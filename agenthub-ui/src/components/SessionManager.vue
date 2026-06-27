@@ -18,7 +18,6 @@ const selectedSession = ref<SessionInfo | null>(null)
 const loading = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
-const searchQuery = ref('')
 
 // Create form
 const newTitle = ref('')

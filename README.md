@@ -15,6 +15,9 @@ agenthub/
 │   └── src/
 │       ├── agent.rs      # Agent model
 │       ├── catalog.rs    # Catalog loading/querying
+│       ├── config.rs     # Configuration management
+│       ├── skill.rs      # Skill management
+│       ├── diagnostic.rs # Diagnostic tools
 │       ├── installer.rs  # Install/uninstall logic
 │       └── status.rs     # Status detection
 ├── agenthub-ui/          # Tauri application
@@ -35,89 +38,67 @@ agenthub/
 - **Schema validation**: JSON schema ensures catalog consistency
 - **Comprehensive testing**: Unit tests for core functionality
 
-## Supported Agents (40 total)
+## Supported Agents (25 total)
 
-### CLI Agents (20)
+### CLI Agents (7)
 
 Command-line based AI coding assistants.
 
-| # | Agent | Package | Manager | Provider | Install Source | npm Status | Description |
-|---|-------|---------|---------|----------|----------------|------------|-------------|
-| 1 | codex | @openai/codex | npm | OpenAI | npmjs.com | ✅ v0.137.0 | AI coding assistant powered by GPT-4 |
-| 2 | claude-code | @anthropic-ai/claude-code | npm | Anthropic | npmjs.com | ✅ v2.1.168 | AI pair programmer with Claude |
-| 3 | kimi-code | @moonshot/kimi-code | npm | Moonshot | npmjs.com | ❌ 未找到 | AI coding assistant with long context |
-| 4 | aider | aider-chat | pip | Paul Gauthier | pypi.org | - | AI pair programming in terminal |
-| 5 | github-copilot-cli | @githubnext/github-copilot-cli | npm | GitHub | npmjs.com | ✅ v0.1.36 | AI-powered command line assistant |
-| 6 | continue-cli | continue | npm | Continue | npmjs.com | ✅ v0.1.0 | Open source AI code assistant |
-| 7 | cody-cli | @sourcegraph/cody | npm | Sourcegraph | npmjs.com | ✅ v5.5.26 | AI with codebase context |
-| 8 | tabnine-cli | @tabnine/cli | npm | Tabnine | npmjs.com | ❌ 未找到 | AI code completion and chat |
-| 9 | amazon-q | @aws/amazon-q-developer-cli | npm | AWS | npmjs.com | ❌ 未找到 | AI coding assistant |
-| 10 | gemini-cli | @google/gemini-cli | npm | Google | npmjs.com | ✅ v0.45.2 | AI powered by Gemini |
-| 11 | qwen-coder-cli | @qwen/coder-cli | npm | Alibaba | npmjs.com | ❌ 未找到 | AI coding assistant |
-| 12 | deepseek-coder | @deepseek/coder | npm | DeepSeek | npmjs.com | ❌ 未找到 | AI with deep reasoning |
-| 13 | codeium-cli | @codeium/cli | npm | Codeium | npmjs.com | ❌ 未找到 | Free AI code completion |
-| 14 | supermaven-cli | @supermaven/cli | npm | Supermaven | npmjs.com | ❌ 未找到 | Fastest AI code completion |
-| 15 | mentat | mentat | pip | Mentat | pypi.org | - | Understands your codebase |
-| 16 | gpt-engineer | gpt-engineer | pip | GPT Engineer | pypi.org | - | Specify what to build |
-| 17 | sweep | sweepai | pip | Sweep AI | pypi.org | - | AI junior developer |
-| 18 | devon | devon-agent | pip | Devon | pypi.org | - | Open source AI engineer |
-| 19 | open-interpreter | open-interpreter | pip | Open Interpreter | pypi.org | - | Local code interpreter |
-| 20 | antigravity-cli | @google/antigravity-cli | npm | Google | npmjs.com | ❌ 未找到 | Google Antigravity CLI |
+| # | Agent | Provider | Package | Manager |
+|---|-------|----------|---------|---------|
+| 1 | codex | OpenAI | @openai/codex | npm |
+| 2 | claude-code | Anthropic | @anthropic-ai/claude-code | npm |
+| 3 | kimi-code | Moonshot | @moonshot-ai/kimi-code | npm |
+| 4 | qwen-code | Alibaba | @qwen-code/qwen-code | npm |
+| 5 | reasonix-cli | Reasonix | ESEngine.ReasonixCLI | winget |
+| 6 | mimo-code | Xiaomi | @mimo-ai/cli | npm |
+| 7 | grok-cli | xAI | xAI.GrokBuild | winget |
 
-### Desktop Agents (20)
+### Desktop Agents (18)
 
 Independent desktop applications and AI coding platforms.
 
-| # | Agent | Provider | Type | Install Source | Download URL | Description |
-|---|-------|----------|------|----------------|--------------|-------------|
-| 1 | cursor | Cursor | IDE | Official | cursor.com | AI-first code editor |
-| 2 | windsurf | Codeium | IDE | Official | codeium.com | AI-powered IDE |
-| 3 | trae | ByteDance | IDE | Official | trae.ai | AI coding companion |
-| 4 | trae-solo | ByteDance | IDE | Official | trae.ai | Standalone AI coding agent |
-| 5 | replit-ai | Replit | Platform | Web | replit.com | AI coding platform |
-| 6 | codex-desktop | OpenAI | Agent | msstore | openai.com | Codex desktop app |
-| 7 | claude-desktop | Anthropic | Agent | Official | claude.ai | Claude desktop app |
-| 8 | kimi-desktop | Moonshot | Agent | Official | kimi.ai | Kimi desktop app |
-| 9 | workbuddy | Tencent | Agent | Official | workbuddy.ai | AI work assistant |
-| 10 | codebuddy | Tencent | Agent | Official | codebuddy.com | AI coding assistant |
-| 11 | mavis | Tencent | Agent | Official | marvis.qq.com | 马维斯 AI assistant |
-| 12 | qoder | Qoder | Agent | Official | qoder.com | AI coding agent |
-| 13 | qoder-work | Qoder | Agent | Official | qoder.com | Qoder work edition |
-| 14 | minimax-agent | MiniMax | Agent | Official | minimax.chat | MiniMax AI assistant |
-| 15 | zcode | ZCode | Agent | Official | zcode.ai | AI coding assistant |
-| 16 | gork-build | xAI | Agent | Official | x.ai | Grok AI coding agent |
-| 17 | antigravity | Google | Agent | Official | antigravity.google | Google Antigravity AI assistant |
-| 18 | antigravity-ide | Google | IDE | Official | antigravity.google | Google Antigravity IDE |
-| 19 | reasonix | Reasonix | Agent | Official | reasonix.ai | AI reasoning and coding agent |
-| 20 | opencode | OpenCode | Agent | Official | opencode.ai | Open source AI coding assistant |
+| # | Agent | Provider | Windows | macOS |
+|---|-------|----------|---------|-------|
+| 1 | cursor | Cursor | winget | brew |
+| 2 | windsurf | Codeium | winget | brew |
+| 3 | trae | ByteDance | winget | brew |
+| 4 | trae-solo | ByteDance | winget | brew |
+| 5 | codex-desktop | OpenAI | winget | brew |
+| 6 | claude-desktop | Anthropic | winget | brew |
+| 7 | kimi-desktop | Moonshot | winget | brew |
+| 8 | workbuddy | Tencent | winget | brew |
+| 9 | codebuddy | Tencent | winget | brew |
+| 10 | qoder | Qoder | winget | brew |
+| 11 | qoder-work | Qoder | winget | brew |
+| 12 | minimax-agent | MiniMax | winget | brew |
+| 13 | zcode | ZCode | winget | brew |
+| 14 | antigravity | Google | winget | brew |
+| 15 | antigravity-ide | Google | winget | brew |
+| 16 | reasonix | Reasonix | winget | brew |
+| 17 | opencode | OpenCode | winget | brew |
+| 18 | openwork | DifferentAI | winget | - |
 
 ## Quick Install
 
 ### CLI Agents
 
 ```bash
-# npm packages (all platforms)
+# npm packages
 npm install -g @openai/codex
 npm install -g @anthropic-ai/claude-code
-npm install -g @moonshot/kimi-code
-npm install -g @google/gemini-cli
-npm install -g @google/antigravity-cli
-
-# pip packages (all platforms)
-pip install aider-chat
-pip install mentat
+npm install -g @moonshot-ai/kimi-code
+npm install -g @qwen-code/qwen-code
+npm install -g @mimo-ai/cli
 ```
 
-### Desktop Agents
-
-#### Windows (winget) - 推荐
+### Desktop Agents (Windows)
 
 ```powershell
 winget install Anysphere.Cursor
 winget install Codeium.Windsurf
 winget install ByteDance.Trae
 winget install ByteDance.TraeSolo
-winget install Google.AntigravityIDE
 winget install OpenAI.Codex
 winget install Anthropic.Claude
 winget install MoonshotAI.Kimi
@@ -127,21 +108,20 @@ winget install Alibaba.Qoder
 winget install Alibaba.QoderWork
 winget install MiniMax.MiniMaxAgent
 winget install ZhipuAI.ZCode
-winget install Replit.Replit
 winget install Google.Antigravity
-winget install Google.AntigravityCLI
+winget install Google.AntigravityIDE
 winget install ESEngine.Reasonix
 winget install SST.OpenCodeDesktop
-winget install 9N8CJ4W95TBZ  # Codex (Beta) from msstore
+winget install DifferentAI.OpenWork
 ```
 
-#### macOS (brew) - 推荐
+### Desktop Agents (macOS)
 
 ```bash
 brew install --cask cursor
 brew install --cask windsurf
 brew install --cask trae
-brew install --cask antigravity-ide
+brew install --cask trae-solo
 brew install --cask codex
 brew install --cask claude
 brew install --cask kimi
@@ -150,16 +130,11 @@ brew install --cask codebuddy
 brew install --cask qoder
 brew install --cask minimax
 brew install --cask zcode
-brew install --cask replit
 brew install --cask antigravity
-brew install --cask antigravity-cli
+brew install --cask antigravity-ide
 brew install --cask reasonix
 brew install --cask opencode
 ```
-
-#### Linux / 备用方案
-
-从官网下载：cursor.com, codeium.com, trae.ai, reasonix.ai, opencode.ai 等
 
 ## Usage
 
@@ -185,31 +160,17 @@ cd agenthub-ui
 npm run tauri build
 ```
 
-### GUI Features
-
-- **Desktop-Optimized Layout**: Designed for large screens with maximum information density
-- **Batch Operations**: Select multiple agents and install/uninstall them at once
-- **Search**: Find agents by name or description with debounced search
-- **Filter**: Filter agents by type (CLI/Desktop)
-- **Sort**: Sort by name, type, or status with ascending/descending order
-- **View Modes**: Switch between Grid view and Table view
-- **Statistics Dashboard**: Real-time stats showing total, installed, and available agents
-- **Progress Display**: Real-time progress bar during installation/uninstallation
-- **Modern UI**: Gradient backgrounds, smooth animations, and responsive design
-- **Performance Optimized**: Caching and optimized re-renders
-
 ## Project Status
 
 ### Completed (v1.0 Development)
 
-- ✅ **M0: Baseline Confirmation**: Shared agent catalog with 40 agents, platform-specific installer configurations
-- ✅ **M1: Core Refactoring**: `agenthub-core` crate with catalog loading, querying, and installer interfaces
-- ✅ **M2: Reliability & Security**: Unit tests (13 passing), status detection, timeout handling, error classification, code quality checks
-- ✅ **M3: Beta Experience**: GUI async tasks, progress tracking, cache refresh, agent detail page
+- ✅ **M0: Baseline Confirmation**: Shared agent catalog with 25 agents
+- ✅ **M1: Core Refactoring**: `agenthub-core` crate with catalog, config, skill, diagnostic modules
+- ✅ **M2: Reliability & Security**: 32 unit tests passing, status detection, error handling
 
 ### In Progress
 
-- 🔄 **M3: Beta Experience**: Keyboard navigation, accessibility, user testing
+- 🔄 **M3: Beta Experience**: GUI improvements, user testing
 
 ### Planned
 
@@ -221,22 +182,19 @@ npm run tauri build
 |----------|-----|---------|
 | OpenAI | codex | codex-desktop |
 | Anthropic | claude-code | claude-desktop |
-| Google | gemini-cli, antigravity-cli | antigravity, antigravity-ide |
-| AWS | amazon-q | - |
-| GitHub | github-copilot-cli | - |
+| Google | - | antigravity, antigravity-ide |
 | ByteDance | - | trae, trae-solo |
 | Moonshot | kimi-code | kimi-desktop |
-| Alibaba | qwen-coder-cli | qoder, qoder-work |
-| DeepSeek | deepseek-coder | - |
-| Tencent | - | workbuddy, codebuddy, mavis |
+| Alibaba | qwen-code | qoder, qoder-work |
+| Tencent | - | workbuddy, codebuddy |
 | MiniMax | - | minimax-agent |
-| xAI | - | gork-build |
-| Sourcegraph | cody-cli | - |
+| xAI | grok-cli | - |
+| Xiaomi | mimo-code | - |
 | Cursor | - | cursor |
-| Codeium | codeium-cli | windsurf |
-| Replit | - | replit-ai |
-| Reasonix | - | reasonix |
+| Codeium | - | windsurf |
+| Reasonix | reasonix-cli | reasonix |
 | OpenCode | - | opencode |
+| DifferentAI | - | openwork |
 
 ## License
 

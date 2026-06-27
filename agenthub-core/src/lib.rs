@@ -1,11 +1,23 @@
 pub mod agent;
 pub mod catalog;
+pub mod config;
+pub mod diagnostic;
 pub mod error;
 pub mod installer;
+pub mod memory;
+pub mod prompt;
+pub mod session;
+pub mod skill;
 pub mod status;
 
 pub use agent::{Agent, AgentKind, InstallerConfig, Platform, SupportStatus};
 pub use catalog::Catalog;
+pub use config::{AgentConfig, ConfigManager, ConfigValue, Environment};
+pub use diagnostic::{CheckStatus, DiagnosticCheck, DiagnosticManager, DiagnosticReport};
 pub use error::{AgentHubError, Result};
 pub use installer::Installer;
+pub use memory::{MemoryEntry, MemoryManager, MemoryScope, MemoryStats, MemoryType};
+pub use prompt::{PromptManager, PromptTemplate, PromptVariable};
+pub use session::{Session, SessionManager, SessionStats, SessionStatus};
+pub use skill::{Skill, SkillManager, SkillManifest};
 pub use status::{AgentStatus, StatusDetector};

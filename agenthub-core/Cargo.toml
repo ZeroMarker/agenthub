@@ -1,0 +1,20 @@
+[package]
+name = "agenthub-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library for AgentHub - AI coding agent management"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+tempfile = "3"

@@ -1,12 +1,24 @@
 # AgentHub Management Specification
 
-> 版本：v0.1  
+> 版本：v0.2  
 > 创建日期：2026-06-24  
-> 状态：设计文档
+> 更新日期：2026-06-27  
+> 状态：设计文档（Package 模块已实现）
 
 ## 概述
 
 本文档定义 AgentHub 六大核心模块（package, config, prompt, session, skill, memory）的完整生命周期管理规范，包括数据模型、CRUD 操作、状态监控、审计日志、导入导出和备份恢复。
+
+### 实施状态
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| Package | ✅ 已实现 | `agenthub-core` crate + CLI + GUI，支持 40 个代理 |
+| Config | 📋 设计中 | 详见下方设计文档 |
+| Prompt | 📋 设计中 | 详见下方设计文档 |
+| Session | 📋 设计中 | 详见下方设计文档 |
+| Skill | 🟡 基础存在 | `.mimocode/skills/` 目录已有示例 |
+| Memory | 🟡 基础存在 | MiMoCode 内置 memory 系统 |
 
 ---
 
@@ -97,79 +109,105 @@ agenthub <module> <action> [target] [options]
 
 ## Module 1: Package（安装管理）
 
+> **状态**: ✅ 已实现（v1.0）
+> 
+> 核心实现：
+> - `agenthub-core` crate: 代理模型、清单加载、安装器接口
+> - `agenthub-cli`: CLI 命令行工具
+> - `agenthub-ui`: Tauri + Vue 3 桌面应用
+> - `agents.json`: 共享代理清单（40 个代理）
+
 ### 数据模型
 
-```yaml
-# ~/.agenthub/registry.yaml (或 agents.json)
-agents:
-  - id: codex
-    name: Codex
-    type: cli                    # cli | desktop
-    provider: OpenAI
-    description: AI coding assistant powered by GPT-4
-    homepage: https://openai.com
-    installers:
-      npm:
-        package: "@openai/codex"
-        verified: true
-        verified_at: 2026-06-21
-      pip:
-        package: null
-      winget:
-        package: null
-      brew:
-        package: null
-    status: active               # active | deprecated | experimental
-    tags: [openai, gpt4, coding]
-    created_at: 2026-06-14
-    updated_at: 2026-06-21
+```json
+// agents.json (共享清单)
+{
+  "id": "codex",
+  "name": "Codex",
+  "kind": "cli",
+  "provider": "OpenAI",
+  "description": "AI coding assistant powered by GPT-4",
+  "homepage": "https://openai.com",
+  "installers": {
+    "windows": {
+      "manager": "npm",
+      "package": "@openai/codex"
+    },
+    "macos": {
+      "manager": "npm",
+      "package": "@openai/codex"
+    },
+    "linux": {
+      "manager": "npm",
+      "package": "@openai/codex"
+    }
+  },
+  "status": "verified",
+  "catalog_verified_at": "2026-06-27",
+  "installer_verified_at": "2026-06-27"
+}
 ```
 
 ### CRUD 操作
 
 | 操作 | CLI 命令 | 说明 |
 |------|----------|------|
-| list | `agenthub package list [--type cli\|desktop] [--status active\|deprecated]` | 列出已注册的 Agent |
-| show | `agenthub package show <name>` | 查看 Agent 详情（含安装状态） |
-| add | `agenthub package add <id> --name <name> --type <type> --installer <manager>:<package>` | 注册新 Agent 到清单 |
-| edit | `agenthub package edit <id> --installer <manager>:<package>` | 修改 Agent 配置 |
-| remove | `agenthub package remove <id>` | 从清单移除 Agent |
-| install | `agenthub package install <name> [--dry-run] [--yes]` | 安装 Agent |
-| uninstall | `agenthub package uninstall <name> [--dry-run] [--yes]` | 卸载 Agent |
-| update | `agenthub package update <name>` | 更新 Agent 到最新版本 |
-| search | `agenthub package search <query>` | 搜索 Agent 清单 |
+| list | `agenthub list [--type cli\|desktop]` | 列出已注册的 Agent |
+| search | `agenthub search <query> [--type cli\|desktop]` | 搜索 Agent 清单 |
+| info | `agenthub info <name>` | 查看 Agent 详情（含安装状态） |
+| install | `agenthub install <name> [--dry-run] [--yes]` | 安装 Agent |
+| uninstall | `agenthub uninstall <name> [--dry-run] [--yes]` | 卸载 Agent |
+| doctor | `agenthub doctor` | 检查环境和依赖 |
 
 ### 状态监控
 
 ```bash
-agenthub package status
+agenthub list
 ```
 
 输出示例：
 ```
-Package Status Overview
-═══════════════════════
-Total: 25 | Installed: 8 | Available: 15 | Deprecated: 2
+Available Agents:
++--------------------+--------------------+------+------------------+-----------+----------+
+| ID                 | Name               | Type | Provider         | Status    | Platform |
++--------------------+--------------------+------+------------------+-----------+----------+
+| codex              | Codex              | CLI  | OpenAI           | Verified  | Npm      |
+| claude-code        | Claude Code        | CLI  | Anthropic        | Verified  | Npm      |
+| cursor             | Cursor             | Desktop | Cursor       | Verified  | Winget   |
+...
 
-Installed:
-  ✅ codex          v0.141.0    npm     (3 days ago)
-  ✅ claude-code    v2.1.183    npm     (1 day ago)
-  ✅ cursor         0.45.2      winget  (installed)
-  ...
-
-Available:
-  ⬚ kimi-code      @moonshot-ai/kimi-code  npm
-  ⬚ qwen-code      @qwen-code/qwen-code    npm
-  ...
-
-Deprecated:
-  ⚠ aider          aider-chat              pip
+Total: 40 agents (20 CLI, 20 Desktop)
 ```
 
 ### 健康检查
 
 ```bash
-agenthub package doctor
+agenthub doctor
+```
+
+输出示例：
+```
+🏥 AgentHub Environment Check
+----------------------------------------
+
+Platform:
+  Windows
+
+Package Managers:
+  ❌ npm - not found
+  ✅ pip - pip 25.2
+  ✅ winget - v1.29.170-preview
+
+Agent Catalog:
+  📦 20 CLI agents
+  🖥️  20 Desktop agents
+  📊 40 total agents
+
+Installable Agents:
+  38 agents can be installed on this platform
+
+----------------------------------------
+✅ Environment check complete!
 ```
 
 检查项：

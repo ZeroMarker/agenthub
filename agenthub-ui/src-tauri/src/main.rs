@@ -1,521 +1,252 @@
+use agenthub_core::{Agent, AgentKind, Catalog, Installer, Platform, Result};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::Emitter;
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-enum AgentType {
-    CLI,
-    Desktop,
-}
+use tokio::sync::RwLock;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct Agent {
+pub struct AgentInfo {
+    id: String,
     name: String,
     description: String,
-    package_name: String,
-    manager: String,
-    agent_type: AgentType,
-    install_source: String,
-    download_url: String,
-    version: Option<String>,
-    installed: bool,
+    kind: String,
+    provider: String,
+    homepage: String,
+    status: String,
+    installers: Vec<InstallerInfo>,
+    catalog_verified_at: Option<String>,
+    installer_verified_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct InstallResult {
+pub struct InstallerInfo {
+    platform: String,
+    manager: String,
+    package: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InstallResult {
     success: bool,
     message: String,
     agent_name: String,
+    command: String,
+    exit_code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    duration_ms: u64,
+    timed_out: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct BatchResult {
+pub struct BatchResult {
     total: usize,
     success: usize,
     failed: usize,
     results: Vec<InstallResult>,
 }
 
-fn get_known_agents() -> Vec<Agent> {
-    vec![
-        // ==================== CLI Agents ====================
-        Agent {
-            name: "codex".to_string(),
-            description: "OpenAI Codex CLI - AI coding assistant powered by GPT-4".to_string(),
-            package_name: "@openai/codex".to_string(),
-            manager: "npm".to_string(),
-            agent_type: AgentType::CLI,
-            install_source: "npmjs.com".to_string(),
-            download_url: "".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "claude-code".to_string(),
-            description: "Anthropic Claude Code - AI pair programmer with Claude".to_string(),
-            package_name: "@anthropic-ai/claude-code".to_string(),
-            manager: "npm".to_string(),
-            agent_type: AgentType::CLI,
-            install_source: "npmjs.com".to_string(),
-            download_url: "".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "kimi-code".to_string(),
-            description: "Moonshot Kimi Code - AI coding assistant with long context".to_string(),
-            package_name: "@moonshot-ai/kimi-code".to_string(),
-            manager: "npm".to_string(),
-            agent_type: AgentType::CLI,
-            install_source: "npmjs.com".to_string(),
-            download_url: "".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "qwen-code".to_string(),
-            description: "Alibaba Qwen Coder - AI coding assistant".to_string(),
-            package_name: "@qwen-code/qwen-code".to_string(),
-            manager: "npm".to_string(),
-            agent_type: AgentType::CLI,
-            install_source: "npmjs.com".to_string(),
-            download_url: "".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "reasonix-cli".to_string(),
-            description: "Reasonix CLI - AI reasoning and coding agent".to_string(),
-            package_name: "ESEngine.ReasonixCLI".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::CLI,
-            install_source: "winget".to_string(),
-            download_url: "reasonix.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "mimo-code".to_string(),
-            description: "Xiaomi MiMo Code - AI coding assistant powered by MiMo".to_string(),
-            package_name: "@mimo-ai/cli".to_string(),
-            manager: "npm".to_string(),
-            agent_type: AgentType::CLI,
-            install_source: "npmjs.com".to_string(),
-            download_url: "".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "grok-cli".to_string(),
-            description: "Grok CLI - AI coding agent by xAI".to_string(),
-            package_name: "xAI.GrokBuild".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::CLI,
-            install_source: "winget".to_string(),
-            download_url: "x.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-
-        // ==================== Desktop Agents ====================
-        Agent {
-            name: "cursor".to_string(),
-            description: "Cursor - AI-first code editor built on VS Code".to_string(),
-            package_name: "Anysphere.Cursor".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "cursor.com".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "windsurf".to_string(),
-            description: "Windsurf - AI-powered IDE by Codeium".to_string(),
-            package_name: "Codeium.Windsurf".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "codeium.com".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "trae".to_string(),
-            description: "Trae - AI coding companion by ByteDance".to_string(),
-            package_name: "ByteDance.Trae".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "trae.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "trae-solo".to_string(),
-            description: "Trae Solo - Standalone AI coding agent by ByteDance".to_string(),
-            package_name: "ByteDance.TraeWork".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "trae.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "codex-desktop".to_string(),
-            description: "OpenAI Codex Desktop - AI coding assistant desktop app".to_string(),
-            package_name: "9N8CJ4W95TBZ".to_string(),
-            manager: "msstore".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "msstore".to_string(),
-            download_url: "openai.com".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "claude-desktop".to_string(),
-            description: "Anthropic Claude Desktop - AI assistant desktop app".to_string(),
-            package_name: "Anthropic.Claude".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "claude.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "kimi-desktop".to_string(),
-            description: "Moonshot Kimi Desktop - AI assistant desktop app".to_string(),
-            package_name: "MoonshotAI.Kimi".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "kimi.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "workbuddy".to_string(),
-            description: "WorkBuddy - AI work assistant".to_string(),
-            package_name: "Tencent.WorkBuddy".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "workbuddy.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "codebuddy".to_string(),
-            description: "CodeBuddy - AI coding assistant by Tencent".to_string(),
-            package_name: "Tencent.CodeBuddy".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "codebuddy.com".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "qoder".to_string(),
-            description: "Qoder - AI coding agent".to_string(),
-            package_name: "Alibaba.Qoder".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "qoder.com".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "qoder-work".to_string(),
-            description: "Qoder Work - AI coding agent for work".to_string(),
-            package_name: "Alibaba.QoderWork".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "qoder.com".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "minimax-agent".to_string(),
-            description: "MiniMax Agent - AI coding assistant by MiniMax".to_string(),
-            package_name: "MiniMax.MiniMaxCode".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "minimax.chat".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "zcode".to_string(),
-            description: "ZCode - AI coding assistant".to_string(),
-            package_name: "ZhipuAI.ZCode".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "zcode.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "antigravity".to_string(),
-            description: "Google Antigravity - AI coding assistant by Google".to_string(),
-            package_name: "Google.Antigravity".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "antigravity.google".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "antigravity-ide".to_string(),
-            description: "Google Antigravity IDE - AI-powered IDE by Google".to_string(),
-            package_name: "Google.AntigravityIDE".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "antigravity.google".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "reasonix".to_string(),
-            description: "Reasonix - AI reasoning and coding agent".to_string(),
-            package_name: "reasonix".to_string(),
-            manager: "npm".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget / brew".to_string(),
-            download_url: "reasonix.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "opencode".to_string(),
-            description: "OpenCode - Open source AI coding assistant".to_string(),
-            package_name: "SST.OpenCodeDesktop".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget / brew".to_string(),
-            download_url: "opencode.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-        Agent {
-            name: "openwork".to_string(),
-            description: "OpenWork - AI-powered work assistant".to_string(),
-            package_name: "DifferentAI.OpenWork".to_string(),
-            manager: "winget".to_string(),
-            agent_type: AgentType::Desktop,
-            install_source: "winget".to_string(),
-            download_url: "openwork.ai".to_string(),
-            version: None,
-            installed: false,
-        },
-    ]
+pub struct AppState {
+    catalog: Arc<RwLock<Catalog>>,
+    platform: Platform,
 }
 
-fn check_installed(agents: &mut Vec<Agent>) {
-    // 只执行一次npm list命令
-    let npm_output = {
-        #[cfg(target_os = "windows")]
-        {
-            Command::new("cmd")
-                .args(["/C", "npm", "list", "-g", "--depth=0"])
-                .output()
+fn agent_to_info(agent: &Agent) -> AgentInfo {
+    let installers: Vec<InstallerInfo> = agent
+        .installers
+        .iter()
+        .map(|(platform, config)| InstallerInfo {
+            platform: format!("{:?}", platform),
+            manager: format!("{:?}", config.manager),
+            package: config.package.clone(),
+        })
+        .collect();
+
+    AgentInfo {
+        id: agent.id.clone(),
+        name: agent.name.clone(),
+        description: agent.description.clone(),
+        kind: format!("{:?}", agent.kind),
+        provider: agent.provider.clone(),
+        homepage: agent.homepage.clone(),
+        status: format!("{:?}", agent.status),
+        installers,
+        catalog_verified_at: agent.catalog_verified_at.map(|d| d.to_string()),
+        installer_verified_at: agent.installer_verified_at.map(|d| d.to_string()),
+    }
+}
+
+fn get_current_platform() -> Platform {
+    if cfg!(target_os = "windows") {
+        Platform::Windows
+    } else if cfg!(target_os = "macos") {
+        Platform::MacOS
+    } else {
+        Platform::Linux
+    }
+}
+
+fn load_catalog() -> Result<Catalog> {
+    // Try embedded catalog first
+    const EMBEDDED_CATALOG: &str = include_str!("../../../agents.json");
+    if let Ok(catalog) = Catalog::from_json(EMBEDDED_CATALOG) {
+        return Ok(catalog);
+    }
+
+    // Fallback: try to find agents.json in the filesystem
+    let mut current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    loop {
+        let catalog_path = current.join("agents.json");
+        if catalog_path.exists() {
+            return Catalog::from_file(&catalog_path);
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Command::new("npm")
-                .args(["list", "-g", "--depth=0"])
-                .output()
+        if !current.pop() {
+            break;
         }
-    };
-
-    let npm_stdout = match npm_output {
-        Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
-        Err(_) => String::new(),
-    };
-
-    // 只执行一次pip list命令
-    let pip_output = Command::new("pip")
-        .args(["list", "--format=columns"])
-        .output();
-
-    let pip_stdout = match pip_output {
-        Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
-        Err(_) => String::new(),
-    };
-
-    // Windows: 执行一次winget list命令
-    #[cfg(target_os = "windows")]
-    let winget_output = Command::new("cmd")
-        .args(["/C", "winget", "list"])
-        .output();
-
-    #[cfg(target_os = "windows")]
-    let winget_stdout = match winget_output {
-        Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
-        Err(_) => String::new(),
-    };
-
-    #[cfg(not(target_os = "windows"))]
-    let winget_stdout = String::new();
-
-    for agent in agents {
-        agent.installed = match agent.manager.as_str() {
-            "npm" => npm_stdout.contains(&agent.package_name),
-            "pip" => pip_stdout.contains(&agent.package_name),
-            "winget" | "msstore" => winget_stdout.contains(&agent.package_name),
-            _ => false,
-        };
     }
+
+    Err(agenthub_core::AgentHubError::CatalogLoadError(
+        "Could not find agents.json".to_string(),
+    ))
 }
 
 #[tauri::command]
-fn list_agents(agent_type: Option<String>) -> Vec<Agent> {
-    let mut agents = get_known_agents();
-    check_installed(&mut agents);
-    
-    match agent_type.as_deref() {
-        Some("cli") => agents.into_iter().filter(|a| a.agent_type == AgentType::CLI).collect(),
-        Some("desktop") => agents.into_iter().filter(|a| a.agent_type == AgentType::Desktop).collect(),
-        _ => agents,
-    }
+async fn list_agents(
+    agent_type: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<AgentInfo>, String> {
+    let catalog = state.catalog.read().await;
+    let agents: Vec<AgentInfo> = match agent_type.as_deref() {
+        Some("cli") => catalog
+            .filter_by_kind(AgentKind::CLI)
+            .iter()
+            .map(|a| agent_to_info(a))
+            .collect(),
+        Some("desktop") => catalog
+            .filter_by_kind(AgentKind::Desktop)
+            .iter()
+            .map(|a| agent_to_info(a))
+            .collect(),
+        _ => catalog.agents().iter().map(agent_to_info).collect(),
+    };
+    Ok(agents)
 }
 
 #[tauri::command]
-fn search_agents(query: String, agent_type: Option<String>) -> Vec<Agent> {
-    let mut agents = get_known_agents();
-    let query_lower = query.to_lowercase();
+async fn search_agents(
+    query: String,
+    agent_type: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<AgentInfo>, String> {
+    let catalog = state.catalog.read().await;
+    let results = catalog.search(&query);
 
-    check_installed(&mut agents);
+    let filtered: Vec<AgentInfo> = match agent_type.as_deref() {
+        Some("cli") => results
+            .into_iter()
+            .filter(|a| a.kind == AgentKind::CLI)
+            .map(agent_to_info)
+            .collect(),
+        Some("desktop") => results
+            .into_iter()
+            .filter(|a| a.kind == AgentKind::Desktop)
+            .map(agent_to_info)
+            .collect(),
+        _ => results.iter().map(|a| agent_to_info(a)).collect(),
+    };
 
-    let filtered = agents
-        .into_iter()
-        .filter(|a| {
-            a.name.to_lowercase().contains(&query_lower)
-                || a.description.to_lowercase().contains(&query_lower)
-                || a.package_name.to_lowercase().contains(&query_lower)
-        });
-
-    match agent_type.as_deref() {
-        Some("cli") => filtered.filter(|a| a.agent_type == AgentType::CLI).collect(),
-        Some("desktop") => filtered.filter(|a| a.agent_type == AgentType::Desktop).collect(),
-        _ => filtered.collect(),
-    }
+    Ok(filtered)
 }
 
 #[tauri::command]
-async fn install_agent(name: String, app: AppHandle) -> Result<InstallResult, String> {
-    let agents = get_known_agents();
-    let agent = agents.iter().find(|a| a.name == name).cloned();
+async fn install_agent(
+    name: String,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<InstallResult, String> {
+    let catalog = state.catalog.read().await;
+    let agent = catalog.find_by_name(&name).cloned();
 
     match agent {
         Some(agent) => {
-            // Emit progress: preparing
-            let _ = app.emit("install-progress", serde_json::json!({
-                "name": agent.name,
-                "step": 1,
-                "total_steps": 3,
-                "message": "Preparing installation..."
-            }));
-            
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            
-            // Emit progress: downloading
-            let _ = app.emit("install-progress", serde_json::json!({
-                "name": agent.name,
-                "step": 2,
-                "total_steps": 3,
-                "message": "Downloading and installing..."
-            }));
-            
-            let package_name = agent.package_name.clone();
-            let manager = agent.manager.clone();
-            let agent_name = agent.name.clone();
-            
-            let result = tokio::task::spawn_blocking(move || {
-                let status = match manager.as_str() {
-                    "npm" => {
-                        #[cfg(target_os = "windows")]
-                        {
-                            Command::new("cmd")
-                                .args(["/C", "npm", "install", "-g", &package_name])
-                                .status()
-                        }
-                        #[cfg(not(target_os = "windows"))]
-                        {
-                            Command::new("npm")
-                                .args(["install", "-g", &package_name])
-                                .status()
-                        }
-                    }
-                    "pip" => Command::new("pip")
-                        .args(["install", &package_name])
-                        .status(),
-                    "cargo" => Command::new("cargo")
-                        .args(["install", &package_name])
-                        .status(),
-                    "winget" | "msstore" => {
-                        #[cfg(target_os = "windows")]
-                        {
-                            Command::new("cmd")
-                                .args(["/C", "winget", "install", &package_name, "--accept-package-agreements", "--accept-source-agreements"])
-                                .status()
-                        }
-                        #[cfg(not(target_os = "windows"))]
-                        {
-                            Command::new("brew")
-                                .args(["install", "--cask", &package_name])
-                                .status()
-                        }
-                    }
-                    _ => return Err(format!("Unsupported package manager: {}", manager)),
-                };
+            let _ = app.emit(
+                "install-progress",
+                serde_json::json!({
+                    "name": agent.name,
+                    "step": 1,
+                    "total_steps": 3,
+                    "message": "Preparing installation..."
+                }),
+            );
 
-                match status {
-                    Ok(status) => {
-                        if status.success() {
-                            Ok(())
-                        } else {
-                            Err("Installation failed".to_string())
-                        }
-                    }
-                    Err(e) => Err(format!("Error running installer: {}", e)),
-                }
-            }).await.unwrap_or_else(|e| Err(format!("Task failed: {}", e)));
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+            let _ = app.emit(
+                "install-progress",
+                serde_json::json!({
+                    "name": agent.name,
+                    "step": 2,
+                    "total_steps": 3,
+                    "message": "Downloading and installing..."
+                }),
+            );
+
+            let platform = state.platform;
+            let agent_clone = agent.clone();
+            let agent_name = agent.name.clone();
+
+            let result = tokio::task::spawn_blocking(move || {
+                let installer = Installer::new(platform);
+                installer.execute_install(&agent_clone, false)
+            })
+            .await
+            .map_err(|e| format!("Task failed: {}", e))?;
 
             match result {
-                Ok(()) => {
-                    let _ = app.emit("install-progress", serde_json::json!({
-                        "name": agent_name,
-                        "step": 3,
-                        "total_steps": 3,
-                        "message": "Completed"
-                    }));
+                Ok(result) => {
+                    let _ = app.emit(
+                        "install-progress",
+                        serde_json::json!({
+                            "name": agent_name,
+                            "step": 3,
+                            "total_steps": 3,
+                            "message": "Completed"
+                        }),
+                    );
                     Ok(InstallResult {
-                        success: true,
-                        message: format!("{} installed successfully", agent_name),
+                        success: result.success,
+                        message: result.message,
                         agent_name,
+                        command: result.command,
+                        exit_code: result.exit_code,
+                        stdout: result.stdout,
+                        stderr: result.stderr,
+                        duration_ms: result.duration_ms,
+                        timed_out: result.timed_out,
                     })
                 }
                 Err(e) => {
-                    let _ = app.emit("install-progress", serde_json::json!({
-                        "name": agent_name,
-                        "step": 3,
-                        "total_steps": 3,
-                        "message": format!("Failed: {}", e)
-                    }));
+                    let _ = app.emit(
+                        "install-progress",
+                        serde_json::json!({
+                            "name": agent_name,
+                            "step": 3,
+                            "total_steps": 3,
+                            "message": format!("Failed: {}", e)
+                        }),
+                    );
                     Ok(InstallResult {
                         success: false,
-                        message: e,
+                        message: e.to_string(),
                         agent_name,
+                        command: String::new(),
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration_ms: 0,
+                        timed_out: false,
                     })
                 }
             }
@@ -525,110 +256,92 @@ async fn install_agent(name: String, app: AppHandle) -> Result<InstallResult, St
 }
 
 #[tauri::command]
-async fn uninstall_agent(name: String, app: AppHandle) -> Result<InstallResult, String> {
-    let agents = get_known_agents();
-    let agent = agents.iter().find(|a| a.name == name).cloned();
+async fn uninstall_agent(
+    name: String,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<InstallResult, String> {
+    let catalog = state.catalog.read().await;
+    let agent = catalog.find_by_name(&name).cloned();
 
     match agent {
         Some(agent) => {
-            // Emit progress: preparing
-            let _ = app.emit("uninstall-progress", serde_json::json!({
-                "name": agent.name,
-                "step": 1,
-                "total_steps": 3,
-                "message": "Preparing uninstallation..."
-            }));
-            
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            
-            // Emit progress: removing
-            let _ = app.emit("uninstall-progress", serde_json::json!({
-                "name": agent.name,
-                "step": 2,
-                "total_steps": 3,
-                "message": "Removing package..."
-            }));
-            
-            let package_name = agent.package_name.clone();
-            let manager = agent.manager.clone();
-            let agent_name = agent.name.clone();
-            
-            let result = tokio::task::spawn_blocking(move || {
-                let status = match manager.as_str() {
-                    "npm" => {
-                        #[cfg(target_os = "windows")]
-                        {
-                            Command::new("cmd")
-                                .args(["/C", "npm", "uninstall", "-g", &package_name])
-                                .status()
-                        }
-                        #[cfg(not(target_os = "windows"))]
-                        {
-                            Command::new("npm")
-                                .args(["uninstall", "-g", &package_name])
-                                .status()
-                        }
-                    }
-                    "pip" => Command::new("pip")
-                        .args(["uninstall", "-y", &package_name])
-                        .status(),
-                    "cargo" => Command::new("cargo")
-                        .args(["uninstall", &package_name])
-                        .status(),
-                    "winget" | "msstore" => {
-                        #[cfg(target_os = "windows")]
-                        {
-                            Command::new("cmd")
-                                .args(["/C", "winget", "uninstall", &package_name])
-                                .status()
-                        }
-                        #[cfg(not(target_os = "windows"))]
-                        {
-                            Command::new("brew")
-                                .args(["uninstall", "--cask", &package_name])
-                                .status()
-                        }
-                    }
-                    _ => return Err(format!("Unsupported package manager: {}", manager)),
-                };
+            let _ = app.emit(
+                "uninstall-progress",
+                serde_json::json!({
+                    "name": agent.name,
+                    "step": 1,
+                    "total_steps": 3,
+                    "message": "Preparing uninstallation..."
+                }),
+            );
 
-                match status {
-                    Ok(status) => {
-                        if status.success() {
-                            Ok(())
-                        } else {
-                            Err("Uninstallation failed".to_string())
-                        }
-                    }
-                    Err(e) => Err(format!("Error running uninstaller: {}", e)),
-                }
-            }).await.unwrap_or_else(|e| Err(format!("Task failed: {}", e)));
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+            let _ = app.emit(
+                "uninstall-progress",
+                serde_json::json!({
+                    "name": agent.name,
+                    "step": 2,
+                    "total_steps": 3,
+                    "message": "Removing package..."
+                }),
+            );
+
+            let platform = state.platform;
+            let agent_clone = agent.clone();
+            let agent_name = agent.name.clone();
+
+            let result = tokio::task::spawn_blocking(move || {
+                let installer = Installer::new(platform);
+                installer.execute_uninstall(&agent_clone, false)
+            })
+            .await
+            .map_err(|e| format!("Task failed: {}", e))?;
 
             match result {
-                Ok(()) => {
-                    let _ = app.emit("uninstall-progress", serde_json::json!({
-                        "name": agent_name,
-                        "step": 3,
-                        "total_steps": 3,
-                        "message": "Completed"
-                    }));
+                Ok(result) => {
+                    let _ = app.emit(
+                        "uninstall-progress",
+                        serde_json::json!({
+                            "name": agent_name,
+                            "step": 3,
+                            "total_steps": 3,
+                            "message": "Completed"
+                        }),
+                    );
                     Ok(InstallResult {
-                        success: true,
-                        message: format!("{} uninstalled successfully", agent_name),
+                        success: result.success,
+                        message: result.message,
                         agent_name,
+                        command: result.command,
+                        exit_code: result.exit_code,
+                        stdout: result.stdout,
+                        stderr: result.stderr,
+                        duration_ms: result.duration_ms,
+                        timed_out: result.timed_out,
                     })
                 }
                 Err(e) => {
-                    let _ = app.emit("uninstall-progress", serde_json::json!({
-                        "name": agent_name,
-                        "step": 3,
-                        "total_steps": 3,
-                        "message": format!("Failed: {}", e)
-                    }));
+                    let _ = app.emit(
+                        "uninstall-progress",
+                        serde_json::json!({
+                            "name": agent_name,
+                            "step": 3,
+                            "total_steps": 3,
+                            "message": format!("Failed: {}", e)
+                        }),
+                    );
                     Ok(InstallResult {
                         success: false,
-                        message: e,
+                        message: e.to_string(),
                         agent_name,
+                        command: String::new(),
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration_ms: 0,
+                        timed_out: false,
                     })
                 }
             }
@@ -638,93 +351,72 @@ async fn uninstall_agent(name: String, app: AppHandle) -> Result<InstallResult, 
 }
 
 #[tauri::command]
-async fn batch_install_agents(names: Vec<String>, app: AppHandle) -> Result<BatchResult, String> {
-    let agents = get_known_agents();
+async fn batch_install_agents(
+    names: Vec<String>,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<BatchResult, String> {
+    let catalog = state.catalog.read().await;
+    let platform = state.platform;
     let mut results = Vec::new();
     let mut success_count = 0;
     let mut fail_count = 0;
 
     for (index, name) in names.iter().enumerate() {
-        let agent = agents.iter().find(|a| a.name == *name).cloned();
+        let agent = catalog.find_by_name(name).cloned();
 
         match agent {
             Some(agent) => {
-                let _ = app.emit("batch-progress", serde_json::json!({
-                    "current": index + 1,
-                    "total": names.len(),
-                    "agent": agent.name,
-                    "action": "install"
-                }));
+                let _ = app.emit(
+                    "batch-progress",
+                    serde_json::json!({
+                        "current": index + 1,
+                        "total": names.len(),
+                        "agent": agent.name,
+                        "action": "install"
+                    }),
+                );
 
-                let package_name = agent.package_name.clone();
-                let manager = agent.manager.clone();
+                let agent_clone = agent.clone();
                 let agent_name = agent.name.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    let status = match manager.as_str() {
-                        "npm" => {
-                            #[cfg(target_os = "windows")]
-                            {
-                                Command::new("cmd")
-                                    .args(["/C", "npm", "install", "-g", &package_name])
-                                    .status()
-                            }
-                            #[cfg(not(target_os = "windows"))]
-                            {
-                                Command::new("npm")
-                                    .args(["install", "-g", &package_name])
-                                    .status()
-                            }
-                        }
-                        "pip" => Command::new("pip")
-                            .args(["install", &package_name])
-                            .status(),
-                        "cargo" => Command::new("cargo")
-                            .args(["install", &package_name])
-                            .status(),
-                        "winget" | "msstore" => {
-                            #[cfg(target_os = "windows")]
-                            {
-                                Command::new("cmd")
-                                    .args(["/C", "winget", "install", &package_name, "--accept-package-agreements", "--accept-source-agreements"])
-                                    .status()
-                            }
-                            #[cfg(not(target_os = "windows"))]
-                            {
-                                Command::new("brew")
-                                    .args(["install", "--cask", &package_name])
-                                    .status()
-                            }
-                        }
-                        _ => return Err(format!("Unsupported package manager: {}", manager)),
-                    };
-
-                    match status {
-                        Ok(status) => {
-                            if status.success() {
-                                Ok(())
-                            } else {
-                                Err("Installation failed".to_string())
-                            }
-                        }
-                        Err(e) => Err(format!("Error: {}", e)),
-                    }
-                }).await.unwrap_or_else(|e| Err(format!("Task failed: {}", e)));
+                    let installer = Installer::new(platform);
+                    installer.execute_install(&agent_clone, false)
+                })
+                .await
+                .map_err(|e| format!("Task failed: {}", e))?;
 
                 match result {
-                    Ok(()) => {
+                    Ok(result) => {
                         results.push(InstallResult {
-                            success: true,
-                            message: "Installed successfully".to_string(),
+                            success: result.success,
+                            message: result.message,
                             agent_name: agent_name.clone(),
+                            command: result.command,
+                            exit_code: result.exit_code,
+                            stdout: result.stdout,
+                            stderr: result.stderr,
+                            duration_ms: result.duration_ms,
+                            timed_out: result.timed_out,
                         });
-                        success_count += 1;
+                        if result.success {
+                            success_count += 1;
+                        } else {
+                            fail_count += 1;
+                        }
                     }
                     Err(e) => {
                         results.push(InstallResult {
                             success: false,
-                            message: e,
+                            message: e.to_string(),
                             agent_name: agent_name.clone(),
+                            command: String::new(),
+                            exit_code: None,
+                            stdout: String::new(),
+                            stderr: String::new(),
+                            duration_ms: 0,
+                            timed_out: false,
                         });
                         fail_count += 1;
                     }
@@ -735,6 +427,12 @@ async fn batch_install_agents(names: Vec<String>, app: AppHandle) -> Result<Batc
                     success: false,
                     message: "Agent not found".to_string(),
                     agent_name: name.clone(),
+                    command: String::new(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    duration_ms: 0,
+                    timed_out: false,
                 });
                 fail_count += 1;
             }
@@ -750,93 +448,72 @@ async fn batch_install_agents(names: Vec<String>, app: AppHandle) -> Result<Batc
 }
 
 #[tauri::command]
-async fn batch_uninstall_agents(names: Vec<String>, app: AppHandle) -> Result<BatchResult, String> {
-    let agents = get_known_agents();
+async fn batch_uninstall_agents(
+    names: Vec<String>,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<BatchResult, String> {
+    let catalog = state.catalog.read().await;
+    let platform = state.platform;
     let mut results = Vec::new();
     let mut success_count = 0;
     let mut fail_count = 0;
 
     for (index, name) in names.iter().enumerate() {
-        let agent = agents.iter().find(|a| a.name == *name).cloned();
+        let agent = catalog.find_by_name(name).cloned();
 
         match agent {
             Some(agent) => {
-                let _ = app.emit("batch-progress", serde_json::json!({
-                    "current": index + 1,
-                    "total": names.len(),
-                    "agent": agent.name,
-                    "action": "uninstall"
-                }));
+                let _ = app.emit(
+                    "batch-progress",
+                    serde_json::json!({
+                        "current": index + 1,
+                        "total": names.len(),
+                        "agent": agent.name,
+                        "action": "uninstall"
+                    }),
+                );
 
-                let package_name = agent.package_name.clone();
-                let manager = agent.manager.clone();
+                let agent_clone = agent.clone();
                 let agent_name = agent.name.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    let status = match manager.as_str() {
-                        "npm" => {
-                            #[cfg(target_os = "windows")]
-                            {
-                                Command::new("cmd")
-                                    .args(["/C", "npm", "uninstall", "-g", &package_name])
-                                    .status()
-                            }
-                            #[cfg(not(target_os = "windows"))]
-                            {
-                                Command::new("npm")
-                                    .args(["uninstall", "-g", &package_name])
-                                    .status()
-                            }
-                        }
-                        "pip" => Command::new("pip")
-                            .args(["uninstall", "-y", &package_name])
-                            .status(),
-                        "cargo" => Command::new("cargo")
-                            .args(["uninstall", &package_name])
-                            .status(),
-                        "winget" | "msstore" => {
-                            #[cfg(target_os = "windows")]
-                            {
-                                Command::new("cmd")
-                                    .args(["/C", "winget", "uninstall", &package_name])
-                                    .status()
-                            }
-                            #[cfg(not(target_os = "windows"))]
-                            {
-                                Command::new("brew")
-                                    .args(["uninstall", "--cask", &package_name])
-                                    .status()
-                            }
-                        }
-                        _ => return Err(format!("Unsupported package manager: {}", manager)),
-                    };
-
-                    match status {
-                        Ok(status) => {
-                            if status.success() {
-                                Ok(())
-                            } else {
-                                Err("Uninstallation failed".to_string())
-                            }
-                        }
-                        Err(e) => Err(format!("Error: {}", e)),
-                    }
-                }).await.unwrap_or_else(|e| Err(format!("Task failed: {}", e)));
+                    let installer = Installer::new(platform);
+                    installer.execute_uninstall(&agent_clone, false)
+                })
+                .await
+                .map_err(|e| format!("Task failed: {}", e))?;
 
                 match result {
-                    Ok(()) => {
+                    Ok(result) => {
                         results.push(InstallResult {
-                            success: true,
-                            message: "Uninstalled successfully".to_string(),
+                            success: result.success,
+                            message: result.message,
                             agent_name: agent_name.clone(),
+                            command: result.command,
+                            exit_code: result.exit_code,
+                            stdout: result.stdout,
+                            stderr: result.stderr,
+                            duration_ms: result.duration_ms,
+                            timed_out: result.timed_out,
                         });
-                        success_count += 1;
+                        if result.success {
+                            success_count += 1;
+                        } else {
+                            fail_count += 1;
+                        }
                     }
                     Err(e) => {
                         results.push(InstallResult {
                             success: false,
-                            message: e,
+                            message: e.to_string(),
                             agent_name: agent_name.clone(),
+                            command: String::new(),
+                            exit_code: None,
+                            stdout: String::new(),
+                            stderr: String::new(),
+                            duration_ms: 0,
+                            timed_out: false,
                         });
                         fail_count += 1;
                     }
@@ -847,6 +524,12 @@ async fn batch_uninstall_agents(names: Vec<String>, app: AppHandle) -> Result<Ba
                     success: false,
                     message: "Agent not found".to_string(),
                     agent_name: name.clone(),
+                    command: String::new(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    duration_ms: 0,
+                    timed_out: false,
                 });
                 fail_count += 1;
             }
@@ -862,8 +545,19 @@ async fn batch_uninstall_agents(names: Vec<String>, app: AppHandle) -> Result<Ba
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
+    let catalog = load_catalog().expect("Failed to load agent catalog");
+    let platform = get_current_platform();
+
+    let state = AppState {
+        catalog: Arc::new(RwLock::new(catalog)),
+        platform,
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             list_agents,
             search_agents,

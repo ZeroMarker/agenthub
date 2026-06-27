@@ -3,22 +3,35 @@ import { ref, onMounted, computed, onUnmounted, shallowRef, onErrorCaptured } fr
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
+interface InstallerInfo {
+  platform: string
+  manager: string
+  package: string | null
+}
+
 interface Agent {
+  id: string
   name: string
   description: string
-  package_name: string
-  manager: string
-  agent_type: 'CLI' | 'Desktop'
-  install_source: string
-  download_url: string
-  version: string | null
-  installed: boolean
+  kind: 'CLI' | 'Desktop'
+  provider: string
+  homepage: string
+  status: string
+  installers: InstallerInfo[]
+  catalog_verified_at: string | null
+  installer_verified_at: string | null
 }
 
 interface InstallResult {
   success: boolean
   message: string
   agent_name: string
+  command: string
+  exit_code: number | null
+  stdout: string
+  stderr: string
+  duration_ms: number
+  timed_out: boolean
 }
 
 interface BatchResult {
@@ -89,7 +102,7 @@ const filteredAgents = computed(() => {
   let result = agents.value
   
   if (activeTab.value !== 'all') {
-    result = result.filter(a => a.agent_type.toLowerCase() === activeTab.value)
+    result = result.filter(a => a.kind.toLowerCase() === activeTab.value)
   }
   
   if (debouncedSearchQuery.value.trim()) {
@@ -97,7 +110,8 @@ const filteredAgents = computed(() => {
     result = result.filter(a => 
       a.name.toLowerCase().includes(query) ||
       a.description.toLowerCase().includes(query) ||
-      a.package_name.toLowerCase().includes(query)
+      a.provider.toLowerCase().includes(query) ||
+      a.id.toLowerCase().includes(query)
     )
   }
   
@@ -108,10 +122,10 @@ const filteredAgents = computed(() => {
         comparison = a.name.localeCompare(b.name)
         break
       case 'type':
-        comparison = a.agent_type.localeCompare(b.agent_type)
+        comparison = a.kind.localeCompare(b.kind)
         break
       case 'status':
-        comparison = (a.installed ? 1 : 0) - (b.installed ? 1 : 0)
+        comparison = a.status.localeCompare(b.status)
         break
     }
     return sortDirection.value === 'asc' ? comparison : -comparison
@@ -120,10 +134,8 @@ const filteredAgents = computed(() => {
   return result
 })
 
-const cliAgents = computed(() => agents.value.filter(a => a.agent_type === 'CLI'))
-const desktopAgents = computed(() => agents.value.filter(a => a.agent_type === 'Desktop'))
-const installedAgents = computed(() => agents.value.filter(a => a.installed))
-const notInstalledAgents = computed(() => agents.value.filter(a => !a.installed))
+const cliAgents = computed(() => agents.value.filter(a => a.kind === 'CLI'))
+const desktopAgents = computed(() => agents.value.filter(a => a.kind === 'Desktop'))
 
 async function loadAgents(forceRefresh = false) {
   if (!forceRefresh) {
@@ -356,6 +368,12 @@ onUnmounted(() => {
   }
 })
 
+function getInstallerSummary(agent: Agent): string {
+  const managers = agent.installers.map(i => i.manager)
+  const unique = [...new Set(managers)]
+  return unique.join(', ') || 'N/A'
+}
+
 function openDetail(agent: Agent) {
   selectedAgent.value = agent
   showDetailModal.value = true
@@ -389,12 +407,12 @@ onErrorCaptured((err, _instance, info) => {
             <span class="stat-label">Total</span>
           </div>
           <div class="stat-item">
-            <span class="stat-value">{{ installedAgents.length }}</span>
-            <span class="stat-label">Installed</span>
+            <span class="stat-value">{{ cliAgents.length }}</span>
+            <span class="stat-label">CLI</span>
           </div>
           <div class="stat-item">
-            <span class="stat-value">{{ notInstalledAgents.length }}</span>
-            <span class="stat-label">Available</span>
+            <span class="stat-value">{{ desktopAgents.length }}</span>
+            <span class="stat-label">Desktop</span>
           </div>
         </div>
       </div>
@@ -532,43 +550,41 @@ onErrorCaptured((err, _instance, info) => {
 
     <!-- Grid View -->
     <div v-if="viewMode === 'grid' && !loading && filteredAgents.length > 0" class="agents-grid">
-      <div v-for="agent in filteredAgents" :key="agent.name" :class="['agent-card', agent.agent_type.toLowerCase()]" @click="openDetail(agent)">
+      <div v-for="agent in filteredAgents" :key="agent.id" :class="['agent-card', agent.kind.toLowerCase()]" @click="openDetail(agent)">
         <div class="agent-header">
           <div class="agent-title">
             <input 
               type="checkbox" 
-              :checked="selectedAgents.has(agent.name)"
-              @change="toggleSelectAgent(agent.name)"
+              :checked="selectedAgents.has(agent.id)"
+              @change="toggleSelectAgent(agent.id)"
               @click.stop
             />
             <h3>{{ agent.name }}</h3>
           </div>
           <div class="badges">
-            <span :class="['type-badge', agent.agent_type.toLowerCase()]">
-              {{ agent.agent_type }}
+            <span :class="['type-badge', agent.kind.toLowerCase()]">
+              {{ agent.kind }}
             </span>
-            <span :class="['status', agent.installed ? 'installed' : 'not-installed']">
-              {{ agent.installed ? 'Installed' : 'Not Installed' }}
+            <span :class="['status-badge', agent.status]">
+              {{ agent.status }}
             </span>
           </div>
         </div>
         <p class="description">{{ agent.description }}</p>
         <div class="agent-meta">
-          <span class="package">{{ agent.package_name }}</span>
-          <span class="manager">{{ agent.manager }}</span>
+          <span class="provider">{{ agent.provider }}</span>
+          <span class="platform">{{ getInstallerSummary(agent) }}</span>
         </div>
         <div class="actions" @click.stop>
           <button
-            v-if="!agent.installed"
-            @click="installAgent(agent.name)"
+            @click="installAgent(agent.id)"
             :disabled="loading"
             class="install-btn"
           >
             Install
           </button>
           <button
-            v-else
-            @click="uninstallAgent(agent.name)"
+            @click="uninstallAgent(agent.id)"
             :disabled="loading"
             class="uninstall-btn"
           >
@@ -597,9 +613,8 @@ onErrorCaptured((err, _instance, info) => {
               Type {{ getSortIcon('type') }}
             </th>
             <th>Description</th>
-            <th>Package</th>
-            <th>Manager</th>
-            <th>Source</th>
+            <th>Provider</th>
+            <th>Installers</th>
             <th @click="toggleSort('status')" class="sortable">
               Status {{ getSortIcon('status') }}
             </th>
@@ -607,47 +622,42 @@ onErrorCaptured((err, _instance, info) => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="agent in filteredAgents" :key="agent.name" :class="['agent-row', agent.agent_type.toLowerCase()]">
+          <tr v-for="agent in filteredAgents" :key="agent.id" :class="['agent-row', agent.kind.toLowerCase()]">
             <td class="checkbox-col">
               <input 
                 type="checkbox" 
-                :checked="selectedAgents.has(agent.name)"
-                @change="toggleSelectAgent(agent.name)"
+                :checked="selectedAgents.has(agent.id)"
+                @change="toggleSelectAgent(agent.id)"
               />
             </td>
             <td class="name-col">
               <span class="agent-name">{{ agent.name }}</span>
             </td>
             <td>
-              <span :class="['type-badge', agent.agent_type.toLowerCase()]">
-                {{ agent.agent_type }}
+              <span :class="['type-badge', agent.kind.toLowerCase()]">
+                {{ agent.kind }}
               </span>
             </td>
             <td class="description-col">{{ agent.description }}</td>
-            <td class="package-col">
-              <code>{{ agent.package_name }}</code>
+            <td class="provider-col">{{ agent.provider }}</td>
+            <td class="installers-col">
+              <code>{{ getInstallerSummary(agent) }}</code>
             </td>
             <td>
-              <span class="manager-badge">{{ agent.manager }}</span>
-            </td>
-            <td class="source-col">{{ agent.install_source }}</td>
-            <td>
-              <span :class="['status-badge', agent.installed ? 'installed' : 'not-installed']">
-                {{ agent.installed ? '✓ Installed' : '○ Not Installed' }}
+              <span :class="['status-badge', agent.status]">
+                {{ agent.status }}
               </span>
             </td>
             <td class="actions-col">
               <button
-                v-if="!agent.installed"
-                @click="installAgent(agent.name)"
+                @click="installAgent(agent.id)"
                 :disabled="loading"
                 class="install-btn-sm"
               >
                 Install
               </button>
               <button
-                v-else
-                @click="uninstallAgent(agent.name)"
+                @click="uninstallAgent(agent.id)"
                 :disabled="loading"
                 class="uninstall-btn-sm"
               >
@@ -670,11 +680,11 @@ onErrorCaptured((err, _instance, info) => {
           <div class="modal-header">
             <div class="modal-title">
               <h2>{{ selectedAgent.name }}</h2>
-              <span :class="['type-badge', selectedAgent.agent_type.toLowerCase()]">
-                {{ selectedAgent.agent_type }}
+              <span :class="['type-badge', selectedAgent.kind.toLowerCase()]">
+                {{ selectedAgent.kind }}
               </span>
-              <span :class="['status-badge', selectedAgent.installed ? 'installed' : 'not-installed']">
-                {{ selectedAgent.installed ? '✓ Installed' : '○ Not Installed' }}
+              <span :class="['status-badge', selectedAgent.status]">
+                {{ selectedAgent.status }}
               </span>
             </div>
             <button class="modal-close" @click="closeDetail">&times;</button>
@@ -684,41 +694,49 @@ onErrorCaptured((err, _instance, info) => {
             
             <div class="detail-grid">
               <div class="detail-item">
-                <span class="detail-label">Package</span>
-                <code class="detail-value">{{ selectedAgent.package_name }}</code>
+                <span class="detail-label">Provider</span>
+                <span class="detail-value">{{ selectedAgent.provider }}</span>
               </div>
               <div class="detail-item">
-                <span class="detail-label">Manager</span>
-                <span class="detail-value manager-badge">{{ selectedAgent.manager }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">Install Source</span>
-                <span class="detail-value">{{ selectedAgent.install_source }}</span>
-              </div>
-              <div v-if="selectedAgent.download_url" class="detail-item">
-                <span class="detail-label">Website</span>
-                <a :href="'https://' + selectedAgent.download_url" target="_blank" class="detail-value link">
-                  {{ selectedAgent.download_url }}
+                <span class="detail-label">Homepage</span>
+                <a :href="selectedAgent.homepage" target="_blank" class="detail-value link">
+                  {{ selectedAgent.homepage }}
                 </a>
               </div>
-              <div v-if="selectedAgent.version" class="detail-item">
-                <span class="detail-label">Version</span>
-                <span class="detail-value">{{ selectedAgent.version }}</span>
+              <div class="detail-item">
+                <span class="detail-label">ID</span>
+                <code class="detail-value">{{ selectedAgent.id }}</code>
+              </div>
+              <div v-if="selectedAgent.catalog_verified_at" class="detail-item">
+                <span class="detail-label">Catalog Verified</span>
+                <span class="detail-value">{{ selectedAgent.catalog_verified_at }}</span>
+              </div>
+              <div v-if="selectedAgent.installer_verified_at" class="detail-item">
+                <span class="detail-label">Installer Verified</span>
+                <span class="detail-value">{{ selectedAgent.installer_verified_at }}</span>
+              </div>
+            </div>
+
+            <h3 class="installers-title">Platform Installers</h3>
+            <div class="installers-grid">
+              <div v-for="installer in selectedAgent.installers" :key="installer.platform" class="installer-item">
+                <span class="installer-platform">{{ installer.platform }}</span>
+                <span class="installer-manager">{{ installer.manager }}</span>
+                <code v-if="installer.package" class="installer-package">{{ installer.package }}</code>
+                <span v-else class="installer-manual">Manual</span>
               </div>
             </div>
           </div>
           <div class="modal-footer">
             <button
-              v-if="!selectedAgent.installed"
-              @click="installAgent(selectedAgent.name); closeDetail()"
+              @click="installAgent(selectedAgent.id); closeDetail()"
               :disabled="loading"
               class="modal-install-btn"
             >
               Install
             </button>
             <button
-              v-else
-              @click="uninstallAgent(selectedAgent.name); closeDetail()"
+              @click="uninstallAgent(selectedAgent.id); closeDetail()"
               :disabled="loading"
               class="modal-uninstall-btn"
             >
@@ -1349,13 +1367,33 @@ header::before {
   transition: all 0.3s ease;
 }
 
-.installed {
+.status-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.status-badge.verified {
   background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
   color: #155724;
   box-shadow: 0 2px 4px rgba(21, 87, 36, 0.1);
 }
 
-.not-installed {
+.status-badge.community {
+  background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+  color: #856404;
+  box-shadow: 0 2px 4px rgba(133, 100, 4, 0.1);
+}
+
+.status-badge.manual {
+  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+  color: #1565c0;
+  box-shadow: 0 2px 4px rgba(21, 101, 192, 0.1);
+}
+
+.status-badge.deprecated {
   background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
   color: #721c24;
   box-shadow: 0 2px 4px rgba(114, 28, 36, 0.1);
@@ -1373,7 +1411,7 @@ header::before {
   margin-bottom: 1rem;
 }
 
-.package {
+.provider {
   background-color: #e9ecef;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
@@ -1381,7 +1419,7 @@ header::before {
   color: #495057;
 }
 
-.manager {
+.platform {
   background-color: #e3f2fd;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
@@ -1389,29 +1427,53 @@ header::before {
   color: #1976d2;
 }
 
-.install-source {
-  background-color: #fff3cd;
-  padding: 0.25rem 0.5rem;
+.installers-title {
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: #2c3e50;
+  font-size: 1.1rem;
+}
+
+.installers-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.installer-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.installer-platform {
+  font-weight: 600;
+  color: #2c3e50;
+  min-width: 80px;
+}
+
+.installer-manager {
+  background-color: #e3f2fd;
+  padding: 0.15rem 0.5rem;
   border-radius: 4px;
-  font-size: 0.875rem;
-  color: #856404;
+  font-size: 0.8rem;
+  color: #1976d2;
 }
 
-.download-url {
-  background-color: #d1ecf1;
-  padding: 0.25rem 0.5rem;
+.installer-package {
+  background-color: #f8f9fa;
+  padding: 0.15rem 0.5rem;
   border-radius: 4px;
-  font-size: 0.875rem;
-  color: #0c5460;
+  font-size: 0.85rem;
+  color: #495057;
 }
 
-.download-url a {
-  color: #0c5460;
-  text-decoration: none;
-}
-
-.download-url a:hover {
-  text-decoration: underline;
+.installer-manual {
+  color: #95a5a6;
+  font-style: italic;
+  font-size: 0.85rem;
 }
 
 .actions {

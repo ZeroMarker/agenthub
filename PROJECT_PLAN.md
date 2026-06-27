@@ -122,36 +122,36 @@ installers:
 
 ### M0：基线确认
 
-- [ ] 为每个代理核验官网、活跃状态、准确名称和支持平台。
-- [ ] 将“已验证”拆分为 `catalog_verified_at`、`installer_verified_at` 和 `status`。
-- [ ] 修正明显的名称问题，例如 `gork-build` 与实际产品名称不一致的风险。
-- [ ] 定义支持等级：`verified`、`community`、`manual`、`deprecated`。
+- [x] 为每个代理核验官网、活跃状态、准确名称和支持平台。
+- [x] 将"已验证"拆分为 `catalog_verified_at`、`installer_verified_at` 和 `status`。
+- [x] 修正明显的名称问题，例如 `gork-build` 与实际产品名称不一致的风险。
+- [x] 定义支持等级：`verified`、`community`、`manual`、`deprecated`。
 - [ ] 建立 ADR，记录清单格式、安装器接口和平台策略。
 
 ### M1：核心重构
 
-- [ ] 新建 `agenthub-core` crate，抽取 Agent 模型、目录加载和查询逻辑。
-- [ ] 把代理清单迁移到版本化的 YAML/JSON/TOML 文件，并增加 schema 校验。
-- [ ] 用平台级 installer 配置替换当前单一 `manager/package_name` 模型。
-- [ ] 实现 npm、pip、winget、brew-cask 和 manual 适配器。
-- [ ] 统一 CLI 与 Tauri 后端对核心库的调用。
-- [ ] 增加 `agenthub doctor`、`agenthub install --dry-run` 和 `--yes`。
+- [x] 新建 `agenthub-core` crate，抽取 Agent 模型、目录加载和查询逻辑。
+- [x] 把代理清单迁移到版本化的 YAML/JSON/TOML 文件，并增加 schema 校验。
+- [x] 用平台级 installer 配置替换当前单一 `manager/package_name` 模型。
+- [x] 实现 npm、pip、winget、brew-cask 和 manual 适配器。
+- [x] 统一 CLI 与 Tauri 后端对核心库的调用。
+- [x] 增加 `agenthub doctor`、`agenthub install --dry-run` 和 `--yes`。
 
 ### M2：可靠性与安全
 
-- [ ] 状态检测使用结构化输出或精确匹配，并解析已安装版本。
-- [ ] 为外部命令增加超时、退出码、标准输出和标准错误摘要。
-- [ ] 安装/卸载前展示目标、来源、命令和影响范围。
-- [ ] 对批量操作返回每项结果，不因一项失败丢失其他结果。
-- [ ] 为 catalog、搜索、命令生成、状态解析和批量结果添加测试。
-- [ ] 增加格式检查、lint、依赖审计和基础供应链安全检查。
+- [x] 状态检测使用结构化输出或精确匹配，并解析已安装版本。
+- [x] 为外部命令增加超时、退出码、标准输出和标准错误摘要。
+- [x] 安装/卸载前展示目标、来源、命令和影响范围。
+- [x] 对批量操作返回每项结果，不因一项失败丢失其他结果。
+- [x] 为 catalog、搜索、命令生成、状态解析和批量结果添加测试。
+- [x] 增加格式检查、lint、依赖审计和基础供应链安全检查。
 
 ### M3：Beta 体验
 
-- [ ] 将 Tauri 长耗时命令改为异步任务，避免阻塞界面。
+- [x] 将 Tauri 长耗时命令改为异步任务，避免阻塞界面。
 - [ ] 支持逐项进度、取消、重试和失败详情。
-- [ ] 修复前端缓存刷新与安装后状态同步。
-- [ ] 增加代理详情页，展示平台安装方式、来源和验证日期。
+- [x] 修复前端缓存刷新与安装后状态同步。
+- [x] 增加代理详情页，展示平台安装方式、来源和验证日期。
 - [ ] 完成键盘操作、焦点状态、对比度和窗口尺寸适配。
 - [ ] 邀请 3 至 5 名用户完成安装、查询和卸载任务测试。
 

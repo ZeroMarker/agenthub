@@ -1,8 +1,9 @@
 # AgentHub Goal — 七大模块架构
 
-> 版本：v0.1  
+> 版本：v0.2  
 > 创建日期：2026-06-24  
-> 状态：规划草案
+> 更新日期：2026-06-27  
+> 状态：规划草案（Package 模块已实现）
 
 ## 愿景
 
@@ -31,15 +32,17 @@ AgentHub 从"AI 编程助手的安装管理器"演进为**全生命周期的 Age
 
 **职责**：Agent 的发现、安装、卸载、版本管理和状态检测。
 
-**当前状态**：✅ 已有原型（CLI + GUI）
+**当前状态**：✅ 已实现（v1.0）
 
-**目标能力**：
-- 统一代理清单（agents.json）作为单一事实来源
-- npm / pip / winget / brew 四类安装器适配
-- 安装前预览（--dry-run）、交互确认、--yes 非交互模式
-- 批量安装/卸载，逐项结果报告
-- 版本检测、升级提醒、deprecated 标记
-- 跨平台（Windows / macOS / Linux）行为一致性
+**已实现能力**：
+- ✅ 统一代理清单（agents.json）作为单一事实来源
+- ✅ npm / pip / winget / brew-cask 四类安装器适配
+- ✅ 平台级安装配置（Windows / macOS / Linux）
+- ✅ 安装前预览（--dry-run）、交互确认、--yes 非交互模式
+- ✅ 批量安装/卸载，逐项结果报告
+- ✅ 状态检测和版本解析
+- ✅ 超时处理和错误分类
+- ✅ JSON schema 验证
 
 **关键指标**：
 - verified 安装器成功率 ≥ 95%
@@ -228,15 +231,15 @@ package ──→ config ──→ session
 
 ## 实施路线
 
-| 阶段 | 模块 | 优先级 | 预计时间 |
-|------|------|--------|----------|
-| Phase 1 | package（完善现有） | P0 | 已有原型 |
-| Phase 2 | config | P0 | 2-3 周 |
-| Phase 3 | memory | P1 | 2-3 周 |
-| Phase 4 | session | P1 | 3-4 周 |
-| Phase 5 | prompt | P2 | 2-3 周 |
-| Phase 6 | skill | P2 | 2-3 周 |
-| Phase 7 | management | P3 | 4-6 周 |
+| 阶段 | 模块 | 优先级 | 状态 | 预计时间 |
+|------|------|--------|------|----------|
+| Phase 1 | package（完善现有） | P0 | ✅ 已完成 | 2026-06-15 至 2026-06-27 |
+| Phase 2 | config | P0 | 📋 设计中 | 2-3 周 |
+| Phase 3 | memory | P1 | 🟡 基础存在 | 2-3 周 |
+| Phase 4 | session | P1 | 📋 设计中 | 3-4 周 |
+| Phase 5 | prompt | P2 | 📋 设计中 | 2-3 周 |
+| Phase 6 | skill | P2 | 🟡 基础存在 | 2-3 周 |
+| Phase 7 | management | P3 | 📋 设计中 | 4-6 周 |
 
 ---
 

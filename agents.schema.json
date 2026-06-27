@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenthub.dev/agents.schema.json",
+  "title": "AgentHub Agent Catalog",
+  "description": "Schema for the AgentHub agent catalog",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date"
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/agent"
+      }
+    }
+  },
+  "required": ["version", "agents"],
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "description": "Unique identifier for the agent"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the agent"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["cli", "desktop"],
+          "description": "Type of agent"
+        },
+        "provider": {
+          "type": "string",
+          "description": "Company or individual providing the agent"
+        },
+        "description": {
+          "type": "string",
+          "description": "Short description of the agent"
+        },
+        "homepage": {
+          "type": "string",
+          "format": "uri",
+          "description": "Official website URL"
+        },
+        "installers": {
+          "type": "object",
+          "properties": {
+            "windows": {
+              "$ref": "#/$defs/installer"
+            },
+            "macos": {
+              "$ref": "#/$defs/installer"
+            },
+            "linux": {
+              "$ref": "#/$defs/installer"
+            }
+          },
+          "required": ["windows", "macos", "linux"],
+          "description": "Platform-specific installation configurations"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["verified", "community", "manual", "deprecated"],
+          "description": "Verification status of the agent"
+        },
+        "catalog_verified_at": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Date when catalog information was verified"
+        },
+        "installer_verified_at": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Date when installer was verified"
+        }
+      },
+      "required": ["id", "name", "kind", "provider", "description", "homepage", "installers", "status"],
+      "additionalProperties": false
+    },
+    "installer": {
+      "type": "object",
+      "properties": {
+        "manager": {
+          "type": "string",
+          "enum": ["npm", "pip", "winget", "brew-cask", "manual"],
+          "description": "Package manager to use"
+        },
+        "package": {
+          "type": ["string", "null"],
+          "description": "Package name or identifier"
+        }
+      },
+      "required": ["manager"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,1007 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "last_updated": "2026-06-27",
+  "agents": [
+    {
+      "id": "codex",
+      "name": "Codex",
+      "kind": "cli",
+      "provider": "OpenAI",
+      "description": "AI coding assistant powered by GPT-4",
+      "homepage": "https://openai.com",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@openai/codex"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@openai/codex"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@openai/codex"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "kind": "cli",
+      "provider": "Anthropic",
+      "description": "AI pair programmer with Claude",
+      "homepage": "https://claude.ai",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@anthropic-ai/claude-code"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@anthropic-ai/claude-code"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@anthropic-ai/claude-code"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "kimi-code",
+      "name": "Kimi Code",
+      "kind": "cli",
+      "provider": "Moonshot",
+      "description": "AI coding assistant with long context",
+      "homepage": "https://kimi.ai",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@moonshot/kimi-code"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@moonshot/kimi-code"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@moonshot/kimi-code"
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "aider",
+      "name": "Aider",
+      "kind": "cli",
+      "provider": "Paul Gauthier",
+      "description": "AI pair programming in terminal",
+      "homepage": "https://aider.chat",
+      "installers": {
+        "windows": {
+          "manager": "pip",
+          "package": "aider-chat"
+        },
+        "macos": {
+          "manager": "pip",
+          "package": "aider-chat"
+        },
+        "linux": {
+          "manager": "pip",
+          "package": "aider-chat"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "github-copilot-cli",
+      "name": "GitHub Copilot CLI",
+      "kind": "cli",
+      "provider": "GitHub",
+      "description": "AI-powered command line assistant",
+      "homepage": "https://github.com",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@githubnext/github-copilot-cli"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@githubnext/github-copilot-cli"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@githubnext/github-copilot-cli"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "continue-cli",
+      "name": "Continue CLI",
+      "kind": "cli",
+      "provider": "Continue",
+      "description": "Open source AI code assistant",
+      "homepage": "https://continue.dev",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "continue"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "continue"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "continue"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "cody-cli",
+      "name": "Cody CLI",
+      "kind": "cli",
+      "provider": "Sourcegraph",
+      "description": "AI with codebase context",
+      "homepage": "https://sourcegraph.com",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@sourcegraph/cody"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@sourcegraph/cody"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@sourcegraph/cody"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "tabnine-cli",
+      "name": "Tabnine CLI",
+      "kind": "cli",
+      "provider": "Tabnine",
+      "description": "AI code completion and chat",
+      "homepage": "https://tabnine.com",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@tabnine/cli"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@tabnine/cli"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@tabnine/cli"
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "amazon-q",
+      "name": "Amazon Q",
+      "kind": "cli",
+      "provider": "AWS",
+      "description": "AI coding assistant",
+      "homepage": "https://aws.amazon.com/q/",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@aws/amazon-q-developer-cli"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@aws/amazon-q-developer-cli"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@aws/amazon-q-developer-cli"
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "gemini-cli",
+      "name": "Gemini CLI",
+      "kind": "cli",
+      "provider": "Google",
+      "description": "AI powered by Gemini",
+      "homepage": "https://gemini.google.com",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@google/gemini-cli"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@google/gemini-cli"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@google/gemini-cli"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "qwen-coder-cli",
+      "name": "Qwen Coder CLI",
+      "kind": "cli",
+      "provider": "Alibaba",
+      "description": "AI coding assistant",
+      "homepage": "https://qwen.ai",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@qwen/coder-cli"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@qwen/coder-cli"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@qwen/coder-cli"
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "deepseek-coder",
+      "name": "DeepSeek Coder",
+      "kind": "cli",
+      "provider": "DeepSeek",
+      "description": "AI with deep reasoning",
+      "homepage": "https://deepseek.com",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@deepseek/coder"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@deepseek/coder"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@deepseek/coder"
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "codeium-cli",
+      "name": "Codeium CLI",
+      "kind": "cli",
+      "provider": "Codeium",
+      "description": "Free AI code completion",
+      "homepage": "https://codeium.com",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@codeium/cli"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@codeium/cli"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@codeium/cli"
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "supermaven-cli",
+      "name": "Supermaven CLI",
+      "kind": "cli",
+      "provider": "Supermaven",
+      "description": "Fastest AI code completion",
+      "homepage": "https://supermaven.com",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@supermaven/cli"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@supermaven/cli"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@supermaven/cli"
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "mentat",
+      "name": "Mentat",
+      "kind": "cli",
+      "provider": "Mentat",
+      "description": "Understands your codebase",
+      "homepage": "https://mentat.ai",
+      "installers": {
+        "windows": {
+          "manager": "pip",
+          "package": "mentat"
+        },
+        "macos": {
+          "manager": "pip",
+          "package": "mentat"
+        },
+        "linux": {
+          "manager": "pip",
+          "package": "mentat"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "gpt-engineer",
+      "name": "GPT Engineer",
+      "kind": "cli",
+      "provider": "GPT Engineer",
+      "description": "Specify what to build",
+      "homepage": "https://gptengineer.app",
+      "installers": {
+        "windows": {
+          "manager": "pip",
+          "package": "gpt-engineer"
+        },
+        "macos": {
+          "manager": "pip",
+          "package": "gpt-engineer"
+        },
+        "linux": {
+          "manager": "pip",
+          "package": "gpt-engineer"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "sweep",
+      "name": "Sweep",
+      "kind": "cli",
+      "provider": "Sweep AI",
+      "description": "AI junior developer",
+      "homepage": "https://sweep.dev",
+      "installers": {
+        "windows": {
+          "manager": "pip",
+          "package": "sweepai"
+        },
+        "macos": {
+          "manager": "pip",
+          "package": "sweepai"
+        },
+        "linux": {
+          "manager": "pip",
+          "package": "sweepai"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "devon",
+      "name": "Devon",
+      "kind": "cli",
+      "provider": "Devon",
+      "description": "Open source AI engineer",
+      "homepage": "https://devon.ai",
+      "installers": {
+        "windows": {
+          "manager": "pip",
+          "package": "devon-agent"
+        },
+        "macos": {
+          "manager": "pip",
+          "package": "devon-agent"
+        },
+        "linux": {
+          "manager": "pip",
+          "package": "devon-agent"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "open-interpreter",
+      "name": "Open Interpreter",
+      "kind": "cli",
+      "provider": "Open Interpreter",
+      "description": "Local code interpreter",
+      "homepage": "https://openinterpreter.com",
+      "installers": {
+        "windows": {
+          "manager": "pip",
+          "package": "open-interpreter"
+        },
+        "macos": {
+          "manager": "pip",
+          "package": "open-interpreter"
+        },
+        "linux": {
+          "manager": "pip",
+          "package": "open-interpreter"
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "antigravity-cli",
+      "name": "Antigravity CLI",
+      "kind": "cli",
+      "provider": "Google",
+      "description": "Google Antigravity CLI",
+      "homepage": "https://antigravity.google",
+      "installers": {
+        "windows": {
+          "manager": "npm",
+          "package": "@google/antigravity-cli"
+        },
+        "macos": {
+          "manager": "npm",
+          "package": "@google/antigravity-cli"
+        },
+        "linux": {
+          "manager": "npm",
+          "package": "@google/antigravity-cli"
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "kind": "desktop",
+      "provider": "Cursor",
+      "description": "AI-first code editor",
+      "homepage": "https://cursor.com",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Anysphere.Cursor"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "cursor"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "windsurf",
+      "name": "Windsurf",
+      "kind": "desktop",
+      "provider": "Codeium",
+      "description": "AI-powered IDE",
+      "homepage": "https://codeium.com",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Codeium.Windsurf"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "windsurf"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "trae",
+      "name": "Trae",
+      "kind": "desktop",
+      "provider": "ByteDance",
+      "description": "AI coding companion",
+      "homepage": "https://trae.ai",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "ByteDance.Trae"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "trae"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "trae-solo",
+      "name": "Trae Solo",
+      "kind": "desktop",
+      "provider": "ByteDance",
+      "description": "Standalone AI coding agent",
+      "homepage": "https://trae.ai",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "ByteDance.TraeSolo"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "trae-solo"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "replit-ai",
+      "name": "Replit AI",
+      "kind": "desktop",
+      "provider": "Replit",
+      "description": "AI coding platform",
+      "homepage": "https://replit.com",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Replit.Replit"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "replit"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "codex-desktop",
+      "name": "Codex Desktop",
+      "kind": "desktop",
+      "provider": "OpenAI",
+      "description": "Codex desktop app",
+      "homepage": "https://openai.com",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "OpenAI.Codex"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "codex"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "claude-desktop",
+      "name": "Claude Desktop",
+      "kind": "desktop",
+      "provider": "Anthropic",
+      "description": "Claude desktop app",
+      "homepage": "https://claude.ai",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Anthropic.Claude"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "claude"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "kimi-desktop",
+      "name": "Kimi Desktop",
+      "kind": "desktop",
+      "provider": "Moonshot",
+      "description": "Kimi desktop app",
+      "homepage": "https://kimi.ai",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "MoonshotAI.Kimi"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "kimi"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "workbuddy",
+      "name": "WorkBuddy",
+      "kind": "desktop",
+      "provider": "Tencent",
+      "description": "AI work assistant",
+      "homepage": "https://workbuddy.ai",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Tencent.WorkBuddy"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "workbuddy"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "codebuddy",
+      "name": "CodeBuddy",
+      "kind": "desktop",
+      "provider": "Tencent",
+      "description": "AI coding assistant",
+      "homepage": "https://codebuddy.com",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Tencent.CodeBuddy"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "codebuddy"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "mavis",
+      "name": "Mavis",
+      "kind": "desktop",
+      "provider": "Tencent",
+      "description": "马维斯 AI assistant",
+      "homepage": "https://marvis.qq.com",
+      "installers": {
+        "windows": {
+          "manager": "manual",
+          "package": null
+        },
+        "macos": {
+          "manager": "manual",
+          "package": null
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "qoder",
+      "name": "Qoder",
+      "kind": "desktop",
+      "provider": "Qoder",
+      "description": "AI coding agent",
+      "homepage": "https://qoder.com",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Alibaba.Qoder"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "qoder"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "qoder-work",
+      "name": "Qoder Work",
+      "kind": "desktop",
+      "provider": "Qoder",
+      "description": "Qoder work edition",
+      "homepage": "https://qoder.com",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Alibaba.QoderWork"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "qoder-work"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "minimax-agent",
+      "name": "MiniMax Agent",
+      "kind": "desktop",
+      "provider": "MiniMax",
+      "description": "MiniMax AI assistant",
+      "homepage": "https://minimax.chat",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "MiniMax.MiniMaxAgent"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "minimax"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "zcode",
+      "name": "ZCode",
+      "kind": "desktop",
+      "provider": "ZCode",
+      "description": "AI coding assistant",
+      "homepage": "https://zcode.ai",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "ZhipuAI.ZCode"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "zcode"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "gork-build",
+      "name": "Grok Build",
+      "kind": "desktop",
+      "provider": "xAI",
+      "description": "Grok AI coding agent",
+      "homepage": "https://x.ai",
+      "installers": {
+        "windows": {
+          "manager": "manual",
+          "package": null
+        },
+        "macos": {
+          "manager": "manual",
+          "package": null
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "community",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": null
+    },
+    {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "kind": "desktop",
+      "provider": "Google",
+      "description": "Google Antigravity AI assistant",
+      "homepage": "https://antigravity.google",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Google.Antigravity"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "antigravity"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "antigravity-ide",
+      "name": "Antigravity IDE",
+      "kind": "desktop",
+      "provider": "Google",
+      "description": "Google Antigravity IDE",
+      "homepage": "https://antigravity.google",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "Google.AntigravityIDE"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "antigravity-ide"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "reasonix",
+      "name": "Reasonix",
+      "kind": "desktop",
+      "provider": "Reasonix",
+      "description": "AI reasoning and coding agent",
+      "homepage": "https://reasonix.ai",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "ESEngine.Reasonix"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "reasonix"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "kind": "desktop",
+      "provider": "OpenCode",
+      "description": "Open source AI coding assistant",
+      "homepage": "https://opencode.ai",
+      "installers": {
+        "windows": {
+          "manager": "winget",
+          "package": "SST.OpenCodeDesktop"
+        },
+        "macos": {
+          "manager": "brew-cask",
+          "package": "opencode"
+        },
+        "linux": {
+          "manager": "manual",
+          "package": null
+        }
+      },
+      "status": "verified",
+      "catalog_verified_at": "2026-06-27",
+      "installer_verified_at": "2026-06-27"
+    }
+  ]
+}

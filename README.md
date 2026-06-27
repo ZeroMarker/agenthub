@@ -2,8 +2,38 @@
 
 A comprehensive tool to manage AI coding agents with both CLI and GUI interfaces.
 
-> Current status: prototype. See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the v1.0
+> Current status: v1.0 development. See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the
 > roadmap, known gaps, and release criteria.
+
+## Architecture
+
+Standard Tauri 2 project structure with shared core library:
+
+```
+agenthub/
+├── agenthub-core/        # Shared Rust library
+│   └── src/
+│       ├── agent.rs      # Agent model
+│       ├── catalog.rs    # Catalog loading/querying
+│       ├── installer.rs  # Install/uninstall logic
+│       └── status.rs     # Status detection
+├── agenthub-ui/          # Tauri application
+│   ├── src/              # Vue 3 frontend
+│   ├── src-tauri/        # Rust backend
+│   │   ├── src/main.rs
+│   │   ├── Cargo.toml
+│   │   └── tauri.conf.json
+│   └── package.json
+└── agents.json           # Agent catalog (single source of truth)
+```
+
+### Key Features
+
+- **Single source of truth**: Agent data is maintained once in `agents.json`
+- **Platform-aware installers**: Each agent has platform-specific installation configurations
+- **Shared core library**: CLI and GUI use the same `agenthub-core` crate
+- **Schema validation**: JSON schema ensures catalog consistency
+- **Comprehensive testing**: Unit tests for core functionality
 
 ## Supported Agents (40 total)
 
@@ -131,52 +161,28 @@ brew install --cask opencode
 
 从官网下载：cursor.com, codeium.com, trae.ai, reasonix.ai, opencode.ai 等
 
-## CLI Usage
+## Usage
+
+### Development
 
 ```bash
-# List all agents
-agenthub-cli list
-
-# List by type
-agenthub-cli list --type cli
-agenthub-cli list --type desktop
-
-# Search
-agenthub-cli search "keyword"
-
-# Install/Uninstall (single or batch)
-agenthub-cli install <name>
-agenthub-cli install <name1> <name2> ...  # Batch install
-agenthub-cli uninstall <name>
-agenthub-cli uninstall <name1> <name2> ...  # Batch uninstall
-
-# Info
-agenthub-cli info <name>
-```
-
-### Installation Progress
-
-When installing or uninstalling agents, you'll see a progress display:
-
-```
-🔧 Installing codex...
-   Package: @openai/codex
-   Manager: npm
-
-  Step 1/3: Preparing installation...
-  [==========--------------------] 1/3 Prepared
-
-  Step 2/3: Downloading and installing...
-  [==============================] 3/3 Completed
-✅ codex installed successfully!
-```
-
-## GUI Usage
-
-```bash
+# Install frontend dependencies
 cd agenthub-ui
 npm install
+
+# Run in development mode
 npm run tauri dev
+```
+
+### Build
+
+```bash
+# Build the application
+cargo build --release
+
+# Or use npm script
+cd agenthub-ui
+npm run tauri build
 ```
 
 ### GUI Features
@@ -191,6 +197,23 @@ npm run tauri dev
 - **Progress Display**: Real-time progress bar during installation/uninstallation
 - **Modern UI**: Gradient backgrounds, smooth animations, and responsive design
 - **Performance Optimized**: Caching and optimized re-renders
+
+## Project Status
+
+### Completed (v1.0 Development)
+
+- ✅ **M0: Baseline Confirmation**: Shared agent catalog with 40 agents, platform-specific installer configurations
+- ✅ **M1: Core Refactoring**: `agenthub-core` crate with catalog loading, querying, and installer interfaces
+- ✅ **M2: Reliability & Security**: Unit tests (13 passing), status detection, timeout handling, error classification, code quality checks
+- ✅ **M3: Beta Experience**: GUI async tasks, progress tracking, cache refresh, agent detail page
+
+### In Progress
+
+- 🔄 **M3: Beta Experience**: Keyboard navigation, accessibility, user testing
+
+### Planned
+
+- 📋 **M4: Release Preparation**: CI/CD, installation packages, documentation
 
 ## Providers
 

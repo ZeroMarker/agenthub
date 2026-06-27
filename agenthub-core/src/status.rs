@@ -44,18 +44,26 @@ impl StatusDetector {
                 let installer = agent.get_installer(self.platform);
                 match installer {
                     Some(installer) => match installer.manager {
-                        PackageManager::Npm => {
-                            self.check_npm_from_cache(agent, installer.package.as_deref(), &npm_list)
-                        }
-                        PackageManager::Pip => {
-                            self.check_pip_from_cache(agent, installer.package.as_deref(), &pip_list)
-                        }
-                        PackageManager::Winget => {
-                            self.check_winget_from_cache(agent, installer.package.as_deref(), &winget_list)
-                        }
-                        PackageManager::BrewCask => {
-                            self.check_brew_from_cache(agent, installer.package.as_deref(), &brew_list)
-                        }
+                        PackageManager::Npm => self.check_npm_from_cache(
+                            agent,
+                            installer.package.as_deref(),
+                            &npm_list,
+                        ),
+                        PackageManager::Pip => self.check_pip_from_cache(
+                            agent,
+                            installer.package.as_deref(),
+                            &pip_list,
+                        ),
+                        PackageManager::Winget => self.check_winget_from_cache(
+                            agent,
+                            installer.package.as_deref(),
+                            &winget_list,
+                        ),
+                        PackageManager::BrewCask => self.check_brew_from_cache(
+                            agent,
+                            installer.package.as_deref(),
+                            &brew_list,
+                        ),
                         PackageManager::Manual => AgentStatus {
                             agent_id: agent.id.clone(),
                             installed: false,
@@ -107,9 +115,7 @@ impl StatusDetector {
             return String::new();
         }
 
-        let output = Command::new("cmd")
-            .args(["/C", "winget", "list"])
-            .output();
+        let output = Command::new("cmd").args(["/C", "winget", "list"]).output();
 
         match output {
             Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
@@ -122,9 +128,7 @@ impl StatusDetector {
             return String::new();
         }
 
-        let output = Command::new("brew")
-            .args(["list", "--cask"])
-            .output();
+        let output = Command::new("brew").args(["list", "--cask"]).output();
 
         match output {
             Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
@@ -132,7 +136,12 @@ impl StatusDetector {
         }
     }
 
-    fn check_npm_from_cache(&self, agent: &Agent, package: Option<&str>, npm_list: &str) -> AgentStatus {
+    fn check_npm_from_cache(
+        &self,
+        agent: &Agent,
+        package: Option<&str>,
+        npm_list: &str,
+    ) -> AgentStatus {
         let package = match package {
             Some(p) => p,
             None => {
@@ -160,7 +169,12 @@ impl StatusDetector {
         }
     }
 
-    fn check_pip_from_cache(&self, agent: &Agent, package: Option<&str>, pip_list: &str) -> AgentStatus {
+    fn check_pip_from_cache(
+        &self,
+        agent: &Agent,
+        package: Option<&str>,
+        pip_list: &str,
+    ) -> AgentStatus {
         let package = match package {
             Some(p) => p,
             None => {
@@ -176,10 +190,7 @@ impl StatusDetector {
         let installed = pip_list.contains(package);
         let version = if installed {
             // For pip, we need to run pip show to get version
-            let output = Command::new("pip")
-                .args(["show", package])
-                .output()
-                .ok();
+            let output = Command::new("pip").args(["show", package]).output().ok();
             match output {
                 Some(output) => {
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -199,7 +210,12 @@ impl StatusDetector {
         }
     }
 
-    fn check_winget_from_cache(&self, agent: &Agent, package: Option<&str>, winget_list: &str) -> AgentStatus {
+    fn check_winget_from_cache(
+        &self,
+        agent: &Agent,
+        package: Option<&str>,
+        winget_list: &str,
+    ) -> AgentStatus {
         let package = match package {
             Some(p) => p,
             None => {
@@ -228,7 +244,12 @@ impl StatusDetector {
         }
     }
 
-    fn check_brew_from_cache(&self, agent: &Agent, package: Option<&str>, brew_list: &str) -> AgentStatus {
+    fn check_brew_from_cache(
+        &self,
+        agent: &Agent,
+        package: Option<&str>,
+        brew_list: &str,
+    ) -> AgentStatus {
         let package = match package {
             Some(p) => p,
             None => {
@@ -262,10 +283,7 @@ impl StatusDetector {
                 if let Some(package_pos) = line.find(package) {
                     let after_package = &line[package_pos + package.len()..];
                     if let Some(version_part) = after_package.strip_prefix('@') {
-                        let version = version_part
-                            .split([' ', '-', '\0'])
-                            .next()
-                            .unwrap_or("");
+                        let version = version_part.split([' ', '-', '\0']).next().unwrap_or("");
                         if !version.is_empty() {
                             return Some(version.to_string());
                         }

@@ -67,14 +67,16 @@ impl PromptManager {
         }
 
         let mut prompts = Vec::new();
-        for entry in std::fs::read_dir(&templates_dir).map_err(|e| {
-            AgentHubError::PromptError(format!("Failed to read prompts dir: {}", e))
-        })? {
-            let entry = entry.map_err(|e| {
-                AgentHubError::PromptError(format!("Failed to read entry: {}", e))
-            })?;
+        for entry in std::fs::read_dir(&templates_dir)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to read prompts dir: {}", e)))?
+        {
+            let entry = entry
+                .map_err(|e| AgentHubError::PromptError(format!("Failed to read entry: {}", e)))?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "yaml" || ext == "yml") {
+            if path
+                .extension()
+                .map_or(false, |ext| ext == "yaml" || ext == "yml")
+            {
                 match self.load_prompt_from_file(&path) {
                     Ok(prompt) => prompts.push(prompt),
                     Err(e) => {
@@ -89,13 +91,11 @@ impl PromptManager {
     }
 
     fn load_prompt_from_file(&self, path: &Path) -> Result<PromptTemplate> {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            AgentHubError::PromptError(format!("Failed to read prompt: {}", e))
-        })?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to read prompt: {}", e)))?;
 
-        serde_yaml::from_str(&content).map_err(|e| {
-            AgentHubError::PromptError(format!("Failed to parse prompt: {}", e))
-        })
+        serde_yaml::from_str(&content)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to parse prompt: {}", e)))
     }
 
     pub fn get_prompt(&self, id: &str) -> Result<PromptTemplate> {
@@ -158,9 +158,8 @@ impl PromptManager {
             AgentHubError::PromptError(format!("Failed to serialize prompt: {}", e))
         })?;
 
-        std::fs::write(&path, content).map_err(|e| {
-            AgentHubError::PromptError(format!("Failed to write prompt: {}", e))
-        })?;
+        std::fs::write(&path, content)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to write prompt: {}", e)))?;
 
         Ok(())
     }
@@ -261,8 +260,12 @@ mod tests {
     fn test_list_prompts() {
         let (manager, _temp) = create_test_manager();
 
-        manager.create_prompt("p1", "Prompt 1", "First", "Template 1").unwrap();
-        manager.create_prompt("p2", "Prompt 2", "Second", "Template 2").unwrap();
+        manager
+            .create_prompt("p1", "Prompt 1", "First", "Template 1")
+            .unwrap();
+        manager
+            .create_prompt("p2", "Prompt 2", "Second", "Template 2")
+            .unwrap();
 
         let prompts = manager.list_prompts().unwrap();
         assert_eq!(prompts.len(), 2);
@@ -272,7 +275,14 @@ mod tests {
     fn test_render_prompt() {
         let (manager, _temp) = create_test_manager();
 
-        manager.create_prompt("greeting", "Greeting", "A greeting", "Hello {{name}}, welcome to {{place}}!").unwrap();
+        manager
+            .create_prompt(
+                "greeting",
+                "Greeting",
+                "A greeting",
+                "Hello {{name}}, welcome to {{place}}!",
+            )
+            .unwrap();
 
         let mut vars = HashMap::new();
         vars.insert("name".to_string(), "Alice".to_string());
@@ -286,9 +296,13 @@ mod tests {
     fn test_update_prompt() {
         let (manager, _temp) = create_test_manager();
 
-        manager.create_prompt("test", "Test", "Desc", "Template").unwrap();
+        manager
+            .create_prompt("test", "Test", "Desc", "Template")
+            .unwrap();
 
-        let updated = manager.update_prompt("test", Some("New Name"), None, None).unwrap();
+        let updated = manager
+            .update_prompt("test", Some("New Name"), None, None)
+            .unwrap();
         assert_eq!(updated.name, "New Name");
     }
 
@@ -296,7 +310,9 @@ mod tests {
     fn test_delete_prompt() {
         let (manager, _temp) = create_test_manager();
 
-        manager.create_prompt("test", "Test", "Desc", "Template").unwrap();
+        manager
+            .create_prompt("test", "Test", "Desc", "Template")
+            .unwrap();
 
         let deleted = manager.delete_prompt("test").unwrap();
         assert!(deleted);
@@ -309,7 +325,9 @@ mod tests {
     fn test_tags() {
         let (manager, _temp) = create_test_manager();
 
-        manager.create_prompt("test", "Test", "Desc", "Template").unwrap();
+        manager
+            .create_prompt("test", "Test", "Desc", "Template")
+            .unwrap();
 
         manager.add_tag("test", "review").unwrap();
         manager.add_tag("test", "code").unwrap();

@@ -119,22 +119,12 @@ impl DiagnosticManager {
         self.run_check("Operating System", "system", || {
             let os = std::env::consts::OS;
             let arch = std::env::consts::ARCH;
-            (
-                CheckStatus::Passed,
-                format!("{} {}", os, arch),
-                None,
-            )
+            (CheckStatus::Passed, format!("{} {}", os, arch), None)
         });
 
         self.run_check("Hostname", "system", || {
             hostname::get()
-                .map(|h| {
-                    (
-                        CheckStatus::Passed,
-                        h.to_string_lossy().to_string(),
-                        None,
-                    )
-                })
+                .map(|h| (CheckStatus::Passed, h.to_string_lossy().to_string(), None))
                 .unwrap_or_else(|_| {
                     (
                         CheckStatus::Warning,
@@ -172,16 +162,18 @@ impl DiagnosticManager {
 
         // winget (Windows only)
         if cfg!(target_os = "windows") {
-            self.run_check("winget", "package_manager", || {
-                match Self::get_tool_version("cmd", &["/C", "winget", "--version"]) {
+            self.run_check(
+                "winget",
+                "package_manager",
+                || match Self::get_tool_version("cmd", &["/C", "winget", "--version"]) {
                     Some(version) => (CheckStatus::Passed, version, None),
                     None => (
                         CheckStatus::Warning,
                         "winget not found".to_string(),
                         Some("Install App Installer from Microsoft Store".to_string()),
                     ),
-                }
-            });
+                },
+            );
         }
 
         // brew (macOS only)
@@ -200,16 +192,18 @@ impl DiagnosticManager {
     }
 
     fn check_rust_toolchain(&mut self) {
-        self.run_check("Rust Compiler", "toolchain", || {
-            match Self::get_tool_version("rustc", &["--version"]) {
+        self.run_check(
+            "Rust Compiler",
+            "toolchain",
+            || match Self::get_tool_version("rustc", &["--version"]) {
                 Some(version) => (CheckStatus::Passed, version, None),
                 None => (
                     CheckStatus::Warning,
                     "rustc not found".to_string(),
                     Some("Install from https://rustup.rs".to_string()),
                 ),
-            }
-        });
+            },
+        );
 
         self.run_check("Cargo", "toolchain", || {
             match Self::get_tool_version("cargo", &["--version"]) {
@@ -282,10 +276,15 @@ impl DiagnosticManager {
                     match std::fs::read_to_string(path) {
                         Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
                             Ok(json) => {
-                                if let Some(agents) = json.get("agents").and_then(|a| a.as_array()) {
+                                if let Some(agents) = json.get("agents").and_then(|a| a.as_array())
+                                {
                                     return (
                                         CheckStatus::Passed,
-                                        format!("{} agents found at {}", agents.len(), path.display()),
+                                        format!(
+                                            "{} agents found at {}",
+                                            agents.len(),
+                                            path.display()
+                                        ),
                                         None,
                                     );
                                 } else {
@@ -382,19 +381,13 @@ impl DiagnosticManager {
     }
 
     fn check_disk_space(&mut self) {
-        self.run_check("Disk Space", "system", || {
-            match std::fs::metadata(".") {
-                Ok(_) => (
-                    CheckStatus::Passed,
-                    "Disk accessible".to_string(),
-                    None,
-                ),
-                Err(e) => (
-                    CheckStatus::Warning,
-                    format!("Cannot check disk: {}", e),
-                    None,
-                ),
-            }
+        self.run_check("Disk Space", "system", || match std::fs::metadata(".") {
+            Ok(_) => (CheckStatus::Passed, "Disk accessible".to_string(), None),
+            Err(e) => (
+                CheckStatus::Warning,
+                format!("Cannot check disk: {}", e),
+                None,
+            ),
         });
     }
 
@@ -423,20 +416,32 @@ impl DiagnosticManager {
                     "Network unreachable".to_string(),
                     Some("Check internet connection".to_string()),
                 ),
-                Err(e) => (
-                    CheckStatus::Warning,
-                    format!("Ping failed: {}", e),
-                    None,
-                ),
+                Err(e) => (CheckStatus::Warning, format!("Ping failed: {}", e), None),
             }
         });
     }
 
     fn build_report(&self) -> DiagnosticReport {
-        let passed = self.checks.iter().filter(|c| c.status == CheckStatus::Passed).count();
-        let warnings = self.checks.iter().filter(|c| c.status == CheckStatus::Warning).count();
-        let failed = self.checks.iter().filter(|c| c.status == CheckStatus::Failed).count();
-        let skipped = self.checks.iter().filter(|c| c.status == CheckStatus::Skipped).count();
+        let passed = self
+            .checks
+            .iter()
+            .filter(|c| c.status == CheckStatus::Passed)
+            .count();
+        let warnings = self
+            .checks
+            .iter()
+            .filter(|c| c.status == CheckStatus::Warning)
+            .count();
+        let failed = self
+            .checks
+            .iter()
+            .filter(|c| c.status == CheckStatus::Failed)
+            .count();
+        let skipped = self
+            .checks
+            .iter()
+            .filter(|c| c.status == CheckStatus::Skipped)
+            .count();
 
         DiagnosticReport {
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -497,9 +502,7 @@ impl DiagnosticManager {
     pub fn format_report(report: &DiagnosticReport) -> String {
         let mut output = String::new();
 
-        output.push_str(&format!(
-            "\n🏥 AgentHub Diagnostic Report\n"
-        ));
+        output.push_str(&format!("\n🏥 AgentHub Diagnostic Report\n"));
         output.push_str(&format!("{:=<60}\n", ""));
         output.push_str(&format!("Platform: {}\n", report.platform));
         output.push_str(&format!("Timestamp: {}\n", report.timestamp));
@@ -517,7 +520,10 @@ impl DiagnosticManager {
         for (category, checks) in &categories {
             output.push_str(&format!("{}:\n", Self::format_category_name(category)));
             for check in checks {
-                output.push_str(&format!("  {} {} - {}\n", check.status, check.name, check.message));
+                output.push_str(&format!(
+                    "  {} {} - {}\n",
+                    check.status, check.name, check.message
+                ));
                 if let Some(details) = &check.details {
                     output.push_str(&format!("      💡 {}\n", details));
                 }
@@ -529,7 +535,10 @@ impl DiagnosticManager {
         output.push_str(&format!("Summary:\n"));
         output.push_str(&format!(
             "  ✅ Passed: {} | ⚠️ Warnings: {} | ❌ Failed: {} | ⏭️ Skipped: {}\n",
-            report.summary.passed, report.summary.warnings, report.summary.failed, report.summary.skipped
+            report.summary.passed,
+            report.summary.warnings,
+            report.summary.failed,
+            report.summary.skipped
         ));
         output.push_str(&format!(
             "  Total checks: {} | Duration: {}ms\n",

@@ -109,8 +109,9 @@ impl SkillManager {
             ));
         }
 
-        serde_yaml::from_str(parts[1])
-            .map_err(|e| AgentHubError::SkillError(format!("Failed to parse skill manifest: {}", e)))
+        serde_yaml::from_str(parts[1]).map_err(|e| {
+            AgentHubError::SkillError(format!("Failed to parse skill manifest: {}", e))
+        })
     }
 
     pub fn list_skills(&self) -> Result<Vec<Skill>> {
@@ -183,20 +184,15 @@ impl SkillManager {
 
     fn load_skill_from_dir(&self, skill_dir: &Path) -> Result<Skill> {
         let manifest_path = skill_dir.join("SKILL.md");
-        let content = std::fs::read_to_string(&manifest_path).map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to read SKILL.md: {}", e))
-        })?;
+        let content = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to read SKILL.md: {}", e)))?;
 
         let manifest = Self::parse_manifest(&content)?;
         let enabled_path = skill_dir.join(".enabled");
         let enabled = enabled_path.exists();
 
         let metadata = std::fs::metadata(&manifest_path).ok();
-        let installed_at = metadata.and_then(|m| {
-            m.modified()
-                .ok()
-                .map(|t| DateTime::from(t))
-        });
+        let installed_at = metadata.and_then(|m| m.modified().ok().map(|t| DateTime::from(t)));
 
         Ok(Skill {
             manifest,
@@ -228,18 +224,16 @@ impl SkillManager {
             )));
         }
 
-        std::fs::create_dir_all(&dest_dir).map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to create skill dir: {}", e))
-        })?;
+        std::fs::create_dir_all(&dest_dir)
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to create skill dir: {}", e)))?;
 
         // Copy skill files
         Self::copy_dir_recursive(source_dir, &dest_dir)?;
 
         // Enable by default
         let enabled_path = dest_dir.join(".enabled");
-        std::fs::write(&enabled_path, "").map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to enable skill: {}", e))
-        })?;
+        std::fs::write(&enabled_path, "")
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to enable skill: {}", e)))?;
 
         self.get_skill(skill_name)
     }
@@ -250,9 +244,8 @@ impl SkillManager {
             return Ok(false);
         }
 
-        std::fs::remove_dir_all(&skill_dir).map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to uninstall skill: {}", e))
-        })?;
+        std::fs::remove_dir_all(&skill_dir)
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to uninstall skill: {}", e)))?;
 
         Ok(true)
     }
@@ -267,9 +260,8 @@ impl SkillManager {
         }
 
         let enabled_path = skill_dir.join(".enabled");
-        std::fs::write(&enabled_path, "").map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to enable skill: {}", e))
-        })?;
+        std::fs::write(&enabled_path, "")
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to enable skill: {}", e)))?;
 
         Ok(())
     }
@@ -329,16 +321,14 @@ impl SkillManager {
     }
 
     fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-        std::fs::create_dir_all(dst).map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to create directory: {}", e))
-        })?;
+        std::fs::create_dir_all(dst)
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to create directory: {}", e)))?;
 
-        for entry in std::fs::read_dir(src).map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to read directory: {}", e))
-        })? {
-            let entry = entry.map_err(|e| {
-                AgentHubError::SkillError(format!("Failed to read entry: {}", e))
-            })?;
+        for entry in std::fs::read_dir(src)
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to read directory: {}", e)))?
+        {
+            let entry = entry
+                .map_err(|e| AgentHubError::SkillError(format!("Failed to read entry: {}", e)))?;
 
             let src_path = entry.path();
             let dst_path = dst.join(entry.file_name());
@@ -364,9 +354,8 @@ impl SkillManager {
             )));
         }
 
-        std::fs::create_dir_all(&skill_dir).map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to create skill dir: {}", e))
-        })?;
+        std::fs::create_dir_all(&skill_dir)
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to create skill dir: {}", e)))?;
 
         let manifest_content = format!(
             r#"---
@@ -389,15 +378,13 @@ config: {{}}
         );
 
         let manifest_path = skill_dir.join("SKILL.md");
-        std::fs::write(&manifest_path, manifest_content).map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to write manifest: {}", e))
-        })?;
+        std::fs::write(&manifest_path, manifest_content)
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to write manifest: {}", e)))?;
 
         // Enable by default
         let enabled_path = skill_dir.join(".enabled");
-        std::fs::write(&enabled_path, "").map_err(|e| {
-            AgentHubError::SkillError(format!("Failed to enable skill: {}", e))
-        })?;
+        std::fs::write(&enabled_path, "")
+            .map_err(|e| AgentHubError::SkillError(format!("Failed to enable skill: {}", e)))?;
 
         self.get_skill(skill_name)
     }

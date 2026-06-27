@@ -1,7 +1,7 @@
 use agenthub_core::{
-    Agent, AgentKind, Catalog, ConfigManager, ConfigValue, DiagnosticManager,
-    Installer, MemoryManager, MemoryScope, MemoryType, Platform, PromptManager,
-    Result, SessionManager, SkillManager,
+    Agent, AgentKind, Catalog, ConfigManager, ConfigValue, DiagnosticManager, Installer,
+    MemoryManager, MemoryScope, MemoryType, Platform, PromptManager, Result, SessionManager,
+    SkillManager,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -574,13 +574,24 @@ struct NativeConfig {
 }
 
 #[tauri::command]
-async fn list_configs(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<String>, String> {
-    state.config_manager.list_configs().map_err(|e| e.to_string())
+async fn list_configs(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<String>, String> {
+    state
+        .config_manager
+        .list_configs()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn get_config(agent_id: String, state: tauri::State<'_, AppState>) -> std::result::Result<ConfigInfo, String> {
-    let config = state.config_manager.load_config(&agent_id).map_err(|e| e.to_string())?;
+async fn get_config(
+    agent_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ConfigInfo, String> {
+    let config = state
+        .config_manager
+        .load_config(&agent_id)
+        .map_err(|e| e.to_string())?;
 
     let settings: HashMap<String, String> = config
         .settings
@@ -628,11 +639,15 @@ async fn get_native_config(agent_id: String) -> std::result::Result<NativeConfig
         ("workbuddy", (".workbuddy", ".mcp.json", false)),
         ("codebuddy", (".codebuddy", "config.json", false)),
         ("openwork", (".openwork", "config.json", false)),
-        ("opencode", ("ai.opencode.desktop", "opencode.settings", true)),
+        (
+            "opencode",
+            ("ai.opencode.desktop", "opencode.settings", true),
+        ),
         ("grok-cli", (".grok", "auth.json", false)),
     ]);
 
-    let (dir_name, file_name, use_app_data) = config_files.get(agent_id.as_str())
+    let (dir_name, file_name, use_app_data) = config_files
+        .get(agent_id.as_str())
         .ok_or_else(|| format!("No known config for agent: {}", agent_id))?;
 
     let base_dir = if *use_app_data { &app_data } else { &home_dir };
@@ -710,18 +725,21 @@ async fn save_native_config(agent_id: String, content: String) -> std::result::R
         ("workbuddy", (".workbuddy", ".mcp.json", false)),
         ("codebuddy", (".codebuddy", "config.json", false)),
         ("openwork", (".openwork", "config.json", false)),
-        ("opencode", ("ai.opencode.desktop", "opencode.settings", true)),
+        (
+            "opencode",
+            ("ai.opencode.desktop", "opencode.settings", true),
+        ),
         ("grok-cli", (".grok", "auth.json", false)),
     ]);
 
-    let (dir_name, file_name, use_app_data) = config_files.get(agent_id.as_str())
+    let (dir_name, file_name, use_app_data) = config_files
+        .get(agent_id.as_str())
         .ok_or_else(|| format!("No known config for agent: {}", agent_id))?;
 
     let base_dir = if *use_app_data { &app_data } else { &home_dir };
     let config_path = base_dir.join(dir_name).join(file_name);
 
-    std::fs::write(&config_path, &content)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
+    std::fs::write(&config_path, &content).map_err(|e| format!("Failed to write config: {}", e))?;
 
     Ok(())
 }
@@ -735,7 +753,9 @@ struct InstalledAgent {
 }
 
 #[tauri::command]
-async fn list_installed_agents(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<InstalledAgent>, String> {
+async fn list_installed_agents(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<InstalledAgent>, String> {
     let catalog = state.catalog.read().await;
     let platform = state.platform;
     let agents: Vec<Agent> = catalog.agents().to_vec();
@@ -785,13 +805,25 @@ async fn set_config_value(
 }
 
 #[tauri::command]
-async fn delete_config(agent_id: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
-    state.config_manager.delete_config(&agent_id).map_err(|e| e.to_string())
+async fn delete_config(
+    agent_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .config_manager
+        .delete_config(&agent_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn create_config(agent_id: String, state: tauri::State<'_, AppState>) -> std::result::Result<(), String> {
-    state.config_manager.create_config(&agent_id).map_err(|e| e.to_string())?;
+async fn create_config(
+    agent_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    state
+        .config_manager
+        .create_config(&agent_id)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -809,8 +841,13 @@ struct SkillInfo {
 }
 
 #[tauri::command]
-async fn list_skills(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<SkillInfo>, String> {
-    let skills = state.skill_manager.list_skills().map_err(|e| e.to_string())?;
+async fn list_skills(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<SkillInfo>, String> {
+    let skills = state
+        .skill_manager
+        .list_skills()
+        .map_err(|e| e.to_string())?;
 
     // Get the codex skills directory for comparison
     let codex_skills_dir = dirs::home_dir()
@@ -845,7 +882,10 @@ async fn create_skill(
     description: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<SkillInfo, String> {
-    let skill = state.skill_manager.create_skill(&name, &description).map_err(|e| e.to_string())?;
+    let skill = state
+        .skill_manager
+        .create_skill(&name, &description)
+        .map_err(|e| e.to_string())?;
     Ok(SkillInfo {
         name: skill.manifest.name,
         description: skill.manifest.description,
@@ -858,18 +898,36 @@ async fn create_skill(
 }
 
 #[tauri::command]
-async fn enable_skill(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<(), String> {
-    state.skill_manager.enable_skill(&name).map_err(|e| e.to_string())
+async fn enable_skill(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    state
+        .skill_manager
+        .enable_skill(&name)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn disable_skill(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<(), String> {
-    state.skill_manager.disable_skill(&name).map_err(|e| e.to_string())
+async fn disable_skill(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    state
+        .skill_manager
+        .disable_skill(&name)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn delete_skill(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
-    state.skill_manager.uninstall_skill(&name).map_err(|e| e.to_string())
+async fn delete_skill(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .skill_manager
+        .uninstall_skill(&name)
+        .map_err(|e| e.to_string())
 }
 
 // ============ Diagnostic Commands ============
@@ -930,17 +988,25 @@ struct PromptInfo {
 }
 
 #[tauri::command]
-async fn list_prompts(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<PromptInfo>, String> {
-    let prompts = state.prompt_manager.list_prompts().map_err(|e| e.to_string())?;
-    Ok(prompts.iter().map(|p| PromptInfo {
-        id: p.id.clone(),
-        name: p.name.clone(),
-        description: p.description.clone(),
-        template: p.template.clone(),
-        tags: p.tags.clone(),
-        category: p.category.clone(),
-        version: p.version,
-    }).collect())
+async fn list_prompts(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<PromptInfo>, String> {
+    let prompts = state
+        .prompt_manager
+        .list_prompts()
+        .map_err(|e| e.to_string())?;
+    Ok(prompts
+        .iter()
+        .map(|p| PromptInfo {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            description: p.description.clone(),
+            template: p.template.clone(),
+            tags: p.tags.clone(),
+            category: p.category.clone(),
+            version: p.version,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -951,7 +1017,9 @@ async fn create_prompt(
     template: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<PromptInfo, String> {
-    let prompt = state.prompt_manager.create_prompt(&id, &name, &description, &template)
+    let prompt = state
+        .prompt_manager
+        .create_prompt(&id, &name, &description, &template)
         .map_err(|e| e.to_string())?;
     Ok(PromptInfo {
         id: prompt.id,
@@ -970,12 +1038,21 @@ async fn render_prompt(
     vars: HashMap<String, String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<String, String> {
-    state.prompt_manager.render_prompt(&id, &vars).map_err(|e| e.to_string())
+    state
+        .prompt_manager
+        .render_prompt(&id, &vars)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn delete_prompt(id: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
-    state.prompt_manager.delete_prompt(&id).map_err(|e| e.to_string())
+async fn delete_prompt(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .prompt_manager
+        .delete_prompt(&id)
+        .map_err(|e| e.to_string())
 }
 
 // ============ Session Commands ============
@@ -993,18 +1070,26 @@ struct SessionInfo {
 }
 
 #[tauri::command]
-async fn list_sessions(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<SessionInfo>, String> {
-    let sessions = state.session_manager.list_sessions().map_err(|e| e.to_string())?;
-    Ok(sessions.iter().map(|s| SessionInfo {
-        id: s.id.clone(),
-        title: s.title.clone(),
-        agent: s.agent.clone(),
-        status: s.status.to_string(),
-        started_at: s.started_at.to_rfc3339(),
-        ended_at: s.ended_at.map(|dt| dt.to_rfc3339()),
-        message_count: s.messages.len(),
-        tags: s.tags.clone(),
-    }).collect())
+async fn list_sessions(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<SessionInfo>, String> {
+    let sessions = state
+        .session_manager
+        .list_sessions()
+        .map_err(|e| e.to_string())?;
+    Ok(sessions
+        .iter()
+        .map(|s| SessionInfo {
+            id: s.id.clone(),
+            title: s.title.clone(),
+            agent: s.agent.clone(),
+            status: s.status.to_string(),
+            started_at: s.started_at.to_rfc3339(),
+            ended_at: s.ended_at.map(|dt| dt.to_rfc3339()),
+            message_count: s.messages.len(),
+            tags: s.tags.clone(),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -1013,7 +1098,9 @@ async fn create_session(
     agent: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<SessionInfo, String> {
-    let session = state.session_manager.create_session(&title, &agent)
+    let session = state
+        .session_manager
+        .create_session(&title, &agent)
         .map_err(|e| e.to_string())?;
     Ok(SessionInfo {
         id: session.id,
@@ -1028,8 +1115,14 @@ async fn create_session(
 }
 
 #[tauri::command]
-async fn get_session(id: String, state: tauri::State<'_, AppState>) -> std::result::Result<SessionInfo, String> {
-    let session = state.session_manager.get_session(&id).map_err(|e| e.to_string())?;
+async fn get_session(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<SessionInfo, String> {
+    let session = state
+        .session_manager
+        .get_session(&id)
+        .map_err(|e| e.to_string())?;
     Ok(SessionInfo {
         id: session.id,
         title: session.title,
@@ -1043,8 +1136,14 @@ async fn get_session(id: String, state: tauri::State<'_, AppState>) -> std::resu
 }
 
 #[tauri::command]
-async fn delete_session(id: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
-    state.session_manager.delete_session(&id).map_err(|e| e.to_string())
+async fn delete_session(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .session_manager
+        .delete_session(&id)
+        .map_err(|e| e.to_string())
 }
 
 // ============ Memory Commands ============
@@ -1061,7 +1160,10 @@ struct MemoryInfo {
 }
 
 #[tauri::command]
-async fn list_memories(scope: Option<String>, state: tauri::State<'_, AppState>) -> std::result::Result<Vec<MemoryInfo>, String> {
+async fn list_memories(
+    scope: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<MemoryInfo>, String> {
     let scope_enum = scope.and_then(|s| match s.as_str() {
         "global" => Some(MemoryScope::Global),
         "project" => Some(MemoryScope::Project),
@@ -1069,16 +1171,22 @@ async fn list_memories(scope: Option<String>, state: tauri::State<'_, AppState>)
         _ => None,
     });
 
-    let entries = state.memory_manager.list_entries(scope_enum).map_err(|e| e.to_string())?;
-    Ok(entries.iter().map(|e| MemoryInfo {
-        path: e.path.clone(),
-        title: e.title.clone(),
-        content: e.content.clone(),
-        scope: e.scope.to_string(),
-        memory_type: e.memory_type.to_string(),
-        tags: e.tags.clone(),
-        updated_at: e.updated_at.to_rfc3339(),
-    }).collect())
+    let entries = state
+        .memory_manager
+        .list_entries(scope_enum)
+        .map_err(|e| e.to_string())?;
+    Ok(entries
+        .iter()
+        .map(|e| MemoryInfo {
+            path: e.path.clone(),
+            title: e.title.clone(),
+            content: e.content.clone(),
+            scope: e.scope.to_string(),
+            memory_type: e.memory_type.to_string(),
+            tags: e.tags.clone(),
+            updated_at: e.updated_at.to_rfc3339(),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -1095,13 +1203,10 @@ async fn create_memory(
         _ => return Err("Invalid scope".to_string()),
     };
 
-    let entry = state.memory_manager.create_entry(
-        scope_enum,
-        None,
-        &title,
-        &content,
-        MemoryType::Free,
-    ).map_err(|e| e.to_string())?;
+    let entry = state
+        .memory_manager
+        .create_entry(scope_enum, None, &title, &content, MemoryType::Free)
+        .map_err(|e| e.to_string())?;
 
     Ok(MemoryInfo {
         path: entry.path,
@@ -1115,22 +1220,37 @@ async fn create_memory(
 }
 
 #[tauri::command]
-async fn search_memories(query: String, state: tauri::State<'_, AppState>) -> std::result::Result<Vec<MemoryInfo>, String> {
-    let entries = state.memory_manager.search_entries(&query).map_err(|e| e.to_string())?;
-    Ok(entries.iter().map(|e| MemoryInfo {
-        path: e.path.clone(),
-        title: e.title.clone(),
-        content: e.content.clone(),
-        scope: e.scope.to_string(),
-        memory_type: e.memory_type.to_string(),
-        tags: e.tags.clone(),
-        updated_at: e.updated_at.to_rfc3339(),
-    }).collect())
+async fn search_memories(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<MemoryInfo>, String> {
+    let entries = state
+        .memory_manager
+        .search_entries(&query)
+        .map_err(|e| e.to_string())?;
+    Ok(entries
+        .iter()
+        .map(|e| MemoryInfo {
+            path: e.path.clone(),
+            title: e.title.clone(),
+            content: e.content.clone(),
+            scope: e.scope.to_string(),
+            memory_type: e.memory_type.to_string(),
+            tags: e.tags.clone(),
+            updated_at: e.updated_at.to_rfc3339(),
+        })
+        .collect())
 }
 
 #[tauri::command]
-async fn delete_memory(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
-    state.memory_manager.delete_entry(&path).map_err(|e| e.to_string())
+async fn delete_memory(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .memory_manager
+        .delete_entry(&path)
+        .map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -1149,8 +1269,8 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".codex")
         .join("skills");
-    let skill_manager = SkillManager::new(config_dir.join("skills"))
-        .with_extra_dir(codex_skills_dir);
+    let skill_manager =
+        SkillManager::new(config_dir.join("skills")).with_extra_dir(codex_skills_dir);
 
     let prompt_manager = PromptManager::new(config_dir.join("prompts"));
     let session_manager = SessionManager::new(config_dir.join("sessions"));

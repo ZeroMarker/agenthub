@@ -177,11 +177,13 @@ impl ConfigManager {
         for entry in std::fs::read_dir(&agents_dir)
             .map_err(|e| AgentHubError::ConfigError(format!("Failed to read config dir: {}", e)))?
         {
-            let entry = entry.map_err(|e| {
-                AgentHubError::ConfigError(format!("Failed to read entry: {}", e))
-            })?;
+            let entry = entry
+                .map_err(|e| AgentHubError::ConfigError(format!("Failed to read entry: {}", e)))?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "yaml" || ext == "yml") {
+            if path
+                .extension()
+                .map_or(false, |ext| ext == "yaml" || ext == "yml")
+            {
                 if let Some(stem) = path.file_stem() {
                     configs.push(stem.to_string_lossy().to_string());
                 }
@@ -201,9 +203,8 @@ impl ConfigManager {
             )));
         }
 
-        let content = std::fs::read_to_string(&path).map_err(|e| {
-            AgentHubError::ConfigError(format!("Failed to read config: {}", e))
-        })?;
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to read config: {}", e)))?;
 
         serde_yaml::from_str(&content)
             .map_err(|e| AgentHubError::ConfigError(format!("Failed to parse config: {}", e)))
@@ -220,9 +221,8 @@ impl ConfigManager {
             AgentHubError::ConfigError(format!("Failed to serialize config: {}", e))
         })?;
 
-        std::fs::write(&path, content).map_err(|e| {
-            AgentHubError::ConfigError(format!("Failed to write config: {}", e))
-        })?;
+        std::fs::write(&path, content)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to write config: {}", e)))?;
 
         Ok(())
     }
@@ -254,9 +254,9 @@ impl ConfigManager {
     }
 
     pub fn set_setting(&self, agent_id: &str, key: &str, value: ConfigValue) -> Result<()> {
-        let mut config = self.load_config(agent_id).or_else(|_| {
-            self.create_config(agent_id)
-        })?;
+        let mut config = self
+            .load_config(agent_id)
+            .or_else(|_| self.create_config(agent_id))?;
 
         config.settings.insert(key.to_string(), value);
         config.metadata.updated_at = Utc::now();
@@ -279,9 +279,9 @@ impl ConfigManager {
     }
 
     pub fn set_custom(&self, agent_id: &str, key: &str, value: ConfigValue) -> Result<()> {
-        let mut config = self.load_config(agent_id).or_else(|_| {
-            self.create_config(agent_id)
-        })?;
+        let mut config = self
+            .load_config(agent_id)
+            .or_else(|_| self.create_config(agent_id))?;
 
         config.custom.insert(key.to_string(), value);
         config.metadata.updated_at = Utc::now();
@@ -289,9 +289,9 @@ impl ConfigManager {
     }
 
     pub fn set_env_var(&self, agent_id: &str, key: &str, value: &str) -> Result<()> {
-        let mut config = self.load_config(agent_id).or_else(|_| {
-            self.create_config(agent_id)
-        })?;
+        let mut config = self
+            .load_config(agent_id)
+            .or_else(|_| self.create_config(agent_id))?;
 
         config
             .environment_variables
@@ -328,21 +328,18 @@ impl ConfigManager {
             AgentHubError::ConfigError(format!("Failed to serialize config: {}", e))
         })?;
 
-        std::fs::write(output_path, content).map_err(|e| {
-            AgentHubError::ConfigError(format!("Failed to write export: {}", e))
-        })?;
+        std::fs::write(output_path, content)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to write export: {}", e)))?;
 
         Ok(())
     }
 
     pub fn import_config(&self, input_path: &Path, agent_id: Option<&str>) -> Result<AgentConfig> {
-        let content = std::fs::read_to_string(input_path).map_err(|e| {
-            AgentHubError::ConfigError(format!("Failed to read import: {}", e))
-        })?;
+        let content = std::fs::read_to_string(input_path)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to read import: {}", e)))?;
 
-        let mut config: AgentConfig = serde_yaml::from_str(&content).map_err(|e| {
-            AgentHubError::ConfigError(format!("Failed to parse import: {}", e))
-        })?;
+        let mut config: AgentConfig = serde_yaml::from_str(&content)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to parse import: {}", e)))?;
 
         if let Some(id) = agent_id {
             config.agent_id = id.to_string();
@@ -367,9 +364,8 @@ impl ConfigManager {
             AgentHubError::ConfigError(format!("Failed to serialize configs: {}", e))
         })?;
 
-        std::fs::write(output_path, content).map_err(|e| {
-            AgentHubError::ConfigError(format!("Failed to write export: {}", e))
-        })?;
+        std::fs::write(output_path, content)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to write export: {}", e)))?;
 
         Ok(())
     }
@@ -455,10 +451,22 @@ mod tests {
 
     #[test]
     fn test_environment_parsing() {
-        assert_eq!("development".parse::<Environment>().unwrap(), Environment::Development);
-        assert_eq!("dev".parse::<Environment>().unwrap(), Environment::Development);
-        assert_eq!("production".parse::<Environment>().unwrap(), Environment::Production);
-        assert_eq!("prod".parse::<Environment>().unwrap(), Environment::Production);
+        assert_eq!(
+            "development".parse::<Environment>().unwrap(),
+            Environment::Development
+        );
+        assert_eq!(
+            "dev".parse::<Environment>().unwrap(),
+            Environment::Development
+        );
+        assert_eq!(
+            "production".parse::<Environment>().unwrap(),
+            Environment::Production
+        );
+        assert_eq!(
+            "prod".parse::<Environment>().unwrap(),
+            Environment::Production
+        );
         assert!("invalid".parse::<Environment>().is_err());
     }
 

@@ -181,12 +181,11 @@ impl MemoryManager {
             return Ok(());
         }
 
-        for entry in std::fs::read_dir(dir).map_err(|e| {
-            AgentHubError::MemoryError(format!("Failed to read dir: {}", e))
-        })? {
-            let entry = entry.map_err(|e| {
-                AgentHubError::MemoryError(format!("Failed to read entry: {}", e))
-            })?;
+        for entry in std::fs::read_dir(dir)
+            .map_err(|e| AgentHubError::MemoryError(format!("Failed to read dir: {}", e)))?
+        {
+            let entry = entry
+                .map_err(|e| AgentHubError::MemoryError(format!("Failed to read entry: {}", e)))?;
             let path = entry.path();
 
             if path.is_dir() {
@@ -205,9 +204,8 @@ impl MemoryManager {
     }
 
     fn load_entry_from_file(&self, path: &Path) -> Result<MemoryEntry> {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            AgentHubError::MemoryError(format!("Failed to read memory: {}", e))
-        })?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| AgentHubError::MemoryError(format!("Failed to read memory: {}", e)))?;
 
         // Parse frontmatter if present
         if content.starts_with("---") {
@@ -257,9 +255,8 @@ impl MemoryManager {
         memory_type: MemoryType,
     ) -> Result<MemoryEntry> {
         let dir = self.scope_dir(&scope, scope_id);
-        std::fs::create_dir_all(&dir).map_err(|e| {
-            AgentHubError::MemoryError(format!("Failed to create dir: {}", e))
-        })?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| AgentHubError::MemoryError(format!("Failed to create dir: {}", e)))?;
 
         let filename = format!("{}.md", title.to_lowercase().replace(' ', "-"));
         let path = dir.join(&filename);
@@ -289,9 +286,8 @@ impl MemoryManager {
     pub fn save_entry(&self, entry: &MemoryEntry) -> Result<()> {
         let path = self.memory_dir.join(&entry.path);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                AgentHubError::MemoryError(format!("Failed to create dir: {}", e))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AgentHubError::MemoryError(format!("Failed to create dir: {}", e)))?;
         }
 
         let mut output = String::new();
@@ -300,9 +296,8 @@ impl MemoryManager {
         output.push_str("---\n\n");
         output.push_str(&entry.content);
 
-        std::fs::write(&path, output).map_err(|e| {
-            AgentHubError::MemoryError(format!("Failed to write memory: {}", e))
-        })?;
+        std::fs::write(&path, output)
+            .map_err(|e| AgentHubError::MemoryError(format!("Failed to write memory: {}", e)))?;
 
         Ok(())
     }
@@ -328,7 +323,9 @@ impl MemoryManager {
             .filter(|e| {
                 e.title.to_lowercase().contains(&query_lower)
                     || e.content.to_lowercase().contains(&query_lower)
-                    || e.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                    || e.tags
+                        .iter()
+                        .any(|t| t.to_lowercase().contains(&query_lower))
             })
             .collect())
     }
@@ -353,9 +350,18 @@ impl MemoryManager {
     pub fn get_stats(&self) -> Result<MemoryStats> {
         let entries = self.list_entries(None)?;
 
-        let global = entries.iter().filter(|e| e.scope == MemoryScope::Global).count();
-        let project = entries.iter().filter(|e| e.scope == MemoryScope::Project).count();
-        let session = entries.iter().filter(|e| e.scope == MemoryScope::Session).count();
+        let global = entries
+            .iter()
+            .filter(|e| e.scope == MemoryScope::Global)
+            .count();
+        let project = entries
+            .iter()
+            .filter(|e| e.scope == MemoryScope::Project)
+            .count();
+        let session = entries
+            .iter()
+            .filter(|e| e.scope == MemoryScope::Session)
+            .count();
 
         Ok(MemoryStats {
             total: entries.len(),
@@ -408,10 +414,22 @@ mod tests {
         let (manager, _temp) = create_test_manager();
 
         manager
-            .create_entry(MemoryScope::Global, None, "Entry 1", "Content 1", MemoryType::Free)
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Entry 1",
+                "Content 1",
+                MemoryType::Free,
+            )
             .unwrap();
         manager
-            .create_entry(MemoryScope::Global, None, "Entry 2", "Content 2", MemoryType::Free)
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Entry 2",
+                "Content 2",
+                MemoryType::Free,
+            )
             .unwrap();
 
         let entries = manager.list_entries(None).unwrap();
@@ -423,10 +441,22 @@ mod tests {
         let (manager, _temp) = create_test_manager();
 
         manager
-            .create_entry(MemoryScope::Global, None, "Rust Notes", "Rust is great", MemoryType::Learning)
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Rust Notes",
+                "Rust is great",
+                MemoryType::Learning,
+            )
             .unwrap();
         manager
-            .create_entry(MemoryScope::Global, None, "Python Notes", "Python is cool", MemoryType::Learning)
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Python Notes",
+                "Python is cool",
+                MemoryType::Learning,
+            )
             .unwrap();
 
         let results = manager.search_entries("rust").unwrap();
@@ -439,7 +469,13 @@ mod tests {
         let (manager, _temp) = create_test_manager();
 
         let entry = manager
-            .create_entry(MemoryScope::Global, None, "Test", "Content", MemoryType::Free)
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Test",
+                "Content",
+                MemoryType::Free,
+            )
             .unwrap();
 
         let deleted = manager.delete_entry(&entry.path).unwrap();
@@ -454,10 +490,22 @@ mod tests {
         let (manager, _temp) = create_test_manager();
 
         manager
-            .create_entry(MemoryScope::Global, None, "Global 1", "Content", MemoryType::Free)
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Global 1",
+                "Content",
+                MemoryType::Free,
+            )
             .unwrap();
         manager
-            .create_entry(MemoryScope::Project, Some("proj"), "Project 1", "Content", MemoryType::Free)
+            .create_entry(
+                MemoryScope::Project,
+                Some("proj"),
+                "Project 1",
+                "Content",
+                MemoryType::Free,
+            )
             .unwrap();
 
         let stats = manager.get_stats().unwrap();

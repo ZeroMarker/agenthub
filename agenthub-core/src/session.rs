@@ -103,11 +103,13 @@ impl SessionManager {
         for entry in std::fs::read_dir(&data_dir).map_err(|e| {
             AgentHubError::SessionError(format!("Failed to read sessions dir: {}", e))
         })? {
-            let entry = entry.map_err(|e| {
-                AgentHubError::SessionError(format!("Failed to read entry: {}", e))
-            })?;
+            let entry = entry
+                .map_err(|e| AgentHubError::SessionError(format!("Failed to read entry: {}", e)))?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "yaml" || ext == "yml") {
+            if path
+                .extension()
+                .map_or(false, |ext| ext == "yaml" || ext == "yml")
+            {
                 match self.load_session_from_file(&path) {
                     Ok(session) => sessions.push(session),
                     Err(e) => {
@@ -122,13 +124,11 @@ impl SessionManager {
     }
 
     fn load_session_from_file(&self, path: &Path) -> Result<Session> {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            AgentHubError::SessionError(format!("Failed to read session: {}", e))
-        })?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| AgentHubError::SessionError(format!("Failed to read session: {}", e)))?;
 
-        serde_yaml::from_str(&content).map_err(|e| {
-            AgentHubError::SessionError(format!("Failed to parse session: {}", e))
-        })
+        serde_yaml::from_str(&content)
+            .map_err(|e| AgentHubError::SessionError(format!("Failed to parse session: {}", e)))
     }
 
     pub fn get_session(&self, id: &str) -> Result<Session> {
@@ -144,7 +144,11 @@ impl SessionManager {
     }
 
     pub fn create_session(&self, title: &str, agent: &str) -> Result<Session> {
-        let id = format!("ses_{}_{}", Utc::now().timestamp_millis(), rand::random::<u32>());
+        let id = format!(
+            "ses_{}_{}",
+            Utc::now().timestamp_millis(),
+            rand::random::<u32>()
+        );
         let now = Utc::now();
 
         let session = Session {
@@ -178,9 +182,8 @@ impl SessionManager {
             AgentHubError::SessionError(format!("Failed to serialize session: {}", e))
         })?;
 
-        std::fs::write(&path, content).map_err(|e| {
-            AgentHubError::SessionError(format!("Failed to write session: {}", e))
-        })?;
+        std::fs::write(&path, content)
+            .map_err(|e| AgentHubError::SessionError(format!("Failed to write session: {}", e)))?;
 
         Ok(())
     }
@@ -192,9 +195,7 @@ impl SessionManager {
         if status == SessionStatus::Completed || status == SessionStatus::Failed {
             let now = Utc::now();
             session.ended_at = Some(now);
-            session.duration_minutes = Some(
-                (now - session.started_at).num_minutes() as u32
-            );
+            session.duration_minutes = Some((now - session.started_at).num_minutes() as u32);
         }
 
         self.save_session(&session)
@@ -259,8 +260,12 @@ impl SessionManager {
             .filter(|s| {
                 s.title.to_lowercase().contains(&query_lower)
                     || s.agent.to_lowercase().contains(&query_lower)
-                    || s.messages.iter().any(|m| m.content.to_lowercase().contains(&query_lower))
-                    || s.notes.as_ref().map_or(false, |n| n.to_lowercase().contains(&query_lower))
+                    || s.messages
+                        .iter()
+                        .any(|m| m.content.to_lowercase().contains(&query_lower))
+                    || s.notes
+                        .as_ref()
+                        .map_or(false, |n| n.to_lowercase().contains(&query_lower))
             })
             .collect())
     }
@@ -268,9 +273,18 @@ impl SessionManager {
     pub fn get_stats(&self) -> Result<SessionStats> {
         let sessions = self.list_sessions()?;
         let total = sessions.len();
-        let active = sessions.iter().filter(|s| s.status == SessionStatus::Active).count();
-        let completed = sessions.iter().filter(|s| s.status == SessionStatus::Completed).count();
-        let failed = sessions.iter().filter(|s| s.status == SessionStatus::Failed).count();
+        let active = sessions
+            .iter()
+            .filter(|s| s.status == SessionStatus::Active)
+            .count();
+        let completed = sessions
+            .iter()
+            .filter(|s| s.status == SessionStatus::Completed)
+            .count();
+        let failed = sessions
+            .iter()
+            .filter(|s| s.status == SessionStatus::Failed)
+            .count();
 
         let total_tokens: u32 = sessions
             .iter()
@@ -320,7 +334,9 @@ mod tests {
     fn test_create_session() {
         let (manager, _temp) = create_test_manager();
 
-        let session = manager.create_session("Test Session", "claude-code").unwrap();
+        let session = manager
+            .create_session("Test Session", "claude-code")
+            .unwrap();
         assert_eq!(session.title, "Test Session");
         assert_eq!(session.agent, "claude-code");
         assert_eq!(session.status, SessionStatus::Active);
@@ -342,7 +358,9 @@ mod tests {
         let (manager, _temp) = create_test_manager();
 
         let session = manager.create_session("Test", "codex").unwrap();
-        manager.update_status(&session.id, SessionStatus::Completed).unwrap();
+        manager
+            .update_status(&session.id, SessionStatus::Completed)
+            .unwrap();
 
         let updated = manager.get_session(&session.id).unwrap();
         assert_eq!(updated.status, SessionStatus::Completed);
@@ -355,7 +373,9 @@ mod tests {
 
         let session = manager.create_session("Test", "codex").unwrap();
         manager.add_message(&session.id, "user", "Hello!").unwrap();
-        manager.add_message(&session.id, "assistant", "Hi there!").unwrap();
+        manager
+            .add_message(&session.id, "assistant", "Hi there!")
+            .unwrap();
 
         let updated = manager.get_session(&session.id).unwrap();
         assert_eq!(updated.messages.len(), 2);

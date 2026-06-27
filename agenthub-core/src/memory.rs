@@ -24,20 +24,17 @@ impl std::fmt::Display for MemoryScope {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum MemoryType {
     Pinned,
     Learning,
     Decision,
     Reference,
     Feedback,
+    #[default]
     Free,
 }
 
-impl Default for MemoryType {
-    fn default() -> Self {
-        MemoryType::Free
-    }
-}
 
 impl std::fmt::Display for MemoryType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -190,7 +187,7 @@ impl MemoryManager {
 
             if path.is_dir() {
                 self.collect_entries(&path, entries)?;
-            } else if path.extension().map_or(false, |ext| ext == "md") {
+            } else if path.extension().is_some_and(|ext| ext == "md") {
                 match self.load_entry_from_file(&path) {
                     Ok(entry) => entries.push(entry),
                     Err(e) => {

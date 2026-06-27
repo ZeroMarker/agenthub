@@ -182,7 +182,7 @@ impl ConfigManager {
             let path = entry.path();
             if path
                 .extension()
-                .map_or(false, |ext| ext == "yaml" || ext == "yml")
+                .is_some_and(|ext| ext == "yaml" || ext == "yml")
             {
                 if let Some(stem) = path.file_stem() {
                     configs.push(stem.to_string_lossy().to_string());

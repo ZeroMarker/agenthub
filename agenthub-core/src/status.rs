@@ -1,6 +1,5 @@
 use crate::agent::{Agent, PackageManager, Platform};
-use crate::error::{AgentHubError, Result};
-use std::collections::HashMap;
+use crate::error::Result;
 use std::process::Command;
 
 #[derive(Debug, Clone)]
@@ -21,7 +20,7 @@ impl StatusDetector {
     }
 
     pub fn check_agent(&self, agent: &Agent) -> Result<AgentStatus> {
-        let results = self.check_agents(&[agent.clone()]);
+        let results = self.check_agents(std::slice::from_ref(agent));
         Ok(results.into_iter().next().unwrap_or(AgentStatus {
             agent_id: agent.id.clone(),
             installed: false,

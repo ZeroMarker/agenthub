@@ -108,7 +108,7 @@ impl SessionManager {
             let path = entry.path();
             if path
                 .extension()
-                .map_or(false, |ext| ext == "yaml" || ext == "yml")
+                .is_some_and(|ext| ext == "yaml" || ext == "yml")
             {
                 match self.load_session_from_file(&path) {
                     Ok(session) => sessions.push(session),
@@ -265,7 +265,7 @@ impl SessionManager {
                         .any(|m| m.content.to_lowercase().contains(&query_lower))
                     || s.notes
                         .as_ref()
-                        .map_or(false, |n| n.to_lowercase().contains(&query_lower))
+                        .is_some_and(|n| n.to_lowercase().contains(&query_lower))
             })
             .collect())
     }

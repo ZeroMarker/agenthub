@@ -71,6 +71,12 @@ pub struct DiagnosticManager {
     start_time: Instant,
 }
 
+impl Default for DiagnosticManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiagnosticManager {
     pub fn new() -> Self {
         Self {
@@ -355,7 +361,7 @@ impl DiagnosticManager {
         self.run_check("Skills Directory", "storage", || {
             let skills_dir = Self::get_skills_dir();
             if skills_dir.exists() {
-                match std::fs::read_dir(&skills_dir.join("installed")) {
+                match std::fs::read_dir(skills_dir.join("installed")) {
                     Ok(entries) => {
                         let count = entries.count();
                         (
@@ -502,11 +508,11 @@ impl DiagnosticManager {
     pub fn format_report(report: &DiagnosticReport) -> String {
         let mut output = String::new();
 
-        output.push_str(&format!("\n🏥 AgentHub Diagnostic Report\n"));
+        output.push_str("\n🏥 AgentHub Diagnostic Report\n");
         output.push_str(&format!("{:=<60}\n", ""));
         output.push_str(&format!("Platform: {}\n", report.platform));
         output.push_str(&format!("Timestamp: {}\n", report.timestamp));
-        output.push_str(&format!("\n"));
+        output.push('\n');
 
         // Group checks by category
         let mut categories: HashMap<String, Vec<&DiagnosticCheck>> = HashMap::new();
@@ -528,11 +534,11 @@ impl DiagnosticManager {
                     output.push_str(&format!("      💡 {}\n", details));
                 }
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         output.push_str(&format!("{:=<60}\n", ""));
-        output.push_str(&format!("Summary:\n"));
+        output.push_str("Summary:\n");
         output.push_str(&format!(
             "  ✅ Passed: {} | ⚠️ Warnings: {} | ❌ Failed: {} | ⏭️ Skipped: {}\n",
             report.summary.passed,

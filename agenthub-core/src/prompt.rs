@@ -75,7 +75,7 @@ impl PromptManager {
             let path = entry.path();
             if path
                 .extension()
-                .map_or(false, |ext| ext == "yaml" || ext == "yml")
+                .is_some_and(|ext| ext == "yaml" || ext == "yml")
             {
                 match self.load_prompt_from_file(&path) {
                     Ok(prompt) => prompts.push(prompt),

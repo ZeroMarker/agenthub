@@ -96,10 +96,6 @@ impl SkillManager {
         self.skills_dir.join("installed")
     }
 
-    fn skill_manifest_path(&self, skill_name: &str) -> PathBuf {
-        self.installed_dir().join(skill_name).join("SKILL.md")
-    }
-
     fn parse_manifest(content: &str) -> Result<SkillManifest> {
         // Extract YAML frontmatter between --- markers
         let parts: Vec<&str> = content.splitn(3, "---").collect();
@@ -192,7 +188,7 @@ impl SkillManager {
         let enabled = enabled_path.exists();
 
         let metadata = std::fs::metadata(&manifest_path).ok();
-        let installed_at = metadata.and_then(|m| m.modified().ok().map(|t| DateTime::from(t)));
+        let installed_at = metadata.and_then(|m| m.modified().ok().map(DateTime::from));
 
         Ok(Skill {
             manifest,

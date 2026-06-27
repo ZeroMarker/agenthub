@@ -144,7 +144,7 @@ impl SessionManager {
     }
 
     pub fn create_session(&self, title: &str, agent: &str) -> Result<Session> {
-        let id = format!("ses_{}", Utc::now().timestamp_millis());
+        let id = format!("ses_{}_{}", Utc::now().timestamp_millis(), rand::random::<u32>());
         let now = Utc::now();
 
         let session = Session {

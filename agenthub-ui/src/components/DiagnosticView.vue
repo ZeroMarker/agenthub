@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import PageHeader from './common/PageHeader.vue'
 
 interface CheckResult {
   name: string
@@ -79,10 +80,7 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
 
 <template>
   <div class="diagnostic-view">
-    <header class="page-header">
-      <h1>Diagnostic Tool</h1>
-      <p>Check system health and dependencies</p>
-    </header>
+    <PageHeader title="Diagnostic Tool" subtitle="Check system health and dependencies" />
 
     <div class="actions">
       <button
@@ -154,20 +152,6 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
 <style scoped>
 .diagnostic-view {
   padding: 2rem;
-}
-
-.page-header {
-  margin-bottom: 2rem;
-}
-
-.page-header h1 {
-  font-size: 1.75rem;
-  color: #2c3e50;
-  margin-bottom: 0.5rem;
-}
-
-.page-header p {
-  color: #666;
 }
 
 .actions {
@@ -350,12 +334,13 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
   line-height: 1.5;
 }
 
-.empty {
-  text-align: center;
-  padding: 3rem;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  color: #999;
+/* Responsive */
+@media (max-width: 900px) {
+  .diagnostic-view { padding: 1.25rem; }
+  .summary-stats { flex-direction: column; gap: 0.75rem; }
+  .stat { width: 100%; }
+}
+@media (max-width: 600px) {
+  .diagnostic-view { padding: 1rem; }
 }
 </style>

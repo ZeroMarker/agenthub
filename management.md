@@ -1,9 +1,9 @@
 # AgentHub Management Specification
 
-> 版本：v0.2  
-> 创建日期：2026-06-24  
-> 更新日期：2026-06-27  
-> 状态：设计文档（Package 模块已实现）
+> 版本：v0.3
+> 创建日期：2026-06-24
+> 更新日期：2026-07-07
+> 状态：设计文档（核心管理模块已有基础实现，部分高级能力仍在规划中）
 
 ## 概述
 
@@ -13,12 +13,14 @@
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| Package | ✅ 已实现 | `agenthub-core` crate + CLI + GUI，支持 40 个代理 |
-| Config | 📋 设计中 | 详见下方设计文档 |
-| Prompt | 📋 设计中 | 详见下方设计文档 |
-| Session | 📋 设计中 | 详见下方设计文档 |
-| Skill | 🟡 基础存在 | `.mimocode/skills/` 目录已有示例 |
-| Memory | 🟡 基础存在 | MiMoCode 内置 memory 系统 |
+| Package | ✅ 已实现 | `agenthub-core` crate + CLI + GUI，支持 25 个代理 |
+| Config | ✅ 基础实现 | AgentHub YAML 配置 + 部分 Agent 原生配置读写 |
+| Prompt | ✅ 基础实现 | YAML 模板 CRUD + 变量插值 |
+| Session | ✅ 基础实现 | YAML 会话记录、搜索、标签、评分和用量字段 |
+| Skill | ✅ 基础实现 | `SKILL.md` 解析、安装、启停、依赖检查，兼容 Codex skills |
+| Memory | ✅ 基础实现 | Markdown 记忆、scope/type 分类、标签和搜索 |
+
+高级能力如密钥链、审计日志、备份恢复、技能市场、语义检索和跨 Agent 工作流仍属于后续规划。
 
 ---
 
@@ -47,34 +49,36 @@ agenthub <module> <action> [target] [options]
 
 ### 2. 存储结构
 
+桌面端当前使用系统配置目录下的 `agenthub` 作为数据根目录：
+
+| 平台 | 数据根目录 |
+|------|------------|
+| Windows | `%APPDATA%\agenthub` |
+| macOS | `~/Library/Application Support/agenthub` |
+| Linux | `~/.config/agenthub` |
+
+逻辑结构如下：
+
 ```
-~/.agenthub/
-├── config/
-│   ├── global.yaml          # 全局配置
-│   └── agents/
-│       ├── codex.yaml       # 单 Agent 配置
-│       └── claude-code.yaml
+<agenthub-config-dir>/
+├── agents/
+│   ├── codex.yaml           # 单 Agent 配置
+│   └── claude-code.yaml
 ├── prompts/
-│   ├── templates/
-│   │   ├── code-review.yaml
-│   │   └── refactor.yaml
-│   └── versions/
-│       └── code-review/
-│           ├── v1.yaml
-│           └── v2.yaml
+│   └── templates/
+│       ├── code-review.yaml
+│       └── refactor.yaml
 ├── sessions/
-│   ├── index.yaml           # 会话索引
 │   └── data/
 │       ├── ses_001.yaml
 │       └── ses_002.yaml
 ├── skills/
-│   ├── installed/
-│   │   ├── rust-dev/
-│   │   └── elixir-dev/
-│   └── available/
-│       └── registry.yaml
+│   └── installed/
+│       ├── rust-dev/
+│       └── elixir-dev/
 ├── memory/
-│   ├── global.md
+│   ├── global/
+│   │   └── preferences.md
 │   ├── projects/
 │   │   └── <project-hash>/
 │   │       └── MEMORY.md
@@ -88,6 +92,8 @@ agenthub <module> <action> [target] [options]
     ├── 2026-06-24-full.tar.gz
     └── 2026-06-24-config-only.tar.gz
 ```
+
+`audit/`、`backups/`、prompt 版本目录和 skill registry 是规划结构，当前代码尚未完整落地。更贴近当前实现的 harness 文件说明见 `docs/agent-harness.md`。
 
 ### 3. 审计日志格式
 
@@ -115,7 +121,7 @@ agenthub <module> <action> [target] [options]
 > - `agenthub-core` crate: 代理模型、清单加载、安装器接口
 > - `agenthub-cli`: CLI 命令行工具
 > - `agenthub-ui`: Tauri + Vue 3 桌面应用
-> - `agents.json`: 共享代理清单（40 个代理）
+> - `agents.json`: 共享代理清单（25 个代理）
 
 ### 数据模型
 
@@ -176,7 +182,7 @@ Available Agents:
 | cursor             | Cursor             | Desktop | Cursor       | Verified  | Winget   |
 ...
 
-Total: 40 agents (20 CLI, 20 Desktop)
+Total: 25 agents (7 CLI, 18 Desktop)
 ```
 
 ### 健康检查
@@ -199,9 +205,9 @@ Package Managers:
   ✅ winget - v1.29.170-preview
 
 Agent Catalog:
-  📦 20 CLI agents
-  🖥️  20 Desktop agents
-  📊 40 total agents
+  📦 7 CLI agents
+  🖥️  18 Desktop agents
+  📊 25 total agents
 
 Installable Agents:
   38 agents can be installed on this platform
@@ -245,7 +251,7 @@ agenthub package restore package-backup.tar.gz
 ### 数据模型
 
 ```yaml
-# ~/.agenthub/config/agents/codex.yaml
+# <agenthub-config-dir>/agents/codex.yaml
 agent_id: codex
 version: 1
 environment: production          # development | staging | production
@@ -371,7 +377,7 @@ Config Audit Log (last 7 days)
 ### 数据模型
 
 ```yaml
-# ~/.agenthub/prompts/templates/code-review.yaml
+# <agenthub-config-dir>/prompts/templates/code-review.yaml
 id: code-review
 name: 代码审查
 description: 对代码进行结构化审查
@@ -502,7 +508,7 @@ agenthub prompt install community/code-review
 ### 数据模型
 
 ```yaml
-# ~/.agenthub/sessions/data/ses_001.yaml
+# <agenthub-config-dir>/sessions/data/ses_001.yaml
 id: ses_001
 title: "重构认证模块"
 agent: claude-code
@@ -676,7 +682,7 @@ agenthub session import sessions-backup.tar.gz
 ### 数据模型
 
 ```yaml
-# ~/.agenthub/skills/installed/rust-dev/SKILL.md
+# <agenthub-config-dir>/skills/installed/rust-dev/SKILL.md
 ---
 name: rust-dev
 description: "Rust development workflow with cargo, testing, and linting"
@@ -777,7 +783,7 @@ agenthub skill install-deps rust-dev
 ### 技能组合（工作流）
 
 ```yaml
-# ~/.agenthub/workflows/full-review.yaml
+# <agenthub-config-dir>/workflows/full-review.yaml
 name: Full Code Review
 description: 完整的代码审查工作流
 
@@ -842,10 +848,10 @@ agenthub skill export --all --output skills-backup.tar.gz
 ### 数据模型
 
 ```yaml
-# ~/.agenthub/memory/config.yaml
+# <agenthub-config-dir>/memory/config.yaml
 storage:
   backend: file                 # file | sqlite | hybrid
-  path: ~/.agenthub/memory
+  path: <agenthub-config-dir>/memory
   
 indexing:
   enabled: true

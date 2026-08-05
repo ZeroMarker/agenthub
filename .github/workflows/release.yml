@@ -73,3 +73,22 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          # Find all release artifacts
+          ARTIFACTS_DIR="agenthub-ui/src-tauri/target/${{ matrix.target }}/release"
+          if [ -d "$ARTIFACTS_DIR" ]; then
+            cd "$ARTIFACTS_DIR"
+            for f in agenthub* *.msi *.dmg *.AppImage *.deb *.rpm; do
+              [ -f "$f" ] || continue
+              sha256sum "$f" >> "${GITHUB_WORKSPACE}/SHA256SUMS-${{ matrix.target }}"
+            done
+          fi
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums-${{ matrix.target }}
+          path: SHA256SUMS-*

@@ -1,0 +1,17 @@
+[package]
+name = "agenthub-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AgentHub CLI - AI coding agent management"
+
+[dependencies]
+agenthub-core = { path = "../agenthub-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "agenthub-cli"
+path = "src/main.rs"

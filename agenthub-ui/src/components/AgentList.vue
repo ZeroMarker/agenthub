@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, shallowRef, onErrorCaptured } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import PageHeader from './common/PageHeader.vue'
+import NotificationBar from './common/NotificationBar.vue'
+import LoadingSpinner from './common/LoadingSpinner.vue'
+import EmptyState from './common/EmptyState.vue'
+import ModalDialog from './common/ModalDialog.vue'
+import AgentToolbar from './agent/AgentToolbar.vue'
+import BatchActions from './agent/BatchActions.vue'
+import AgentCard from './agent/AgentCard.vue'
+import AgentTable from './agent/AgentTable.vue'
+import AgentDetailModalContent from './agent/AgentDetailModal.vue'
 
 interface InstallerInfo {
   platform: string
@@ -56,7 +66,8 @@ const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
 const activeTab = ref<'all' | 'cli' | 'desktop'>('all')
 const selectedAgents = ref<Set<string>>(new Set())
-const progress = ref<{name: string, step: number, total_steps: number, message: string} | null>(null)
+const installedMap = ref<Map<string, {installed: boolean, version: string | null}>>(new Map())
+const cardProgress = ref<{[agentId: string]: {step: number, total_steps: number, message: string}}>({})
 const batchProgress = ref<{current: number, total: number, agent: string, action: string} | null>(null)
 const debouncedSearchQuery = ref('')
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
@@ -96,6 +107,17 @@ function setCache(data: Agent[]) {
 function clearCache() {
   localStorage.removeItem(CACHE_KEY)
   lastRefresh.value = 0
+}
+
+async function loadInstalledStatus() {
+  try {
+    const installed = await invoke<{id: string, installed: boolean, version: string | null}[]>('list_installed_agents')
+    const map = new Map<string, {installed: boolean, version: string | null}>()
+    installed.forEach(a => map.set(a.id, { installed: a.installed, version: a.version }))
+    installedMap.value = map
+  } catch (e) {
+    console.error('Failed to load installed status:', e)
+  }
 }
 
 const filteredAgents = computed(() => {
@@ -148,7 +170,10 @@ async function loadAgents(forceRefresh = false) {
 
   loading.value = true
   try {
-    const newAgents = await invoke<Agent[]>('list_agents', { agentType: null })
+    const [newAgents, _installed] = await Promise.all([
+      invoke<Agent[]>('list_agents', { agentType: null }),
+      loadInstalledStatus(),
+    ])
     agents.value = newAgents
     setCache(newAgents)
   } catch (error) {
@@ -176,11 +201,6 @@ function toggleSort(field: 'name' | 'type' | 'status') {
   }
 }
 
-function getSortIcon(field: 'name' | 'type' | 'status') {
-  if (sortBy.value !== field) return '↕'
-  return sortDirection.value === 'asc' ? '↑' : '↓'
-}
-
 async function searchAgents() {
   if (!searchQuery.value.trim()) {
     await loadAgents()
@@ -198,50 +218,56 @@ async function searchAgents() {
 }
 
 async function installAgent(name: string) {
-  loading.value = true
-  progress.value = null
+  cardProgress.value[name] = { step: 1, total_steps: 3, message: 'Starting...' }
+  message.value = ''
   try {
     const result = await invoke<InstallResult>('install_agent', { name })
     if (result.success) {
-      message.value = result.message
+      delete cardProgress.value[name]
+      clearCache()
+      await loadAgents(true)
+      await loadInstalledStatus()
+      message.value = `✅ ${name} installed (${result.duration_ms}ms)`
       messageType.value = 'success'
+      setTimeout(() => message.value = '', 5000)
     } else {
-      message.value = result.message
+      const detail = result.stderr || result.stdout || result.message
+      cardProgress.value[name] = { step: 3, total_steps: 3, message: `❌ Failed: ${detail}` }
+      setTimeout(() => delete cardProgress.value[name], 4000)
+      message.value = `❌ ${name}: ${detail}`
       messageType.value = 'error'
     }
-    clearCache()
-    await loadAgents(true)
   } catch (error) {
-    message.value = error as string
+    delete cardProgress.value[name]
+    message.value = `❌ Error: ${error}`
     messageType.value = 'error'
-  } finally {
-    loading.value = false
-    progress.value = null
-    setTimeout(() => message.value = '', 3000)
   }
 }
 
 async function uninstallAgent(name: string) {
-  loading.value = true
-  progress.value = null
+  cardProgress.value[name] = { step: 1, total_steps: 3, message: 'Starting...' }
+  message.value = ''
   try {
     const result = await invoke<InstallResult>('uninstall_agent', { name })
     if (result.success) {
-      message.value = result.message
+      delete cardProgress.value[name]
+      clearCache()
+      await loadAgents(true)
+      await loadInstalledStatus()
+      message.value = `✅ ${name} uninstalled (${result.duration_ms}ms)`
       messageType.value = 'success'
+      setTimeout(() => message.value = '', 5000)
     } else {
-      message.value = result.message
+      const detail = result.stderr || result.stdout || result.message
+      cardProgress.value[name] = { step: 3, total_steps: 3, message: `❌ Failed: ${detail}` }
+      setTimeout(() => delete cardProgress.value[name], 4000)
+      message.value = `❌ ${name}: ${detail}`
       messageType.value = 'error'
     }
-    clearCache()
-    await loadAgents(true)
   } catch (error) {
-    message.value = error as string
+    delete cardProgress.value[name]
+    message.value = `❌ Error: ${error}`
     messageType.value = 'error'
-  } finally {
-    loading.value = false
-    progress.value = null
-    setTimeout(() => message.value = '', 3000)
   }
 }
 
@@ -265,114 +291,108 @@ function selectAllAgents() {
   if (selectedAgents.value.size === filtered.length) {
     selectedAgents.value.clear()
   } else {
-    filtered.forEach(agent => selectedAgents.value.add(agent.name))
+    filtered.forEach(agent => selectedAgents.value.add(agent.id))
   }
 }
 
 async function batchInstall() {
   if (selectedAgents.value.size === 0) {
-    message.value = 'No agents selected'
+    message.value = '❌ No agents selected'
     messageType.value = 'error'
-    setTimeout(() => message.value = '', 3000)
     return
   }
 
   loading.value = true
   batchProgress.value = null
+  message.value = ''
   try {
     const names = Array.from(selectedAgents.value)
     const result = await invoke<BatchResult>('batch_install_agents', { names })
     
     const failedResults = result.results.filter(r => !r.success)
     if (failedResults.length > 0) {
-      message.value = `Batch install: ${result.success} succeeded, ${result.failed} failed`
+      const details = failedResults.map(r => `${r.agent_name}: ${r.stderr || r.message}`).join('; ')
+      message.value = `❌ Batch install: ${result.success} succeeded, ${result.failed} failed — ${details}`
       messageType.value = 'error'
     } else {
-      message.value = `Batch install: ${result.success} agents installed successfully`
+      message.value = `✅ Batch install: ${result.success} agents installed successfully`
       messageType.value = 'success'
+      selectedAgents.value.clear()
+      clearCache()
+      await loadAgents(true)
     }
-    
-    selectedAgents.value.clear()
-    clearCache()
-    await loadAgents(true)
   } catch (error) {
-    message.value = error as string
+    message.value = `❌ Error: ${error}`
     messageType.value = 'error'
   } finally {
     loading.value = false
     batchProgress.value = null
-    setTimeout(() => message.value = '', 5000)
   }
 }
 
 async function batchUninstall() {
   if (selectedAgents.value.size === 0) {
-    message.value = 'No agents selected'
+    message.value = '❌ No agents selected'
     messageType.value = 'error'
-    setTimeout(() => message.value = '', 3000)
     return
   }
 
   loading.value = true
   batchProgress.value = null
+  message.value = ''
   try {
     const names = Array.from(selectedAgents.value)
     const result = await invoke<BatchResult>('batch_uninstall_agents', { names })
     
     const failedResults = result.results.filter(r => !r.success)
     if (failedResults.length > 0) {
-      message.value = `Batch uninstall: ${result.success} succeeded, ${result.failed} failed`
+      const details = failedResults.map(r => `${r.agent_name}: ${r.stderr || r.message}`).join('; ')
+      message.value = `❌ Batch uninstall: ${result.success} succeeded, ${result.failed} failed — ${details}`
       messageType.value = 'error'
     } else {
-      message.value = `Batch uninstall: ${result.success} agents uninstalled successfully`
+      message.value = `✅ Batch uninstall: ${result.success} agents uninstalled successfully`
       messageType.value = 'success'
+      selectedAgents.value.clear()
+      clearCache()
+      await loadAgents(true)
     }
-    
-    selectedAgents.value.clear()
-    clearCache()
-    await loadAgents(true)
   } catch (error) {
-    message.value = error as string
+    message.value = `❌ Error: ${error}`
     messageType.value = 'error'
   } finally {
     loading.value = false
     batchProgress.value = null
-    setTimeout(() => message.value = '', 5000)
   }
 }
 
-onMounted(async () => {
-  await loadAgents()
-  
-  // Listen for install progress events
-  await listen('install-progress', (event) => {
-    progress.value = event.payload as {name: string, step: number, total_steps: number, message: string}
-  })
-  
-  // Listen for uninstall progress events
-  await listen('uninstall-progress', (event) => {
-    progress.value = event.payload as {name: string, step: number, total_steps: number, message: string}
-  })
-  
-  // Listen for batch progress events
-  await listen('batch-progress', (event) => {
+let unlistenInstall: UnlistenFn | null = null
+let unlistenUninstall: UnlistenFn | null = null
+let unlistenBatch: UnlistenFn | null = null
+
+onMounted(() => {
+  loadAgents().then(() => loadInstalledStatus())
+  listen('install-progress', (event) => {
+    const p = event.payload as {name: string, step: number, total_steps: number, message: string}
+    cardProgress.value[p.name] = { step: p.step, total_steps: p.total_steps, message: p.message }
+  }).then(fn => unlistenInstall = fn)
+  listen('uninstall-progress', (event) => {
+    const p = event.payload as {name: string, step: number, total_steps: number, message: string}
+    cardProgress.value[p.name] = { step: p.step, total_steps: p.total_steps, message: p.message }
+  }).then(fn => unlistenUninstall = fn)
+  listen('batch-progress', (event) => {
     batchProgress.value = event.payload as {current: number, total: number, agent: string, action: string}
-  })
+  }).then(fn => unlistenBatch = fn)
 })
 
 onUnmounted(() => {
-  progress.value = null
   batchProgress.value = null
+  unlistenInstall?.()
+  unlistenUninstall?.()
+  unlistenBatch?.()
   if (searchTimeout) {
     clearTimeout(searchTimeout)
   }
 })
-
-function getInstallerSummary(agent: Agent): string {
-  const managers = agent.installers.map(i => i.manager)
-  const unique = [...new Set(managers)]
-  return unique.join(', ') || 'N/A'
-}
 
 function openDetail(agent: Agent) {
   selectedAgent.value = agent
@@ -395,360 +415,133 @@ onErrorCaptured((err, _instance, info) => {
 
 <template>
   <div class="container">
-    <header>
-      <div class="header-content">
-        <div class="header-title">
-          <h1>AgentHub</h1>
-          <p>Manage your AI coding agents</p>
-        </div>
-        <div class="header-stats">
-          <div class="stat-item">
-            <span class="stat-value">{{ agents.length }}</span>
-            <span class="stat-label">Total</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-value">{{ cliAgents.length }}</span>
-            <span class="stat-label">CLI</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-value">{{ desktopAgents.length }}</span>
-            <span class="stat-label">Desktop</span>
-          </div>
-        </div>
-      </div>
-    </header>
+    <PageHeader title="AgentHub" subtitle="Manage your AI coding agents" />
+    <div class="agent-stats">
+      <span class="stat-chip"><strong>{{ agents.length }}</strong> Total</span>
+      <span class="stat-chip"><strong>{{ cliAgents.length }}</strong> CLI</span>
+      <span class="stat-chip"><strong>{{ desktopAgents.length }}</strong> Desktop</span>
+    </div>
 
-    <Transition name="fade">
-      <div v-if="message" :class="['message', messageType]">
-        <span class="message-icon">{{ messageType === 'success' ? '✓' : '✕' }}</span>
-        {{ message }}
-      </div>
-    </Transition>
+    <NotificationBar :message="message" :type="messageType" @close="message = ''" />
 
-    <div class="tabs">
+    <div class="m3-tabs">
       <button 
-        :class="['tab', { active: activeTab === 'all' }]"
+        :class="['m3-tab', { active: activeTab === 'all' }]"
         @click="setTab('all')"
+        @keydown.enter="setTab('all')"
+        aria-label="Show all agents"
       >
         All Agents
-        <span class="badge">{{ agents.length }}</span>
+        <span class="m3-tab-badge">{{ agents.length }}</span>
       </button>
       <button 
-        :class="['tab', { active: activeTab === 'cli' }]"
+        :class="['m3-tab', { active: activeTab === 'cli' }]"
         @click="setTab('cli')"
+        @keydown.enter="setTab('cli')"
+        aria-label="Show CLI agents only"
       >
         CLI Agents
-        <span class="badge">{{ cliAgents.length }}</span>
+        <span class="m3-tab-badge">{{ cliAgents.length }}</span>
       </button>
       <button 
-        :class="['tab', { active: activeTab === 'desktop' }]"
+        :class="['m3-tab', { active: activeTab === 'desktop' }]"
         @click="setTab('desktop')"
+        @keydown.enter="setTab('desktop')"
+        aria-label="Show desktop agents only"
       >
         Desktop Agents
-        <span class="badge">{{ desktopAgents.length }}</span>
+        <span class="m3-tab-badge">{{ desktopAgents.length }}</span>
       </button>
     </div>
 
-    <div class="toolbar">
-      <div class="search-bar">
-        <input
-          v-model="searchQuery"
-          type="text"
-          :placeholder="`Search ${activeTab === 'all' ? 'all' : activeTab} agents...`"
-          @input="debounceSearch"
-          @keyup.enter="searchAgents"
-        />
-        <button @click="searchAgents" :disabled="loading">
-          Search
-        </button>
-        <button @click="loadAgents(true)" :disabled="loading" class="refresh-btn">
-          Refresh
-        </button>
-      </div>
-      <div class="view-controls">
-        <div class="sort-controls">
-          <button @click="toggleSort('name')" :class="['sort-btn', { active: sortBy === 'name' }]">
-            Name {{ getSortIcon('name') }}
-          </button>
-          <button @click="toggleSort('type')" :class="['sort-btn', { active: sortBy === 'type' }]">
-            Type {{ getSortIcon('type') }}
-          </button>
-          <button @click="toggleSort('status')" :class="['sort-btn', { active: sortBy === 'status' }]">
-            Status {{ getSortIcon('status') }}
-          </button>
+    <AgentToolbar
+      :search-query="searchQuery"
+      :view-mode="viewMode"
+      :sort-by="sortBy"
+      :sort-direction="sortDirection"
+      :loading="loading"
+      :active-tab="activeTab"
+      @search-update="searchQuery = $event; debounceSearch()"
+      @search="searchAgents"
+      @refresh="loadAgents(true)"
+      @toggle-sort="toggleSort"
+      @toggle-view="viewMode = $event"
+      @set-tab="setTab"
+    />
+
+    <!-- Batch Progress Overlay -->
+    <div v-if="batchProgress" class="progress-overlay">
+      <div class="progress-card">
+        <div class="progress-header">
+          <span class="progress-title">{{ batchProgress.action === 'install' ? 'Batch Install' : 'Batch Uninstall' }}</span>
+          <span class="progress-badge badge-running">{{ batchProgress.current }}/{{ batchProgress.total }}</span>
         </div>
-        <div class="view-toggle">
-          <button @click="viewMode = 'grid'" :class="['view-btn', { active: viewMode === 'grid' }]">
-            ⊞ Grid
-          </button>
-          <button @click="viewMode = 'table'" :class="['view-btn', { active: viewMode === 'table' }]">
-            ☰ Table
-          </button>
+        <div class="progress-bar-track">
+          <div class="progress-fill" :style="{ width: (batchProgress.current / batchProgress.total * 100) + '%' }"></div>
         </div>
+        <div class="progress-message">Processing: {{ batchProgress.agent }}</div>
       </div>
     </div>
 
-    <div v-if="loading" class="loading">
-      <div v-if="progress" class="progress-container">
-        <div class="progress-info">
-          <span class="progress-name">{{ progress.name }}</span>
-          <span class="progress-step">Step {{ progress.step }}/{{ progress.total_steps }}</span>
-        </div>
-        <div class="progress-bar">
-          <div 
-            class="progress-fill" 
-            :style="{ width: (progress.step / progress.total_steps * 100) + '%' }"
-          ></div>
-        </div>
-        <div class="progress-message">{{ progress.message }}</div>
-      </div>
-      <div v-else-if="batchProgress" class="progress-container">
-        <div class="progress-info">
-          <span class="progress-name">{{ batchProgress.action === 'install' ? 'Installing' : 'Uninstalling' }}: {{ batchProgress.agent }}</span>
-          <span class="progress-step">{{ batchProgress.current }}/{{ batchProgress.total }}</span>
-        </div>
-        <div class="progress-bar">
-          <div 
-            class="progress-fill" 
-            :style="{ width: (batchProgress.current / batchProgress.total * 100) + '%' }"
-          ></div>
-        </div>
-        <div class="progress-message">Processing batch {{ batchProgress.action }}...</div>
-      </div>
-      <div v-else class="loading-spinner">
-        <div class="spinner"></div>
-        <div class="loading-text">Loading agents...</div>
-      </div>
-    </div>
+    <!-- Initial Loading Spinner (first load only) -->
+    <LoadingSpinner v-if="loading && agents.length === 0" text="Loading agents..." />
 
-    <div v-if="!loading && filteredAgents.length > 0" class="batch-actions">
-      <div class="select-all">
-        <input 
-          type="checkbox" 
-          :checked="selectedAgents.size === filteredAgents.length && filteredAgents.length > 0"
-          @change="selectAllAgents"
-        />
-        <span>Select all ({{ selectedAgents.size }}/{{ filteredAgents.length }})</span>
-      </div>
-      <div class="batch-buttons">
-        <button 
-          @click="batchInstall" 
-          :disabled="loading || selectedAgents.size === 0"
-          class="batch-install-btn"
-        >
-          Install Selected ({{ selectedAgents.size }})
-        </button>
-        <button 
-          @click="batchUninstall" 
-          :disabled="loading || selectedAgents.size === 0"
-          class="batch-uninstall-btn"
-        >
-          Uninstall Selected ({{ selectedAgents.size }})
-        </button>
-      </div>
-    </div>
+    <BatchActions
+      :count="selectedAgents.size"
+      :total="filteredAgents.length"
+      :loading="loading"
+      @select-all="selectAllAgents"
+      @batch-install="batchInstall"
+      @batch-uninstall="batchUninstall"
+    />
 
     <!-- Grid View -->
     <div v-if="viewMode === 'grid' && !loading && filteredAgents.length > 0" class="agents-grid">
-      <div v-for="agent in filteredAgents" :key="agent.id" :class="['agent-card', agent.kind.toLowerCase()]" @click="openDetail(agent)">
-        <div class="agent-header">
-          <div class="agent-title">
-            <input 
-              type="checkbox" 
-              :checked="selectedAgents.has(agent.id)"
-              @change="toggleSelectAgent(agent.id)"
-              @click.stop
-            />
-            <h3>{{ agent.name }}</h3>
-          </div>
-          <div class="badges">
-            <span :class="['type-badge', agent.kind.toLowerCase()]">
-              {{ agent.kind }}
-            </span>
-            <span :class="['status-badge', agent.status]">
-              {{ agent.status }}
-            </span>
-          </div>
-        </div>
-        <p class="description">{{ agent.description }}</p>
-        <div class="agent-meta">
-          <span class="provider">{{ agent.provider }}</span>
-          <span class="platform">{{ getInstallerSummary(agent) }}</span>
-        </div>
-        <div class="actions" @click.stop>
-          <button
-            @click="installAgent(agent.id)"
-            :disabled="loading"
-            class="install-btn"
-          >
-            Install
-          </button>
-          <button
-            @click="uninstallAgent(agent.id)"
-            :disabled="loading"
-            class="uninstall-btn"
-          >
-            Uninstall
-          </button>
-        </div>
-      </div>
+      <AgentCard
+        v-for="agent in filteredAgents"
+        :key="agent.id"
+        :agent="agent"
+        :is-selected="selectedAgents.has(agent.id)"
+        :installed="!!installedMap.get(agent.id)?.installed"
+        :version="installedMap.get(agent.id)?.version || null"
+        :progress="cardProgress[agent.id] || null"
+        @toggle-select="toggleSelectAgent"
+        @open-detail="openDetail"
+        @install="installAgent"
+        @uninstall="uninstallAgent"
+      />
     </div>
 
     <!-- Table View -->
-    <div v-if="viewMode === 'table' && !loading && filteredAgents.length > 0" class="agents-table-container">
-      <table class="agents-table">
-        <thead>
-          <tr>
-            <th class="checkbox-col">
-              <input 
-                type="checkbox" 
-                :checked="selectedAgents.size === filteredAgents.length && filteredAgents.length > 0"
-                @change="selectAllAgents"
-              />
-            </th>
-            <th @click="toggleSort('name')" class="sortable">
-              Name {{ getSortIcon('name') }}
-            </th>
-            <th @click="toggleSort('type')" class="sortable">
-              Type {{ getSortIcon('type') }}
-            </th>
-            <th>Description</th>
-            <th>Provider</th>
-            <th>Installers</th>
-            <th @click="toggleSort('status')" class="sortable">
-              Status {{ getSortIcon('status') }}
-            </th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="agent in filteredAgents" :key="agent.id" :class="['agent-row', agent.kind.toLowerCase()]">
-            <td class="checkbox-col">
-              <input 
-                type="checkbox" 
-                :checked="selectedAgents.has(agent.id)"
-                @change="toggleSelectAgent(agent.id)"
-              />
-            </td>
-            <td class="name-col">
-              <span class="agent-name">{{ agent.name }}</span>
-            </td>
-            <td>
-              <span :class="['type-badge', agent.kind.toLowerCase()]">
-                {{ agent.kind }}
-              </span>
-            </td>
-            <td class="description-col">{{ agent.description }}</td>
-            <td class="provider-col">{{ agent.provider }}</td>
-            <td class="installers-col">
-              <code>{{ getInstallerSummary(agent) }}</code>
-            </td>
-            <td>
-              <span :class="['status-badge', agent.status]">
-                {{ agent.status }}
-              </span>
-            </td>
-            <td class="actions-col">
-              <button
-                @click="installAgent(agent.id)"
-                :disabled="loading"
-                class="install-btn-sm"
-              >
-                Install
-              </button>
-              <button
-                @click="uninstallAgent(agent.id)"
-                :disabled="loading"
-                class="uninstall-btn-sm"
-              >
-                Uninstall
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <AgentTable
+      v-if="viewMode === 'table' && !loading && filteredAgents.length > 0"
+      :agents="filteredAgents"
+      :selected-agents="selectedAgents"
+      :sort-by="sortBy"
+      :sort-direction="sortDirection"
+      :loading="loading"
+      :progress="cardProgress"
+      :installed-map="installedMap"
+      @toggle-sort="toggleSort"
+      @toggle-select="toggleSelectAgent"
+      @select-all="selectAllAgents"
+      @install="installAgent"
+      @uninstall="uninstallAgent"
+    />
 
-    <div v-if="!loading && filteredAgents.length === 0" class="empty">
-      No agents found
-    </div>
+    <EmptyState v-if="!loading && filteredAgents.length === 0" text="No agents found" />
 
     <!-- Detail Modal -->
-    <Teleport to="body">
-      <div v-if="showDetailModal && selectedAgent" class="modal-overlay" @click.self="closeDetail">
-        <div class="modal-content">
-          <div class="modal-header">
-            <div class="modal-title">
-              <h2>{{ selectedAgent.name }}</h2>
-              <span :class="['type-badge', selectedAgent.kind.toLowerCase()]">
-                {{ selectedAgent.kind }}
-              </span>
-              <span :class="['status-badge', selectedAgent.status]">
-                {{ selectedAgent.status }}
-              </span>
-            </div>
-            <button class="modal-close" @click="closeDetail">&times;</button>
-          </div>
-          <div class="modal-body">
-            <p class="modal-description">{{ selectedAgent.description }}</p>
-            
-            <div class="detail-grid">
-              <div class="detail-item">
-                <span class="detail-label">Provider</span>
-                <span class="detail-value">{{ selectedAgent.provider }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">Homepage</span>
-                <a :href="selectedAgent.homepage" target="_blank" class="detail-value link">
-                  {{ selectedAgent.homepage }}
-                </a>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">ID</span>
-                <code class="detail-value">{{ selectedAgent.id }}</code>
-              </div>
-              <div v-if="selectedAgent.catalog_verified_at" class="detail-item">
-                <span class="detail-label">Catalog Verified</span>
-                <span class="detail-value">{{ selectedAgent.catalog_verified_at }}</span>
-              </div>
-              <div v-if="selectedAgent.installer_verified_at" class="detail-item">
-                <span class="detail-label">Installer Verified</span>
-                <span class="detail-value">{{ selectedAgent.installer_verified_at }}</span>
-              </div>
-            </div>
-
-            <h3 class="installers-title">Platform Installers</h3>
-            <div class="installers-grid">
-              <div v-for="installer in selectedAgent.installers" :key="installer.platform" class="installer-item">
-                <span class="installer-platform">{{ installer.platform }}</span>
-                <span class="installer-manager">{{ installer.manager }}</span>
-                <code v-if="installer.package" class="installer-package">{{ installer.package }}</code>
-                <span v-else class="installer-manual">Manual</span>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button
-              @click="installAgent(selectedAgent.id); closeDetail()"
-              :disabled="loading"
-              class="modal-install-btn"
-            >
-              Install
-            </button>
-            <button
-              @click="uninstallAgent(selectedAgent.id); closeDetail()"
-              :disabled="loading"
-              class="modal-uninstall-btn"
-            >
-              Uninstall
-            </button>
-            <button @click="closeDetail" class="modal-cancel-btn">
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <ModalDialog :show="showDetailModal" :title="selectedAgent?.name" @close="closeDetail">
+      <AgentDetailModalContent
+        v-if="selectedAgent"
+        :agent="selectedAgent"
+        :loading="loading"
+        @install="installAgent(selectedAgent.id); closeDetail()"
+        @uninstall="uninstallAgent(selectedAgent.id); closeDetail()"
+        @close="closeDetail"
+      />
+    </ModalDialog>
   </div>
 </template>
 
@@ -763,1268 +556,66 @@ onErrorCaptured((err, _instance, info) => {
   box-sizing: border-box;
 }
 
-header {
-  margin-bottom: 2rem;
-  padding: 2rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 16px;
-  color: white;
-  position: relative;
-  overflow: hidden;
-}
-
-header::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
-  animation: pulse 4s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 0.5; }
-  50% { transform: scale(1.1); opacity: 0.8; }
-}
-
-.header-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  position: relative;
-  z-index: 1;
-}
-
-.header-title h1 {
-  font-size: 2.5rem;
-  color: white;
-  margin-bottom: 0.5rem;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.header-title p {
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 1.1rem;
-}
-
-.header-stats {
-  display: flex;
-  gap: 2rem;
-}
-
-.stat-item {
-  text-align: center;
-}
-
-.stat-value {
-  display: block;
-  font-size: 2rem;
-  font-weight: 700;
-  color: white;
-}
-
-.stat-label {
-  display: block;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.8);
-  margin-top: 0.25rem;
-}
-
-.tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
-  background: white;
-  padding: 0.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.tab {
-  flex: 1;
-  padding: 0.75rem 1rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.95rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  background: transparent;
-  color: #666;
-  display: flex;
+.m3-tab-badge {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  position: relative;
-  overflow: hidden;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.375rem;
+  border-radius: var(--md-sys-shape-full);
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-small);
 }
-
-.tab::before {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  width: 0;
-  height: 3px;
-  background: #3498db;
-  transition: all 0.3s ease;
-  transform: translateX(-50%);
-}
-
-.tab:hover {
-  background: #f8f9fa;
-  color: #2c3e50;
-}
-
-.tab:hover::before {
-  width: 30%;
-}
-
-.tab.active {
-  background: #f0f7ff;
-  color: #3498db;
-  font-weight: 600;
-}
-
-.tab.active::before {
-  width: 100%;
-  background: linear-gradient(90deg, #3498db, #2ecc71);
-}
-
-.badge {
-  background: #e9ecef;
-  padding: 0.15rem 0.5rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  transition: all 0.3s ease;
-}
-
-.tab.active .badge {
-  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-  color: white;
-  box-shadow: 0 2px 4px rgba(52, 152, 219, 0.3);
-}
-
-.toolbar {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 2rem;
-  background: white;
-  padding: 1rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  align-items: center;
-}
-
-.search-bar {
-  display: flex;
-  gap: 1rem;
-  flex: 1;
-}
-
-.search-bar input {
-  flex: 1;
-  padding: 0.75rem 1rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 1rem;
-  transition: all 0.3s ease;
-  background: #f8f9fa;
-  color: #2c3e50;
-  caret-color: #3498db;
-}
-
-.search-bar input:focus {
-  outline: none;
-  border-color: #3498db;
-  background: white;
-  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
-}
-
-.search-bar input::placeholder {
-  color: #95a5a6;
-}
-
-.search-bar button {
-  padding: 0.75rem 1.5rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: background-color 0.3s;
-  color: white;
-  font-weight: 500;
-}
-
-.search-bar button:first-of-type {
-  background-color: #3498db;
-  color: white;
-}
-
-.search-bar button:first-of-type:hover {
-  background-color: #2980b9;
-}
-
-.refresh-btn {
-  background-color: #95a5a6;
-  color: white;
-}
-
-.refresh-btn:hover {
-  background-color: #7f8c8d;
-}
-
-.view-controls {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-}
-
-.sort-controls {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.sort-btn {
-  padding: 0.5rem 1rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  background: white;
-  color: #2c3e50;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 0.875rem;
-}
-
-.sort-btn:hover {
-  background: #f8f9fa;
-  border-color: #3498db;
-}
-
-.sort-btn.active {
-  background: #3498db;
-  color: white;
-  border-color: #3498db;
-}
-
-.view-toggle {
-  display: flex;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.view-btn {
-  padding: 0.5rem 1rem;
-  border: none;
-  background: white;
-  color: #2c3e50;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 0.875rem;
-}
-
-.view-btn:hover {
-  background: #f8f9fa;
-}
-
-.view-btn.active {
-  background: #3498db;
-  color: white;
-}
-
-.view-btn:first-child {
-  border-right: 1px solid #e0e0e0;
-}
-
-.loading {
-  text-align: center;
-  padding: 2rem;
-  color: #7f8c8d;
-}
-
-.loading-spinner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #e9ecef;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.loading-text {
-  color: #7f8c8d;
-  font-size: 1rem;
-}
-
-.progress-container {
-  background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  margin-bottom: 1rem;
-}
-
-.progress-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.progress-name {
-  font-weight: 600;
-  color: #2c3e50;
-  font-size: 1.1rem;
-}
-
-.progress-step {
-  color: #7f8c8d;
-  font-size: 0.9rem;
-}
-
-.progress-bar {
-  height: 8px;
-  background: #e9ecef;
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 0.75rem;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #3498db, #2ecc71);
-  border-radius: 4px;
-  transition: width 0.3s ease;
-}
-
-.progress-message {
-  color: #666;
-  font-size: 0.9rem;
+.m3-tab.active .m3-tab-badge {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
 }
 
 .agents-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 1.5rem;
-}
-
-.agents-table-container {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  overflow: hidden;
-}
-
-.agents-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.agents-table th,
-.agents-table td {
-  padding: 1rem;
-  text-align: left;
-  border-bottom: 1px solid #e9ecef;
-}
-
-.agents-table th {
-  background: #f8f9fa;
-  font-weight: 600;
-  color: #2c3e50;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
-
-.agents-table th.sortable {
-  cursor: pointer;
-  user-select: none;
-}
-
-.agents-table th.sortable:hover {
-  background: #e9ecef;
-}
-
-.agents-table tbody tr:hover {
-  background: #f8f9fa;
-}
-
-.agents-table tbody tr.selected {
-  background: #e3f2fd;
-}
-
-.checkbox-col {
-  width: 50px;
-  text-align: center;
-}
-
-.name-col {
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.agent-name {
-  font-size: 1rem;
-}
-
-.description-col {
-  max-width: 300px;
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.package-col code {
-  background: #f8f9fa;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-}
-
-.manager-badge {
-  background: #e3f2fd;
-  color: #1976d2;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.source-col {
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.status-badge {
-  padding: 0.25rem 0.75rem;
-  border-radius: 20px;
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.status-badge.installed {
-  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-  color: #155724;
-}
-
-.status-badge.not-installed {
-  background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
-  color: #721c24;
-}
-
-.actions-col {
-  white-space: nowrap;
-}
-
-.install-btn-sm,
-.uninstall-btn-sm {
-  padding: 0.4rem 0.8rem;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.install-btn-sm {
-  background: #27ae60;
-  color: white;
-}
-
-.install-btn-sm:hover:not(:disabled) {
-  background: #219a52;
-}
-
-.uninstall-btn-sm {
-  background: #e74c3c;
-  color: white;
-}
-
-.uninstall-btn-sm:hover:not(:disabled) {
-  background: #c0392b;
-}
-
-.agent-card {
-  background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
-  border-left: 4px solid transparent;
-  position: relative;
-  overflow: hidden;
-  cursor: pointer;
-}
-
-.agent-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.agent-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-}
-
-.agent-card:hover::before {
-  opacity: 1;
-}
-
-.agent-card.cli {
-  border-left-color: #27ae60;
-}
-
-.agent-card.cli::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 60px;
-  height: 60px;
-  background: linear-gradient(135deg, transparent 50%, rgba(39, 174, 96, 0.1) 50%);
-  border-radius: 0 12px 0 0;
-}
-
-.agent-card.desktop {
-  border-left-color: #9b59b6;
-}
-
-.agent-card.desktop::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 60px;
-  height: 60px;
-  background: linear-gradient(135deg, transparent 50%, rgba(155, 89, 182, 0.1) 50%);
-  border-radius: 0 12px 0 0;
-}
-
-.agent-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 0.75rem;
-}
-
-.agent-header h3 {
-  margin: 0;
-  color: #2c3e50;
-  font-size: 1.25rem;
-}
-
-.badges {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.type-badge {
-  padding: 0.25rem 0.75rem;
-  border-radius: 20px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.type-badge.cli {
-  background-color: #d4edda;
-  color: #155724;
-}
-
-.type-badge.desktop {
-  background-color: #e8daef;
-  color: #6c3483;
-}
-
-.status {
-  padding: 0.25rem 0.75rem;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  transition: all 0.3s ease;
-}
-
-.status-badge {
-  padding: 0.25rem 0.75rem;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: capitalize;
-}
-
-.status-badge.verified {
-  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-  color: #155724;
-  box-shadow: 0 2px 4px rgba(21, 87, 36, 0.1);
-}
-
-.status-badge.community {
-  background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
-  color: #856404;
-  box-shadow: 0 2px 4px rgba(133, 100, 4, 0.1);
-}
-
-.status-badge.manual {
-  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-  color: #1565c0;
-  box-shadow: 0 2px 4px rgba(21, 101, 192, 0.1);
-}
-
-.status-badge.deprecated {
-  background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
-  color: #721c24;
-  box-shadow: 0 2px 4px rgba(114, 28, 36, 0.1);
-}
-
-.description {
-  color: #666;
-  margin-bottom: 1rem;
-  line-height: 1.5;
-}
-
-.agent-meta {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.provider {
-  background-color: #e9ecef;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  color: #495057;
-}
-
-.platform {
-  background-color: #e3f2fd;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  color: #1976d2;
-}
-
-.installers-title {
-  margin-top: 1.5rem;
-  margin-bottom: 0.75rem;
-  color: #2c3e50;
-  font-size: 1.1rem;
-}
-
-.installers-grid {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.installer-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem;
-  background: #f8f9fa;
-  border-radius: 6px;
-}
-
-.installer-platform {
-  font-weight: 600;
-  color: #2c3e50;
-  min-width: 80px;
-}
-
-.installer-manager {
-  background-color: #e3f2fd;
-  padding: 0.15rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  color: #1976d2;
-}
-
-.installer-package {
-  background-color: #f8f9fa;
-  padding: 0.15rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  color: #495057;
-}
-
-.installer-manual {
-  color: #95a5a6;
-  font-style: italic;
-  font-size: 0.85rem;
-}
-
-.actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.install-btn,
-.uninstall-btn {
-  flex: 1;
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.install-btn {
-  background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3);
-}
-
-.install-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(39, 174, 96, 0.4);
-}
-
-.uninstall-btn {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
-}
-
-.uninstall-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
-}
-
-.empty {
-  text-align: center;
-  padding: 3rem;
-  color: #7f8c8d;
-  font-size: 1.1rem;
-}
-
-.batch-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  padding: 1rem 1.5rem;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.select-all {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.select-all input {
-  width: 18px;
-  height: 18px;
-}
-
-.batch-buttons {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.batch-install-btn,
-.batch-uninstall-btn {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.batch-install-btn {
-  background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3);
-}
-
-.batch-install-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(39, 174, 96, 0.4);
-}
-
-.batch-uninstall-btn {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
-}
-
-.batch-uninstall-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
-}
-
-.agent-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.agent-title input {
-  width: 18px;
-  height: 18px;
-}
-
-.message {
-  padding: 1rem;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-  text-align: center;
-}
-
-.success {
-  background-color: #d4edda;
-  color: #155724;
-}
-
-.error {
-  background-color: #f8d7da;
-  color: #721c24;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1rem;
+}
+
+/* Progress Overlay */
+.progress-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.38); display: flex;
+  align-items: center; justify-content: center; z-index: 900;
+}
+.progress-card {
+  background: var(--md-sys-color-surface);
+  padding: 2rem; border-radius: var(--md-sys-shape-lg);
+  min-width: 320px; box-shadow: var(--md-sys-elevation-3);
+}
+.progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.progress-title { font: var(--md-sys-typescale-title-medium); color: var(--md-sys-color-on-surface); }
+.progress-badge { padding: 0.2rem 0.6rem; border-radius: var(--md-sys-shape-full); font: var(--md-sys-typescale-label-small); }
+.badge-running { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+.progress-bar-track { height: 6px; background: var(--md-sys-color-surface-variant); border-radius: var(--md-sys-shape-full); overflow: hidden; margin-bottom: 0.75rem; }
+.progress-fill { height: 100%; background: var(--md-sys-color-primary); border-radius: var(--md-sys-shape-full); transition: width 0.3s ease; }
+.progress-message { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-on-surface-variant); text-align: center; }
+
+button:disabled { opacity: 0.38; cursor: not-allowed; }
 
-/* Desktop optimizations */
 @media (min-width: 1200px) {
-  .agents-grid {
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  }
+  .agents-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
 }
-
 @media (min-width: 1600px) {
-  .agents-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
+  .agents-grid { grid-template-columns: repeat(4, 1fr); }
 }
-
-/* Tooltip styles */
-.tooltip {
-  position: relative;
-}
-
-.tooltip::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #2c3e50;
-  color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-  transition: all 0.3s ease;
-  z-index: 100;
-}
-
-.tooltip:hover::after {
-  opacity: 1;
-  visibility: visible;
-}
-
-/* Keyboard shortcuts hint */
-.shortcut-hint {
-  display: inline-block;
-  background: #e9ecef;
-  padding: 0.1rem 0.3rem;
-  border-radius: 3px;
-  font-size: 0.7rem;
-  color: #666;
-  margin-left: 0.5rem;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-.message-icon {
-  margin-right: 0.5rem;
-  font-weight: bold;
-}
-
-/* Modal Styles */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.modal-content {
-  background: white;
-  border-radius: 16px;
-  width: 90%;
-  max-width: 600px;
-  max-height: 80vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  animation: modalSlideIn 0.3s ease;
-}
-
-@keyframes modalSlideIn {
-  from {
-    transform: translateY(-20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 1.5rem;
-  border-bottom: 1px solid #e9ecef;
-}
-
-.modal-title {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.modal-title h2 {
-  margin: 0;
-  color: #2c3e50;
-  font-size: 1.5rem;
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: #666;
-  padding: 0.5rem;
-  line-height: 1;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-}
-
-.modal-close:hover {
-  background: #f0f0f0;
-}
-
-.modal-body {
-  padding: 1.5rem;
-}
-
-.modal-description {
-  color: #666;
-  line-height: 1.6;
-  margin-bottom: 1.5rem;
-}
-
-.detail-grid {
-  display: grid;
-  gap: 1rem;
-}
-
-.detail-item {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.detail-label {
-  min-width: 100px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.detail-value {
-  color: #666;
-}
-
-.detail-value.link {
-  color: #3498db;
-  text-decoration: none;
-}
-
-.detail-value.link:hover {
-  text-decoration: underline;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  border-top: 1px solid #e9ecef;
-}
-
-.modal-install-btn,
-.modal-uninstall-btn,
-.modal-cancel-btn {
-  padding: 0.75rem 1.5rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.modal-install-btn {
-  background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3);
-}
-
-.modal-install-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(39, 174, 96, 0.4);
-}
-
-.modal-uninstall-btn {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
-}
-
-.modal-uninstall-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
-}
-
-.modal-cancel-btn {
-  background: #e9ecef;
-  color: #666;
-}
-
-.modal-cancel-btn:hover {
-  background: #dee2e6;
-}
-
-/* Responsive Design */
-@media (max-width: 1200px) {
-  .agents-grid {
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  }
-}
-
 @media (max-width: 992px) {
-  .container {
-    padding: 1rem;
-  }
-
-  .header-content {
-    flex-direction: column;
-    gap: 1rem;
-    text-align: center;
-  }
-
-  .header-stats {
-    justify-content: center;
-  }
-
-  .toolbar {
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .search-bar {
-    flex-direction: column;
-  }
-
-  .view-controls {
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .sort-controls {
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .batch-actions {
-    flex-direction: column;
-    gap: 1rem;
-    text-align: center;
-  }
-
-  .batch-buttons {
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .detail-item {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.25rem;
-  }
-
-  .detail-label {
-    min-width: auto;
-  }
+  .container { padding: 1.5rem; }
+  .agent-stats { justify-content: center; }
+  .m3-tabs { flex-wrap: wrap; }
+  .m3-tab { flex: 1 1 calc(50% - 0.25rem); }
 }
-
 @media (max-width: 768px) {
-  .agents-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .header-title h1 {
-    font-size: 2rem;
-  }
-
-  .tabs {
-    flex-wrap: wrap;
-  }
-
-  .tab {
-    flex: 1 1 calc(50% - 0.5rem);
-  }
-
-  .agents-table-container {
-    overflow-x: auto;
-  }
-
-  .agents-table {
-    min-width: 800px;
-  }
-
-  .modal-content {
-    width: 95%;
-    max-height: 90vh;
-  }
-
-  .modal-header {
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .modal-title {
-    flex-wrap: wrap;
-  }
-
-  .modal-footer {
-    flex-direction: column;
-  }
-
-  .modal-install-btn,
-  .modal-uninstall-btn,
-  .modal-cancel-btn {
-    width: 100%;
-  }
+  .agents-grid { grid-template-columns: 1fr; }
 }
-
 @media (max-width: 480px) {
-  .container {
-    padding: 0.75rem;
-  }
-
-  .header-title h1 {
-    font-size: 1.5rem;
-  }
-
-  .header-stats {
-    gap: 1rem;
-  }
-
-  .stat-value {
-    font-size: 1.5rem;
-  }
-
-  .tab {
-    flex: 1 1 100%;
-    font-size: 0.875rem;
-    padding: 0.5rem 0.75rem;
-  }
-
-  .search-bar button {
-    width: 100%;
-  }
-
-  .sort-controls {
-    gap: 0.25rem;
-  }
-
-  .sort-btn {
-    padding: 0.4rem 0.75rem;
-    font-size: 0.75rem;
-  }
-
-  .view-toggle {
-    width: 100%;
-  }
-
-  .view-btn {
-    flex: 1;
-  }
-
-  .agent-card {
-    padding: 1rem;
-  }
-
-  .agent-header {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .badges {
-    flex-wrap: wrap;
-  }
-
-  .batch-actions {
-    padding: 0.75rem;
-  }
-
-  .batch-install-btn,
-  .batch-uninstall-btn {
-    width: 100%;
-  }
+  .container { padding: 1rem; }
 }
 </style>

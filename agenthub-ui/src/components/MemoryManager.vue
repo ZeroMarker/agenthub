@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import PageHeader from './common/PageHeader.vue'
+import NotificationBar from './common/NotificationBar.vue'
+import LoadingSpinner from './common/LoadingSpinner.vue'
+import EmptyState from './common/EmptyState.vue'
 
 interface MemoryInfo {
   path: string
@@ -132,12 +136,9 @@ onMounted(() => loadMemories('all'))
 
 <template>
   <div class="memory-manager">
-    <header class="page-header">
-      <h1>Memory Manager</h1>
-      <p>Manage your persistent knowledge base</p>
-    </header>
+    <PageHeader title="Memory Manager" subtitle="Manage your persistent knowledge base" />
 
-    <div v-if="message" :class="['message', messageType]">{{ message }}</div>
+    <NotificationBar :message="message" :type="messageType" @close="message = ''" />
 
     <div class="toolbar">
       <div class="scope-tabs">
@@ -172,7 +173,7 @@ onMounted(() => loadMemories('all'))
     <div class="content-layout">
       <div class="memory-list">
         <h3>Entries ({{ memories.length }})</h3>
-        <div v-if="loading && memories.length === 0" class="loading">Loading...</div>
+        <LoadingSpinner v-if="loading && memories.length === 0" />
         <div v-else class="list-items">
           <div
             v-for="memory in memories"
@@ -191,7 +192,7 @@ onMounted(() => loadMemories('all'))
             </div>
           </div>
         </div>
-        <p v-if="memories.length === 0 && !loading" class="empty">No memories found</p>
+        <EmptyState v-if="memories.length === 0 && !loading" text="No memories found" />
       </div>
 
       <div class="memory-detail" v-if="selectedMemory">
@@ -228,12 +229,6 @@ onMounted(() => loadMemories('all'))
 
 <style scoped>
 .memory-manager { padding: 2rem; }
-.page-header { margin-bottom: 2rem; }
-.page-header h1 { font-size: 1.75rem; color: #2c3e50; margin-bottom: 0.5rem; }
-.page-header p { color: #666; }
-.message { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
-.message.success { background: #d4edda; color: #155724; }
-.message.error { background: #f8d7da; color: #721c24; }
 .toolbar { display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
 .scope-tabs { display: flex; gap: 0.25rem; background: white; padding: 0.25rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 .tab { padding: 0.5rem 1rem; border: none; border-radius: 6px; background: transparent; cursor: pointer; font-size: 0.9rem; }
@@ -269,5 +264,17 @@ onMounted(() => loadMemories('all'))
 .content-preview h3 { margin-bottom: 0.75rem; color: #2c3e50; }
 .content-preview pre { background: #f8f9fa; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; }
 .delete-btn { padding: 0.5rem 1rem; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; }
-.loading, .empty { text-align: center; padding: 2rem; color: #999; }
+/* Responsive */
+@media (max-width: 900px) {
+  .memory-manager { padding: 1.25rem; }
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .scope-tabs { overflow-x: auto; }
+  .search-box { width: 100%; }
+  .content-layout { flex-direction: column; }
+  .memory-list { width: 100%; max-height: none; }
+  .form-row { flex-direction: column; }
+}
+@media (max-width: 600px) {
+  .memory-manager { padding: 1rem; }
+}
 </style>

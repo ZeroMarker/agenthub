@@ -13,77 +13,38 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
 
 <template>
   <div class="app-layout">
-    <nav class="sidebar">
-      <div class="nav-brand">
-        <h2>AgentHub</h2>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- M3 Navigation Rail -->
+    <nav class="nav-rail" role="navigation" aria-label="Main navigation">
+      <div class="nav-rail-brand">
+        <span class="brand-icon">⚡</span>
+        <span class="brand-label">AgentHub</span>
       </div>
-      <ul class="nav-links">
-        <li>
-          <button
-            :class="['nav-btn', { active: activeView === 'agents' }]"
-            @click="activeView = 'agents'"
-          >
-            <span class="nav-icon">📦</span>
-            <span>Agents</span>
-          </button>
-        </li>
-        <li>
-          <button
-            :class="['nav-btn', { active: activeView === 'config' }]"
-            @click="activeView = 'config'"
-          >
-            <span class="nav-icon">⚙️</span>
-            <span>Config</span>
-          </button>
-        </li>
-        <li>
-          <button
-            :class="['nav-btn', { active: activeView === 'skills' }]"
-            @click="activeView = 'skills'"
-          >
-            <span class="nav-icon">🛠️</span>
-            <span>Skills</span>
-          </button>
-        </li>
-        <li>
-          <button
-            :class="['nav-btn', { active: activeView === 'prompts' }]"
-            @click="activeView = 'prompts'"
-          >
-            <span class="nav-icon">📝</span>
-            <span>Prompts</span>
-          </button>
-        </li>
-        <li>
-          <button
-            :class="['nav-btn', { active: activeView === 'sessions' }]"
-            @click="activeView = 'sessions'"
-          >
-            <span class="nav-icon">💬</span>
-            <span>Sessions</span>
-          </button>
-        </li>
-        <li>
-          <button
-            :class="['nav-btn', { active: activeView === 'memory' }]"
-            @click="activeView = 'memory'"
-          >
-            <span class="nav-icon">🧠</span>
-            <span>Memory</span>
-          </button>
-        </li>
-        <li>
-          <button
-            :class="['nav-btn', { active: activeView === 'diagnostic' }]"
-            @click="activeView = 'diagnostic'"
-          >
-            <span class="nav-icon">🩺</span>
-            <span>Diagnostic</span>
-          </button>
-        </li>
-      </ul>
+      <div class="nav-rail-items">
+        <button
+          v-for="item in [
+            { id: 'agents', icon: '📦', label: 'Agents' },
+            { id: 'config', icon: '⚙️', label: 'Config' },
+            { id: 'skills', icon: '🛠️', label: 'Skills' },
+            { id: 'prompts', icon: '📝', label: 'Prompts' },
+            { id: 'sessions', icon: '💬', label: 'Sessions' },
+            { id: 'memory', icon: '🧠', label: 'Memory' },
+            { id: 'diagnostic', icon: '🩺', label: 'Diagnostic' },
+          ]"
+          :key="item.id"
+          :class="['nav-rail-btn', { active: activeView === item.id }]"
+          @click="activeView = item.id as typeof activeView"
+          @keydown.enter="activeView = item.id as typeof activeView"
+          :aria-label="`${item.label} view`"
+        >
+          <span class="nav-rail-icon">{{ item.icon }}</span>
+          <span class="nav-rail-label">{{ item.label }}</span>
+        </button>
+      </div>
     </nav>
-    <main class="main-content">
+
+    <main id="main-content" class="main-content">
       <AgentList v-if="activeView === 'agents'" />
       <ConfigManager v-else-if="activeView === 'config'" />
       <SkillManager v-else-if="activeView === 'skills'" />
@@ -96,85 +57,168 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
 </template>
 
 <style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* ============================================================
+   App Layout — M3 Navigation Rail
+   ============================================================ */
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f7fa;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 .app-layout {
   display: flex;
   min-height: 100vh;
+  background: var(--md-sys-color-background);
 }
 
-.sidebar {
-  width: 220px;
-  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-  color: white;
-  padding: 1.5rem 0;
-  flex-shrink: 0;
+/* --- Skip link --- */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  padding: 0.5rem 1rem;
+  z-index: 9999;
+  transition: top var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized);
+  text-decoration: none;
+  font: var(--md-sys-typescale-label-large);
+}
+.skip-link:focus { top: 0; }
+
+/* --- Navigation Rail --- */
+.nav-rail {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 80px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.75rem 0 1rem;
+  background: var(--md-sys-color-surface);
+  border-right: 1px solid var(--md-sys-color-outline-variant);
+  z-index: 100;
+  overflow-y: auto;
+  transition: width var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
 }
 
-.nav-brand {
-  padding: 0 1.5rem 1.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  margin-bottom: 1rem;
-}
+.nav-rail:hover { width: 240px; }
 
-.nav-brand h2 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.nav-links {
-  list-style: none;
-  padding: 0 0.75rem;
-}
-
-.nav-links li {
-  margin-bottom: 0.25rem;
-}
-
-.nav-btn {
-  width: 100%;
+.nav-rail-brand {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.brand-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.brand-label {
+  font: var(--md-sys-typescale-title-medium);
+  color: var(--md-sys-color-primary);
+  opacity: 0;
+  transition: opacity var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
+}
+
+.nav-rail:hover .brand-label { opacity: 1; }
+
+.nav-rail-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0 0.5rem;
+}
+
+.nav-rail-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-xl);
   background: transparent;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.95rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-medium);
   cursor: pointer;
-  transition: all 0.2s;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: background var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized),
+              color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized);
 }
 
-.nav-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
+.nav-rail-btn:hover {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
 }
 
-.nav-btn.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+.nav-rail-btn.active {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
 }
 
-.nav-icon {
-  font-size: 1.2rem;
+.nav-rail-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  width: 1.5rem;
+  text-align: center;
 }
 
+.nav-rail-label {
+  font: var(--md-sys-typescale-label-large);
+  opacity: 0;
+  transition: opacity var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
+}
+
+.nav-rail:hover .nav-rail-label { opacity: 1; }
+
+/* --- Main content --- */
 .main-content {
+  margin-left: 80px;
   flex: 1;
+  min-height: 100vh;
   overflow-y: auto;
+}
+
+/* --- Reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .nav-rail,
+  .nav-rail-label,
+  .brand-label { transition-duration: 0s !important; }
+  .nav-rail:hover { width: 80px; }
+  .nav-rail:hover .nav-rail-label,
+  .nav-rail:hover .brand-label { opacity: 0; }
+}
+
+/* --- Responsive: collapse rail --- */
+@media (max-width: 900px) {
+  .nav-rail { width: 60px; }
+  .nav-rail:hover { width: 60px; }
+  .nav-rail-brand { justify-content: center; padding: 0.5rem; }
+  .brand-label { display: none; }
+  .nav-rail-btn { justify-content: center; padding: 0.625rem; }
+  .nav-rail-label { display: none; }
+  .main-content { margin-left: 60px; }
+}
+
+@media (max-width: 600px) {
+  .nav-rail { width: 48px; }
+  .nav-rail:hover { width: 48px; }
+  .nav-rail-icon { font-size: 1rem; }
+  .main-content { margin-left: 48px; }
 }
 </style>

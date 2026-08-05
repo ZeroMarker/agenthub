@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import PageHeader from './common/PageHeader.vue'
+import NotificationBar from './common/NotificationBar.vue'
+import LoadingSpinner from './common/LoadingSpinner.vue'
+import EmptyState from './common/EmptyState.vue'
 
 interface PromptInfo {
   id: string
@@ -110,12 +114,9 @@ onMounted(loadPrompts)
 
 <template>
   <div class="prompt-manager">
-    <header class="page-header">
-      <h1>Prompt Manager</h1>
-      <p>Create and manage prompt templates</p>
-    </header>
+    <PageHeader title="Prompt Manager" subtitle="Create and manage prompt templates" />
 
-    <div v-if="message" :class="['message', messageType]">{{ message }}</div>
+    <NotificationBar :message="message" :type="messageType" @close="message = ''" />
 
     <div class="actions">
       <button class="create-btn" @click="showCreateForm = !showCreateForm">
@@ -139,7 +140,7 @@ onMounted(loadPrompts)
     <div class="content-layout">
       <div class="prompt-list">
         <h3>Templates ({{ prompts.length }})</h3>
-        <div v-if="loading && prompts.length === 0" class="loading">Loading...</div>
+        <LoadingSpinner v-if="loading && prompts.length === 0" />
         <div v-else class="list-items">
           <div
             v-for="prompt in prompts"
@@ -154,7 +155,7 @@ onMounted(loadPrompts)
             <span class="version">v{{ prompt.version }}</span>
           </div>
         </div>
-        <p v-if="prompts.length === 0 && !loading" class="empty">No prompts yet</p>
+        <EmptyState v-if="prompts.length === 0 && !loading" text="No prompts yet" />
       </div>
 
       <div class="prompt-detail" v-if="selectedPrompt">
@@ -188,12 +189,6 @@ onMounted(loadPrompts)
 
 <style scoped>
 .prompt-manager { padding: 2rem; }
-.page-header { margin-bottom: 2rem; }
-.page-header h1 { font-size: 1.75rem; color: #2c3e50; margin-bottom: 0.5rem; }
-.page-header p { color: #666; }
-.message { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
-.message.success { background: #d4edda; color: #155724; }
-.message.error { background: #f8d7da; color: #721c24; }
 .actions { margin-bottom: 1.5rem; }
 .create-btn { padding: 0.6rem 1.5rem; background: #3498db; color: white; border: none; border-radius: 8px; cursor: pointer; }
 .create-form { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
@@ -222,5 +217,18 @@ onMounted(loadPrompts)
 .template-preview pre, .render-result { background: #f8f9fa; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.9rem; line-height: 1.5; }
 .render-section button { padding: 0.5rem 1rem; background: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 1rem; }
 .delete-btn { padding: 0.5rem 1rem; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; }
-.loading, .empty { text-align: center; padding: 2rem; color: #999; }
+.list-items { max-height: calc(100vh - 350px); overflow-y: auto; }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .prompt-manager { padding: 1.25rem; }
+  .form-grid { grid-template-columns: 1fr; }
+  .content-layout { flex-direction: column; }
+  .prompt-list { width: 100%; max-height: none; }
+  .toolbar { flex-direction: column; }
+  .search-box { width: 100%; }
+}
+@media (max-width: 600px) {
+  .prompt-manager { padding: 1rem; }
+}
 </style>

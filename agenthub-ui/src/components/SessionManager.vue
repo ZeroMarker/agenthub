@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import PageHeader from './common/PageHeader.vue'
+import NotificationBar from './common/NotificationBar.vue'
+import LoadingSpinner from './common/LoadingSpinner.vue'
+import EmptyState from './common/EmptyState.vue'
 
 interface SessionInfo {
   id: string
@@ -96,12 +100,9 @@ onMounted(loadSessions)
 
 <template>
   <div class="session-manager">
-    <header class="page-header">
-      <h1>Session Manager</h1>
-      <p>Track and manage your agent sessions</p>
-    </header>
+    <PageHeader title="Session Manager" subtitle="Track and manage your agent sessions" />
 
-    <div v-if="message" :class="['message', messageType]">{{ message }}</div>
+    <NotificationBar :message="message" :type="messageType" @close="message = ''" />
 
     <div class="create-section">
       <h3>Create Session</h3>
@@ -117,7 +118,7 @@ onMounted(loadSessions)
     <div class="content-layout">
       <div class="session-list">
         <h3>Sessions ({{ sessions.length }})</h3>
-        <div v-if="loading && sessions.length === 0" class="loading">Loading...</div>
+        <LoadingSpinner v-if="loading && sessions.length === 0" />
         <div v-else class="list-items">
           <div
             v-for="session in sessions"
@@ -134,7 +135,7 @@ onMounted(loadSessions)
             </span>
           </div>
         </div>
-        <p v-if="sessions.length === 0 && !loading" class="empty">No sessions yet</p>
+        <EmptyState v-if="sessions.length === 0 && !loading" text="No sessions yet" />
       </div>
 
       <div class="session-detail" v-if="selectedSession">
@@ -172,12 +173,6 @@ onMounted(loadSessions)
 
 <style scoped>
 .session-manager { padding: 2rem; }
-.page-header { margin-bottom: 2rem; }
-.page-header h1 { font-size: 1.75rem; color: #2c3e50; margin-bottom: 0.5rem; }
-.page-header p { color: #666; }
-.message { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
-.message.success { background: #d4edda; color: #155724; }
-.message.error { background: #f8d7da; color: #721c24; }
 .create-section { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
 .create-section h3 { margin-bottom: 1rem; color: #2c3e50; }
 .create-form { display: flex; gap: 0.75rem; }
@@ -211,5 +206,16 @@ onMounted(loadSessions)
 .tags { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
 .tag { padding: 0.2rem 0.5rem; background: #f0f0f0; color: #666; border-radius: 4px; font-size: 0.8rem; }
 .delete-btn { padding: 0.5rem 1rem; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; }
-.loading, .empty { text-align: center; padding: 2rem; color: #999; }
+/* Responsive */
+@media (max-width: 900px) {
+  .session-manager { padding: 1.25rem; }
+  .create-form { flex-direction: column; }
+  .create-form input { width: 100%; }
+  .create-form button { width: 100%; }
+  .content-layout { flex-direction: column; }
+  .session-list { width: 100%; }
+}
+@media (max-width: 600px) {
+  .session-manager { padding: 1rem; }
+}
 </style>

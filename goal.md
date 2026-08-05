@@ -1,9 +1,9 @@
 # AgentHub Goal — 七大模块架构
 
-> 版本：v0.2  
-> 创建日期：2026-06-24  
-> 更新日期：2026-06-27  
-> 状态：规划草案（Package 模块已实现）
+> 版本：v0.3
+> 创建日期：2026-06-24
+> 更新日期：2026-07-07
+> 状态：规划草案（Package 已实现，Config / Prompt / Session / Skill / Memory 已具备基础实现）
 
 ## 愿景
 
@@ -54,12 +54,18 @@ AgentHub 从"AI 编程助手的安装管理器"演进为**全生命周期的 Age
 
 **职责**：管理 Agent 的运行时配置，包括模型选择、API Key、环境变量和服务端点。
 
-**当前状态**：❌ 未实现
+**当前状态**：✅ 基础实现
+
+**已实现能力**：
+- ✅ 每个 Agent 独立 YAML 配置（`agents/<agent-id>.yaml`）
+- ✅ `development` / `staging` / `production` 环境枚举
+- ✅ settings、secrets、environment_variables、custom 分区
+- ✅ 配置创建、读取、保存、删除、导入和导出
+- ✅ 桌面端读取和保存部分 Agent 原生配置文件
 
 **目标能力**：
 - 每个 Agent 的配置模板（模型、温度、token 限制等）
 - API Key 安全存储（系统密钥链，不明文存储）
-- 配置导入/导出（JSON/YAML）
 - 配置校验与默认值回退
 - 多环境支持（dev / staging / prod）
 - 配置变更历史与回滚
@@ -75,11 +81,16 @@ AgentHub 从"AI 编程助手的安装管理器"演进为**全生命周期的 Age
 
 **职责**：创建、组织、版本化和共享提示词模板。
 
-**当前状态**：❌ 未实现
+**当前状态**：✅ 基础实现
+
+**已实现能力**：
+- ✅ 提示词模板 YAML 存储（`prompts/templates/<id>.yaml`）
+- ✅ 模板创建、读取、更新、删除
+- ✅ `{{variable}}` 变量插值渲染
+- ✅ 标签和分类字段
+- ✅ 桌面端列表、创建、渲染和删除入口
 
 **目标能力**：
-- 提示词模板库（CRUD + 分类标签）
-- 变量插值（`{{language}}`, `{{context}}`）
 - 版本控制（每次修改生成新版本）
 - 从 Agent 会话中提取和保存提示词
 - 提示词效果追踪（关联会话结果）
@@ -103,13 +114,19 @@ prompt:
 
 **职责**：记录、检索和管理与 Agent 的交互会话。
 
-**当前状态**：❌ 未实现（MiMoCode 有内置 session 系统，AgentHub 自身无）
+**当前状态**：✅ 基础实现
+
+**已实现能力**：
+- ✅ 会话 YAML 存储（`sessions/data/<session-id>.yaml`）
+- ✅ 会话创建、列表、详情和删除
+- ✅ 消息追加、标签、评分、备注
+- ✅ 状态流转（active / paused / completed / failed）
+- ✅ token 和成本字段
+- ✅ 标题、Agent、消息内容和备注搜索
 
 **目标能力**：
-- 会话记录（输入、输出、时间戳、使用的 Agent/模型）
-- 会话搜索（全文检索、按 Agent/日期/标签过滤）
 - 会话回放与导出
-- 会话成本追踪（token 用量、API 调用次数）
+- 更完整的会话成本追踪（API 调用次数、模型价格表）
 - 跨 Agent 会话上下文传递
 - 会话模板（常见工作流的预设会话结构）
 
@@ -132,11 +149,16 @@ session:
 
 **职责**：定义、安装和管理可复用的技能包，扩展 Agent 的能力边界。
 
-**当前状态**：🟡 基础存在（.mimocode/skills/elixir-dev）
+**当前状态**：✅ 基础实现
+
+**已实现能力**：
+- ✅ `SKILL.md` frontmatter 清单解析
+- ✅ 本地技能创建、安装、卸载、启用、禁用
+- ✅ `.enabled` 文件表示启用状态
+- ✅ 依赖命令检查
+- ✅ 桌面端额外扫描 `~/.codex/skills`
 
 **目标能力**：
-- 技能定义格式（SKILL.md frontmatter + 内容）
-- 技能安装/卸载/更新
 - 技能市场（发现、评分、安装统计）
 - 技能组合（workflow 编排多个技能）
 - 技能版本管理与兼容性检查
@@ -165,12 +187,16 @@ triggers:
 
 **职责**：跨会话的知识持久化、检索和组织。
 
-**当前状态**：🟡 基础存在（localStorage 缓存 + MiMoCode 内置 memory）
+**当前状态**：✅ 基础实现
+
+**已实现能力**：
+- ✅ Markdown + YAML frontmatter 存储
+- ✅ global / project / session 三类作用域
+- ✅ pinned / learning / decision / reference / feedback / free 类型
+- ✅ 记忆创建、列表、删除、标签和搜索
+- ✅ 桌面端列表、创建、搜索和删除入口
 
 **目标能力**：
-- 项目级记忆（架构决策、规则、发现）
-- 会话级记忆（当前上下文、工作进度）
-- 全局记忆（用户偏好、跨项目知识）
 - 语义检索（BM25 + 向量搜索）
 - 记忆衰减（旧记忆自动降权或归档）
 - 记忆导入/导出/同步
@@ -234,11 +260,11 @@ package ──→ config ──→ session
 | 阶段 | 模块 | 优先级 | 状态 | 预计时间 |
 |------|------|--------|------|----------|
 | Phase 1 | package（完善现有） | P0 | ✅ 已完成 | 2026-06-15 至 2026-06-27 |
-| Phase 2 | config | P0 | 📋 设计中 | 2-3 周 |
-| Phase 3 | memory | P1 | 🟡 基础存在 | 2-3 周 |
-| Phase 4 | session | P1 | 📋 设计中 | 3-4 周 |
-| Phase 5 | prompt | P2 | 📋 设计中 | 2-3 周 |
-| Phase 6 | skill | P2 | 🟡 基础存在 | 2-3 周 |
+| Phase 2 | config | P0 | ✅ 基础实现 | 持续增强 |
+| Phase 3 | memory | P1 | ✅ 基础实现 | 持续增强 |
+| Phase 4 | session | P1 | ✅ 基础实现 | 持续增强 |
+| Phase 5 | prompt | P2 | ✅ 基础实现 | 持续增强 |
+| Phase 6 | skill | P2 | ✅ 基础实现 | 持续增强 |
 | Phase 7 | management | P3 | 📋 设计中 | 4-6 周 |
 
 ---
@@ -248,4 +274,4 @@ package ──→ config ──→ session
 - `PROJECT_PLAN.md` 定义 v1.0 的交付范围（以 package 为核心）
 - `goal.md` 定义更长远的模块化架构愿景
 - v1.0 聚焦 package 模块的完善
-- v2.0+ 逐步引入 config → memory → session → prompt → skill → management
+- v2.0+ 重点增强 config、memory、session、prompt、skill，并补齐 management、备份恢复、审计和跨 Agent 协作能力

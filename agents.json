@@ -171,7 +171,7 @@
       "description": "Standalone AI coding agent",
       "homepage": "https://trae.ai",
       "installers": {
-        "windows": { "manager": "winget", "package": "ByteDance.TraeSolo" },
+        "windows": { "manager": "winget", "package": "ByteDance.TraeWork" },
         "macos": { "manager": "brew-cask", "package": "trae-solo" },
         "linux": { "manager": "manual", "package": null }
       },

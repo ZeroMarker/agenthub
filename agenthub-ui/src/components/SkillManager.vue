@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import PageHeader from './common/PageHeader.vue'
+import NotificationBar from './common/NotificationBar.vue'
+import LoadingSpinner from './common/LoadingSpinner.vue'
+import EmptyState from './common/EmptyState.vue'
 
 interface SkillInfo {
   name: string
@@ -90,14 +94,9 @@ onMounted(loadSkills)
 
 <template>
   <div class="skill-manager">
-    <header class="page-header">
-      <h1>Skill Manager</h1>
-      <p>Manage your skills and workflows</p>
-    </header>
+    <PageHeader title="Skill Manager" subtitle="Manage your skills and workflows" />
 
-    <div v-if="message" :class="['message', messageType]">
-      {{ message }}
-    </div>
+    <NotificationBar :message="message" :type="messageType" @close="message = ''" />
 
     <div class="create-section">
       <h3>Create Skill</h3>
@@ -151,47 +150,15 @@ onMounted(loadSkills)
       </div>
     </div>
 
-    <div v-if="skills.length === 0 && !loading" class="empty">
-      <p>No skills found. Create your first skill above.</p>
-    </div>
+    <EmptyState v-if="skills.length === 0 && !loading" text="No skills found. Create your first skill above." />
 
-    <div v-if="loading" class="loading">Loading...</div>
+    <LoadingSpinner v-if="loading" />
   </div>
 </template>
 
 <style scoped>
 .skill-manager {
   padding: 2rem;
-}
-
-.page-header {
-  margin-bottom: 2rem;
-}
-
-.page-header h1 {
-  font-size: 1.75rem;
-  color: #2c3e50;
-  margin-bottom: 0.5rem;
-}
-
-.page-header p {
-  color: #666;
-}
-
-.message {
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-}
-
-.message.success {
-  background: #d4edda;
-  color: #155724;
-}
-
-.message.error {
-  background: #f8d7da;
-  color: #721c24;
 }
 
 .create-section {
@@ -387,9 +354,15 @@ onMounted(loadSkills)
   cursor: not-allowed;
 }
 
-.empty, .loading {
-  text-align: center;
-  padding: 3rem;
-  color: #999;
+/* Responsive */
+@media (max-width: 900px) {
+  .skill-manager { padding: 1.25rem; }
+  .create-form { flex-direction: column; }
+  .create-form input { width: 100%; }
+  .create-form button { width: 100%; }
+  .skills-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .skill-manager { padding: 1rem; }
 }
 </style>

@@ -1,0 +1,75 @@
+# TODO
+
+## M3: Beta 体验
+
+### ✅ Material You (Material 3) Expressive Design Refactor — Complete
+
+All UI components have been migrated to the Material 3 design token system:
+
+**Foundation (`style.css`):**
+- Full M3 Light/Dark color palette (`--md-sys-color-primary`, `--md-sys-color-surface`, etc.)
+- Elevation tokens 0-5 with M3 box-shadows
+- Shape tokens (xs/sm/md/lg/xl/full)
+- M3 Typography scale (display/headline/title/body/label)
+- Motion tokens (emphasized easing + duration)
+- Utility classes: `.m3-btn-filled`, `.m3-btn-tonal`, `.m3-btn-outlined`, `.m3-chip`, `.m3-surface`
+
+**Navigation Rail (`App.vue`):**
+- Fixed left rail, 80px collapsed, 240px on hover
+- M3 surface bg + outline-variant border
+- Active: `secondary-container` bg + `on-secondary-container` text
+- Responsive collapse to 60px / 48px
+
+**Shared Components:**
+- `PageHeader` — headline-medium typography, accent bar (4px primary pill)
+- `NotificationBar` — secondary-container surface for success, error-container for errors
+- `LoadingSpinner` — primary spinner on surface-variant track
+- `EmptyState` — muted icon + on-surface-variant text
+- `ModalDialog` — elevation-3, shape-xl, smooth M3 scaling
+- `StatusBadge` — tonal pill (positive/caution/negative/neutral)
+
+**AgentList & Agent Sub-Components:**
+- M3 segmented tabs (surface-variant bg, active tab lifts via elevation-1)
+- Stat chips: secondary-container tonal pills
+- Agent cards: elevated M3 cards (elevation-1 → elevation-3 on hover), shape-md
+- Agent table: M3 data table with surface-variant sticky header
+- Toolbar: M3 chips for sort, M3 tonal/outlined buttons
+- Batch bar: tonal select-all with tonal/outlined action buttons
+- Detail modal: M3 list items, tonal badges, outlined footer buttons
+- Progress indicators: primary color fill + surface-variant track
+
+**Manager Views:**
+- Consistent M3 surface + elevation-1 panel layout
+- M3 tonal/outlined button styling throughout
+- All hardcoded colors replaced with CSS custom properties
+
+## M4: 发布准备
+
+### CI/CD
+- [x] GitHub Actions: Windows/macOS/Linux 构建矩阵（`release.yml` ✅）
+- [x] GitHub Actions: cargo test + clippy + fmt 检查（`ci.yml` ✅）
+- [x] GitHub Actions: 前端 npm run build 检查（`ci.yml` ✅）
+
+### 发布产物
+- [ ] CLI 二进制 + SHA-256 校验和
+- [x] 桌面安装包（Tauri build 配置完成，release workflow 已就绪）
+- [ ] 代码签名策略文档
+
+### 文档
+- [x] CONTRIBUTING.md
+- [x] 安全策略（SECURITY.md）
+- [x] 问题模板（issue templates）
+- [ ] 更新 README 支持矩阵自动化生成
+
+### 发布
+- [ ] 发布 v1.0.0
+- [ ] 安装/升级/卸载回归测试
+
+## 长期规划（goal.md 七大模块）
+
+- [ ] **Config** 模块：API Key 密钥链存储、多环境配置、配置模板
+- [ ] **Memory** 模块：语义搜索（BM25 + 向量）、知识图谱、记忆衰减
+- [ ] **Session** 模块：成本追踪、会话回放、会话模板
+- [ ] **Prompt** 模块：版本控制、变量插值、使用统计
+- [ ] **Skill** 模块：技能市场、工作流编排、依赖检查
+- [ ] **Management** 模块：仪表盘、审计日志、备份恢复、插件系统

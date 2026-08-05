@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import PageHeader from './common/PageHeader.vue'
+import NotificationBar from './common/NotificationBar.vue'
+import LoadingSpinner from './common/LoadingSpinner.vue'
+import EmptyState from './common/EmptyState.vue'
 
 interface AgentInfo {
   id: string
@@ -166,14 +170,9 @@ onMounted(loadAgents)
 
 <template>
   <div class="config-manager">
-    <header class="page-header">
-      <h1>Configuration Manager</h1>
-      <p>View and edit agent configuration files</p>
-    </header>
+    <PageHeader title="Configuration Manager" subtitle="View and edit agent configuration files" />
 
-    <div v-if="message" :class="['message', messageType]">
-      {{ message }}
-    </div>
+    <NotificationBar :message="message" :type="messageType" @close="message = ''" />
 
     <div class="config-layout">
       <div class="config-sidebar">
@@ -191,7 +190,7 @@ onMounted(loadAgents)
 
         <div class="agent-list">
           <h3>Agents ({{ filteredAgents.length }})</h3>
-          <div v-if="loading && agents.length === 0" class="loading">Loading...</div>
+          <LoadingSpinner v-if="loading && agents.length === 0" />
           <ul v-else>
             <li
               v-for="agent in filteredAgents"
@@ -214,9 +213,7 @@ onMounted(loadAgents)
               <span :class="['agent-type', agent.kind.toLowerCase()]">{{ agent.kind }}</span>
             </li>
           </ul>
-          <p v-if="filteredAgents.length === 0 && !loading" class="empty">
-            {{ showInstalledOnly ? 'No installed agents found' : 'No agents found' }}
-          </p>
+          <EmptyState v-if="filteredAgents.length === 0 && !loading" :text="showInstalledOnly ? 'No installed agents found' : 'No agents found'" />
         </div>
       </div>
 
@@ -309,36 +306,6 @@ onMounted(loadAgents)
 .config-manager {
   padding: 2rem;
   height: 100%;
-}
-
-.page-header {
-  margin-bottom: 2rem;
-}
-
-.page-header h1 {
-  font-size: 1.75rem;
-  color: #2c3e50;
-  margin-bottom: 0.5rem;
-}
-
-.page-header p {
-  color: #666;
-}
-
-.message {
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-}
-
-.message.success {
-  background: #d4edda;
-  color: #155724;
-}
-
-.message.error {
-  background: #f8d7da;
-  color: #721c24;
 }
 
 .config-layout {
@@ -726,34 +693,27 @@ onMounted(loadAgents)
 
 .hint {
   font-size: 0.85rem;
-  color: #bbb;
+  color: var(--md-sys-color-on-surface-variant);
+  opacity: 0.7;
   margin-top: 0.5rem;
 }
 
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #f0f0f0;
-  border-top-color: #3498db;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 1rem;
+/* Responsive */
+@media (max-width: 1200px) {
+  .config-layout { flex-direction: column; height: auto; }
+  .config-sidebar { width: 100%; }
+  .config-detail { min-height: 400px; }
 }
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
+@media (max-width: 900px) {
+  .config-manager { padding: 1.25rem; }
+  .filter-controls { padding: 0.75rem; }
+  .config-detail { padding: 1.25rem; }
 }
-
-.loading {
-  text-align: center;
-  padding: 2rem;
-  color: #999;
-}
-
-.empty {
-  text-align: center;
-  padding: 2rem;
-  color: #999;
-  font-style: italic;
+@media (max-width: 600px) {
+  .config-manager { padding: 1rem; }
+  .config-detail { padding: 1rem; }
+  .config-item { flex-direction: column; gap: 0.5rem; }
+  .config-key { min-width: auto; }
+  .detail-meta { flex-wrap: wrap; }
 }
 </style>

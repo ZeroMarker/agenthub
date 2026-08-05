@@ -70,29 +70,17 @@ impl Agent {
     }
 
     pub fn get_install_command(&self, platform: Platform) -> Option<String> {
+        let builder = crate::command_builder::CommandBuilder::new(platform);
         let installer = self.get_installer(platform)?;
         let package = installer.package.as_ref()?;
-
-        match installer.manager {
-            PackageManager::Npm => Some(format!("npm install -g {}", package)),
-            PackageManager::Pip => Some(format!("pip install {}", package)),
-            PackageManager::Winget => Some(format!("winget install {}", package)),
-            PackageManager::BrewCask => Some(format!("brew install --cask {}", package)),
-            PackageManager::Manual => None,
-        }
+        builder.install_command(&installer.manager, package)
     }
 
     pub fn get_uninstall_command(&self, platform: Platform) -> Option<String> {
+        let builder = crate::command_builder::CommandBuilder::new(platform);
         let installer = self.get_installer(platform)?;
         let package = installer.package.as_ref()?;
-
-        match installer.manager {
-            PackageManager::Npm => Some(format!("npm uninstall -g {}", package)),
-            PackageManager::Pip => Some(format!("pip uninstall -y {}", package)),
-            PackageManager::Winget => Some(format!("winget uninstall {}", package)),
-            PackageManager::BrewCask => Some(format!("brew uninstall --cask {}", package)),
-            PackageManager::Manual => None,
-        }
+        builder.uninstall_command(&installer.manager, package)
     }
 }
 

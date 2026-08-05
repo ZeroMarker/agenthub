@@ -109,9 +109,7 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::{AgentKind, InstallerConfig, PackageManager, Platform, SupportStatus};
-    use chrono::NaiveDate;
-    use std::collections::HashMap;
+    use crate::agent::{AgentKind, Platform};
 
     fn create_test_catalog_json() -> String {
         r#"{

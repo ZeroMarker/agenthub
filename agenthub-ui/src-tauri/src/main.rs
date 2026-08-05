@@ -1,7 +1,7 @@
 use agenthub_core::{
     Agent, AgentKind, Catalog, ConfigManager, ConfigValue, DiagnosticManager, Installer,
-    MemoryManager, MemoryScope, MemoryType, Platform, PromptManager, Result, SessionManager,
-    SkillManager,
+    MemoryManager, MemoryScope, MemoryType, Platform, PromptManager, RealCommandRunner, Result,
+    SessionManager, SkillManager,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -208,8 +208,8 @@ async fn install_agent(
             let agent_name = agent.name.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                let installer = Installer::new(platform);
-                installer.execute_install(&agent_clone, false)
+                let installer = Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
+                installer.execute_install(&agent_clone, false, None)
             })
             .await
             .map_err(|e| format!("Task failed: {}", e))?;
@@ -303,8 +303,8 @@ async fn uninstall_agent(
             let agent_name = agent.name.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                let installer = Installer::new(platform);
-                installer.execute_uninstall(&agent_clone, false)
+                let installer = Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
+                installer.execute_uninstall(&agent_clone, false, None)
             })
             .await
             .map_err(|e| format!("Task failed: {}", e))?;
@@ -391,8 +391,8 @@ async fn batch_install_agents(
                 let agent_name = agent.name.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    let installer = Installer::new(platform);
-                    installer.execute_install(&agent_clone, false)
+                    let installer = Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
+                    installer.execute_install(&agent_clone, false, None)
                 })
                 .await
                 .map_err(|e| format!("Task failed: {}", e))?;
@@ -488,8 +488,8 @@ async fn batch_uninstall_agents(
                 let agent_name = agent.name.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    let installer = Installer::new(platform);
-                    installer.execute_uninstall(&agent_clone, false)
+                    let installer = Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
+                    installer.execute_uninstall(&agent_clone, false, None)
                 })
                 .await
                 .map_err(|e| format!("Task failed: {}", e))?;
@@ -1251,6 +1251,141 @@ async fn delete_memory(
         .memory_manager
         .delete_entry(&path)
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agenthub_core::{Agent, AgentKind, InstallerConfig, Platform, SupportStatus};
+    use agenthub_core::agent::PackageManager;
+    use std::collections::HashMap;
+
+    fn test_agent() -> Agent {
+        let mut installers = HashMap::new();
+        installers.insert(
+            Platform::Windows,
+            InstallerConfig {
+                manager: PackageManager::Npm,
+                package: Some("@test/cli".to_string()),
+            },
+        );
+        installers.insert(
+            Platform::MacOS,
+            InstallerConfig {
+                manager: PackageManager::BrewCask,
+                package: Some("test-package".to_string()),
+            },
+        );
+
+        Agent {
+            id: "test-agent".to_string(),
+            name: "Test Agent".to_string(),
+            kind: AgentKind::CLI,
+            provider: "Test Corp".to_string(),
+            description: "A test agent".to_string(),
+            homepage: "https://test.com".to_string(),
+            installers,
+            status: SupportStatus::Verified,
+            catalog_verified_at: None,
+            installer_verified_at: None,
+        }
+    }
+
+    #[test]
+    fn test_agent_to_info_converts_correctly() {
+        let agent = test_agent();
+        let info = agent_to_info(&agent);
+
+        assert_eq!(info.id, "test-agent");
+        assert_eq!(info.name, "Test Agent");
+        assert_eq!(info.kind, "CLI");
+        assert_eq!(info.provider, "Test Corp");
+        assert_eq!(info.description, "A test agent");
+        assert_eq!(info.homepage, "https://test.com");
+        assert_eq!(info.status, "Verified");
+        assert_eq!(info.installers.len(), 2);
+        assert!(info.catalog_verified_at.is_none());
+        assert!(info.installer_verified_at.is_none());
+    }
+
+    #[test]
+    fn test_agent_to_info_no_verification_dates() {
+        let mut agent = test_agent();
+        agent.catalog_verified_at = None;
+        agent.installer_verified_at = None;
+        let info = agent_to_info(&agent);
+
+        assert!(info.catalog_verified_at.is_none());
+        assert!(info.installer_verified_at.is_none());
+    }
+
+    #[test]
+    fn test_get_current_platform_returns_platform() {
+        let platform = get_current_platform();
+        match platform {
+            Platform::Windows | Platform::MacOS | Platform::Linux => {}
+        }
+    }
+
+    #[test]
+    fn test_install_result_serialization() {
+        let result = InstallResult {
+            success: true,
+            message: "Done".to_string(),
+            agent_name: "test".to_string(),
+            command: "npm install -g @test/cli".to_string(),
+            exit_code: Some(0),
+            stdout: "installed".to_string(),
+            stderr: String::new(),
+            duration_ms: 1500,
+            timed_out: false,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"agent_name\":\"test\""));
+        assert!(json.contains("\"exit_code\":0"));
+    }
+
+    #[test]
+    fn test_batch_result_serialization() {
+        let results = vec![
+            InstallResult {
+                success: true,
+                message: "Done".to_string(),
+                agent_name: "agent-a".to_string(),
+                command: String::new(),
+                exit_code: Some(0),
+                stdout: String::new(),
+                stderr: String::new(),
+                duration_ms: 100,
+                timed_out: false,
+            },
+            InstallResult {
+                success: false,
+                message: "Failed".to_string(),
+                agent_name: "agent-b".to_string(),
+                command: String::new(),
+                exit_code: Some(1),
+                stdout: String::new(),
+                stderr: "error".to_string(),
+                duration_ms: 50,
+                timed_out: false,
+            },
+        ];
+
+        let batch = BatchResult {
+            total: 2,
+            success: 1,
+            failed: 1,
+            results,
+        };
+
+        let json = serde_json::to_string(&batch).unwrap();
+        assert!(json.contains("\"total\":2"));
+        assert!(json.contains("\"success\":1"));
+        assert!(json.contains("\"failed\":1"));
+    }
 }
 
 fn main() {

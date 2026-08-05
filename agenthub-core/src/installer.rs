@@ -1,7 +1,9 @@
-use crate::agent::{Agent, PackageManager, Platform};
+﻿use crate::agent::{Agent, Platform};
+use crate::command_builder::{CommandOutput, CommandRunner, RealCommandRunner};
 use crate::error::{AgentHubError, Result};
-use std::process::Command;
+use std::time::Duration;
 
+/// Result of an install or uninstall operation.
 #[derive(Debug, Clone)]
 pub struct InstallResult {
     pub success: bool,
@@ -15,6 +17,7 @@ pub struct InstallResult {
     pub timed_out: bool,
 }
 
+/// Preview of a command that would be executed.
 #[derive(Debug, Clone)]
 pub struct CommandPreview {
     pub command: String,
@@ -22,88 +25,110 @@ pub struct CommandPreview {
     pub platform: Platform,
 }
 
+/// Package installation and uninstallation engine.
+///
+/// Delegates command generation and execution to a `CommandRunner`,
+/// enabling mocking in tests and consistent platform-aware behavior.
 pub struct Installer {
     platform: Platform,
+    runner: Box<dyn CommandRunner>,
 }
 
 impl Installer {
-    pub fn new(platform: Platform) -> Self {
-        Self { platform }
+    pub fn new(platform: Platform, runner: Box<dyn CommandRunner>) -> Self {
+        Self { platform, runner }
     }
 
-    pub fn get_install_command(&self, agent: &Agent) -> Option<CommandPreview> {
+    /// Create a default installer using the real command runner.
+    pub fn new_default(platform: Platform) -> Self {
+        Self {
+            platform,
+            runner: Box::new(RealCommandRunner::new(platform)),
+        }
+    }
+
+    /// Get a preview of the install command for an agent.
+    pub fn get_command_preview(&self, agent: &Agent, uninstall: bool) -> Option<CommandPreview> {
         let installer = agent.get_installer(self.platform)?;
         let package = installer.package.as_ref()?;
 
-        let (command, description) = match installer.manager {
-            PackageManager::Npm => (
-                format!("npm install -g {}", package),
-                format!("Install {} via npm", agent.name),
-            ),
-            PackageManager::Pip => (
-                format!("pip install {}", package),
-                format!("Install {} via pip", agent.name),
-            ),
-            PackageManager::Winget => (
-                format!("winget install {}", package),
-                format!("Install {} via winget", agent.name),
-            ),
-            PackageManager::BrewCask => (
-                format!("brew install --cask {}", package),
-                format!("Install {} via Homebrew", agent.name),
-            ),
-            PackageManager::Manual => return None,
-        };
+        let action = if uninstall { "uninstall" } else { "install" };
+        let command = if uninstall {
+            self.runner.uninstall_command(&installer.manager, package)
+        } else {
+            self.runner.install_command(&installer.manager, package)
+        }?;
 
         Some(CommandPreview {
             command,
-            description,
+            description: format!(
+                "{} {} via {:?}",
+                action, agent.name, installer.manager
+            ),
             platform: self.platform,
         })
     }
 
-    pub fn get_uninstall_command(&self, agent: &Agent) -> Option<CommandPreview> {
-        let installer = agent.get_installer(self.platform)?;
-        let package = installer.package.as_ref()?;
-
-        let (command, description) = match installer.manager {
-            PackageManager::Npm => (
-                format!("npm uninstall -g {}", package),
-                format!("Uninstall {} via npm", agent.name),
-            ),
-            PackageManager::Pip => (
-                format!("pip uninstall -y {}", package),
-                format!("Uninstall {} via pip", agent.name),
-            ),
-            PackageManager::Winget => (
-                format!("winget uninstall {}", package),
-                format!("Uninstall {} via winget", agent.name),
-            ),
-            PackageManager::BrewCask => (
-                format!("brew uninstall --cask {}", package),
-                format!("Uninstall {} via Homebrew", agent.name),
-            ),
-            PackageManager::Manual => return None,
-        };
-
-        Some(CommandPreview {
-            command,
-            description,
-            platform: self.platform,
-        })
-    }
-
-    pub fn execute_install(&self, agent: &Agent, dry_run: bool) -> Result<InstallResult> {
-        let preview = self.get_install_command(agent).ok_or_else(|| {
-            AgentHubError::InstallerError(format!("No installer available for {}", agent.name))
+    /// Build the full command string for installation.
+    fn build_install_command(&self, agent: &Agent) -> Result<String> {
+        let installer = agent.get_installer(self.platform).ok_or_else(|| {
+            AgentHubError::InstallerError(format!("No installer for {}", agent.name))
         })?;
+        let package = installer.package.as_ref().ok_or_else(|| {
+            AgentHubError::InstallerError(format!(
+                "No package defined for {} on {:?}",
+                agent.name, self.platform
+            ))
+        })?;
+        self.runner
+            .install_command(&installer.manager, package)
+            .ok_or_else(|| {
+                AgentHubError::InstallerError(format!(
+                    "{} ({:?}) is not installable via automated tools",
+                    agent.name, installer.manager
+                ))
+            })
+    }
+
+    /// Build the full command string for uninstallation.
+    fn build_uninstall_command(&self, agent: &Agent) -> Result<String> {
+        let installer = agent.get_installer(self.platform).ok_or_else(|| {
+            AgentHubError::InstallerError(format!("No installer for {}", agent.name))
+        })?;
+        let package = installer.package.as_ref().ok_or_else(|| {
+            AgentHubError::InstallerError(format!(
+                "No package defined for {} on {:?}",
+                agent.name, self.platform
+            ))
+        })?;
+        self.runner
+            .uninstall_command(&installer.manager, package)
+            .ok_or_else(|| {
+                AgentHubError::InstallerError(format!(
+                    "{} ({:?}) is not uninstallable via automated tools",
+                    agent.name, installer.manager
+                ))
+            })
+    }
+
+    /// Execute agent installation.
+    ///
+    /// * `dry_run` — if true, returns a successful result without executing anything
+    /// * `timeout` — optional maximum duration; `None` means no timeout
+    pub fn execute_install(
+        &self,
+        agent: &Agent,
+        dry_run: bool,
+        timeout: Option<Duration>,
+    ) -> Result<InstallResult> {
+        let command = self.build_install_command(agent)?;
 
         if dry_run {
             return Ok(InstallResult {
                 success: true,
-                message: format!("Dry run: {}", preview.command),
+                message: format!("Dry run: {}", command),
                 agent_id: agent.id.clone(),
-                command: preview.command,
+                command,
                 exit_code: None,
                 stdout: String::new(),
                 stderr: String::new(),
@@ -112,58 +137,44 @@ impl Installer {
             });
         }
 
-        let start = std::time::Instant::now();
-        let output = if cfg!(target_os = "windows") {
-            Command::new("cmd").args(["/C", &preview.command]).output()
-        } else {
-            let parts: Vec<&str> = preview.command.split_whitespace().collect();
-            if parts.is_empty() {
-                return Err(AgentHubError::InstallerError("Empty command".to_string()));
-            }
-            Command::new(parts[0]).args(&parts[1..]).output()
-        }
-        .map_err(|e| AgentHubError::InstallerError(format!("Failed to execute command: {}", e)))?;
-
-        let duration = start.elapsed();
-        let success = output.status.success();
-        let exit_code = output.status.code();
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        let message = if success {
-            format!("{} installed successfully", agent.name)
-        } else {
-            format!(
-                "Failed to install {}: {}",
-                agent.name,
-                if stderr.is_empty() { &stdout } else { &stderr }
-            )
-        };
+        let output = self.runner.run_command(&command, timeout)?;
+        let message = Self::format_message(
+            &output,
+            agent.name.as_str(),
+            "install",
+        );
 
         Ok(InstallResult {
-            success,
+            success: output.success,
             message,
             agent_id: agent.id.clone(),
-            command: preview.command,
-            exit_code,
-            stdout,
-            stderr,
-            duration_ms: duration.as_millis() as u64,
-            timed_out: false,
+            command,
+            exit_code: output.exit_code,
+            stdout: output.stdout,
+            stderr: output.stderr,
+            duration_ms: output.duration_ms,
+            timed_out: output.timed_out,
         })
     }
 
-    pub fn execute_uninstall(&self, agent: &Agent, dry_run: bool) -> Result<InstallResult> {
-        let preview = self.get_uninstall_command(agent).ok_or_else(|| {
-            AgentHubError::InstallerError(format!("No uninstaller available for {}", agent.name))
-        })?;
+    /// Execute agent uninstallation.
+    ///
+    /// * `dry_run` — if true, returns a successful result without executing anything
+    /// * `timeout` — optional maximum duration; `None` means no timeout
+    pub fn execute_uninstall(
+        &self,
+        agent: &Agent,
+        dry_run: bool,
+        timeout: Option<Duration>,
+    ) -> Result<InstallResult> {
+        let command = self.build_uninstall_command(agent)?;
 
         if dry_run {
             return Ok(InstallResult {
                 success: true,
-                message: format!("Dry run: {}", preview.command),
+                message: format!("Dry run: {}", command),
                 agent_id: agent.id.clone(),
-                command: preview.command,
+                command,
                 exit_code: None,
                 stdout: String::new(),
                 stderr: String::new(),
@@ -172,44 +183,391 @@ impl Installer {
             });
         }
 
-        let start = std::time::Instant::now();
-        let output = if cfg!(target_os = "windows") {
-            Command::new("cmd").args(["/C", &preview.command]).output()
-        } else {
-            let parts: Vec<&str> = preview.command.split_whitespace().collect();
-            if parts.is_empty() {
-                return Err(AgentHubError::InstallerError("Empty command".to_string()));
-            }
-            Command::new(parts[0]).args(&parts[1..]).output()
-        }
-        .map_err(|e| AgentHubError::InstallerError(format!("Failed to execute command: {}", e)))?;
-
-        let duration = start.elapsed();
-        let success = output.status.success();
-        let exit_code = output.status.code();
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        let message = if success {
-            format!("{} uninstalled successfully", agent.name)
-        } else {
-            format!(
-                "Failed to uninstall {}: {}",
-                agent.name,
-                if stderr.is_empty() { &stdout } else { &stderr }
-            )
-        };
+        let output = self.runner.run_command(&command, timeout)?;
+        let message = Self::format_message(
+            &output,
+            agent.name.as_str(),
+            "uninstall",
+        );
 
         Ok(InstallResult {
-            success,
+            success: output.success,
             message,
             agent_id: agent.id.clone(),
-            command: preview.command,
-            exit_code,
-            stdout,
-            stderr,
-            duration_ms: duration.as_millis() as u64,
-            timed_out: false,
+            command,
+            exit_code: output.exit_code,
+            stdout: output.stdout,
+            stderr: output.stderr,
+            duration_ms: output.duration_ms,
+            timed_out: output.timed_out,
         })
+    }
+
+    fn format_message(output: &CommandOutput, agent_name: &str, action: &str) -> String {
+        if output.timed_out {
+            format!("{} {} timed out after {}ms", agent_name, action, output.duration_ms)
+        } else if output.success {
+            format!("{} {}d successfully", agent_name, action)
+        } else {
+            let detail = if output.stderr.is_empty() {
+                &output.stdout
+            } else {
+                &output.stderr
+            };
+            if detail.is_empty() {
+                format!("Failed to {} {}", action, agent_name)
+            } else {
+                format!("Failed to {} {}: {}", action, agent_name, detail)
+            }
+        }
+    }
+
+    /// Install multiple agents sequentially.
+    pub fn batch_install(
+        &self,
+        agents: &[Agent],
+        dry_run: bool,
+        timeout: Option<Duration>,
+    ) -> Vec<InstallResult> {
+        agents
+            .iter()
+            .map(|agent| {
+                self.execute_install(agent, dry_run, timeout)
+                    .unwrap_or_else(|e| InstallResult {
+                        success: false,
+                        message: e.to_string(),
+                        agent_id: agent.id.clone(),
+                        command: String::new(),
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration_ms: 0,
+                        timed_out: false,
+                    })
+            })
+            .collect()
+    }
+
+    /// Uninstall multiple agents sequentially.
+    pub fn batch_uninstall(
+        &self,
+        agents: &[Agent],
+        dry_run: bool,
+        timeout: Option<Duration>,
+    ) -> Vec<InstallResult> {
+        agents
+            .iter()
+            .map(|agent| {
+                self.execute_uninstall(agent, dry_run, timeout)
+                    .unwrap_or_else(|e| InstallResult {
+                        success: false,
+                        message: e.to_string(),
+                        agent_id: agent.id.clone(),
+                        command: String::new(),
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration_ms: 0,
+                        timed_out: false,
+                    })
+            })
+            .collect()
+    }
+}
+
+/// Helper to build a batch summary from individual results.
+pub fn summarize_batch(results: &[InstallResult]) -> (usize, usize) {
+    let success = results.iter().filter(|r| r.success).count();
+    let failed = results.iter().filter(|r| !r.success).count();
+    (success, failed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::{Agent, AgentKind, InstallerConfig, PackageManager, Platform, SupportStatus};
+    use crate::command_builder::MockCommandRunner;
+    use std::collections::HashMap;
+
+    fn create_test_agent() -> Agent {
+        let mut installers = HashMap::new();
+        installers.insert(
+            Platform::Windows,
+            InstallerConfig {
+                manager: PackageManager::Npm,
+                package: Some("@test/package".to_string()),
+            },
+        );
+        installers.insert(
+            Platform::MacOS,
+            InstallerConfig {
+                manager: PackageManager::BrewCask,
+                package: Some("test-package".to_string()),
+            },
+        );
+        installers.insert(
+            Platform::Linux,
+            InstallerConfig {
+                manager: PackageManager::Manual,
+                package: None,
+            },
+        );
+
+        Agent {
+            id: "test-agent".to_string(),
+            name: "Test Agent".to_string(),
+            kind: AgentKind::CLI,
+            provider: "Test Provider".to_string(),
+            description: "A test agent".to_string(),
+            homepage: "https://test.com".to_string(),
+            installers,
+            status: SupportStatus::Verified,
+            catalog_verified_at: None,
+            installer_verified_at: None,
+        }
+    }
+
+    #[test]
+    fn test_install_success() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let result = installer
+            .execute_install(&agent, false, None)
+            .unwrap();
+
+        assert!(result.success, "Expected success, got: {}", result.message);
+        assert_eq!(result.command, "npm install -g @test/package");
+        assert!(!result.timed_out);
+    }
+
+    #[test]
+    fn test_install_failure() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::failure();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let result = installer
+            .execute_install(&agent, false, None)
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.message.contains("Failed"));
+    }
+
+    #[test]
+    fn test_install_dry_run() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let result = installer
+            .execute_install(&agent, true, None)
+            .unwrap();
+
+        assert!(result.success);
+        assert!(result.message.contains("Dry run"));
+        assert_eq!(result.duration_ms, 0);
+        assert!(result.stdout.is_empty());
+        assert!(result.stderr.is_empty());
+    }
+
+    #[test]
+    fn test_install_timeout() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::timeout();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let result = installer
+            .execute_install(&agent, false, Some(Duration::from_millis(1)))
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.timed_out);
+        assert!(result.message.contains("timed out"));
+    }
+
+    #[test]
+    fn test_install_no_installer() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Linux, Box::new(runner));
+
+        let result = installer.execute_install(&agent, false, None);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_uninstall_success() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let result = installer
+            .execute_uninstall(&agent, false, None)
+            .unwrap();
+
+        assert!(result.success, "Expected success, got: {}", result.message);
+        assert_eq!(result.command, "npm uninstall -g @test/package");
+    }
+
+    #[test]
+    fn test_uninstall_dry_run() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let result = installer
+            .execute_uninstall(&agent, true, None)
+            .unwrap();
+
+        assert!(result.success);
+        assert!(result.message.contains("Dry run"));
+    }
+
+    #[test]
+    fn test_uninstall_failure() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::failure();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let result = installer
+            .execute_uninstall(&agent, false, None)
+            .unwrap();
+
+        assert!(!result.success);
+    }
+
+    #[test]
+    fn test_get_command_preview_install() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let preview = installer.get_command_preview(&agent, false).unwrap();
+        assert_eq!(preview.command, "npm install -g @test/package");
+        assert!(preview.description.contains("install"));
+    }
+
+    #[test]
+    fn test_get_command_preview_uninstall() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let preview = installer.get_command_preview(&agent, true).unwrap();
+        assert_eq!(preview.command, "npm uninstall -g @test/package");
+        assert!(preview.description.contains("uninstall"));
+    }
+
+    #[test]
+    fn test_get_command_preview_manual() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Linux, Box::new(runner));
+
+        let preview = installer.get_command_preview(&agent, false);
+        assert!(preview.is_none());
+    }
+
+    #[test]
+    fn test_batch_install() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let results = installer.batch_install(&[agent], false, None);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].success);
+    }
+
+    #[test]
+    fn test_batch_uninstall() {
+        let agent = create_test_agent();
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let results = installer.batch_uninstall(&[agent], false, None);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].success);
+    }
+
+    #[test]
+    fn test_batch_mixed_results() {
+        let mut agents = Vec::new();
+        for i in 0..3 {
+            let mut installers = HashMap::new();
+            installers.insert(
+                Platform::Windows,
+                InstallerConfig {
+                    manager: PackageManager::Npm,
+                    package: Some(format!("@test/package-{}", i)),
+                },
+            );
+            agents.push(Agent {
+                id: format!("test-agent-{}", i),
+                name: format!("Test Agent {}", i),
+                kind: AgentKind::CLI,
+                provider: "Test".to_string(),
+                description: format!("Test agent {}", i),
+                homepage: "https://test.com".to_string(),
+                installers,
+                status: SupportStatus::Verified,
+                catalog_verified_at: None,
+                installer_verified_at: None,
+            });
+        }
+
+        let runner = MockCommandRunner::success();
+        let installer = Installer::new(Platform::Windows, Box::new(runner));
+
+        let results = installer.batch_install(&agents, false, None);
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().all(|r| r.success));
+    }
+
+    #[test]
+    fn test_summarize_batch() {
+        let results = vec![
+            InstallResult {
+                success: true,
+                message: "ok".to_string(),
+                agent_id: "a".to_string(),
+                command: String::new(),
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                duration_ms: 0,
+                timed_out: false,
+            },
+            InstallResult {
+                success: false,
+                message: "fail".to_string(),
+                agent_id: "b".to_string(),
+                command: String::new(),
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                duration_ms: 0,
+                timed_out: false,
+            },
+            InstallResult {
+                success: true,
+                message: "ok".to_string(),
+                agent_id: "c".to_string(),
+                command: String::new(),
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                duration_ms: 0,
+                timed_out: false,
+            },
+        ];
+
+        let (success, failed) = summarize_batch(&results);
+        assert_eq!(success, 2);
+        assert_eq!(failed, 1);
     }
 }

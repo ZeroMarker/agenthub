@@ -99,9 +99,13 @@ impl StatusDetector {
     }
 
     fn get_pip_list(&self) -> String {
-        let output = Command::new("pip")
-            .args(["list", "--format=columns"])
-            .output();
+        let output = if cfg!(target_os = "windows") {
+            Command::new("cmd")
+                .args(["/C", "pip", "list", "--format=columns"])
+                .output()
+        } else {
+            Command::new("pip").args(["list", "--format=columns"]).output()
+        };
 
         match output {
             Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
@@ -186,17 +190,10 @@ impl StatusDetector {
             }
         };
 
+        // Parse from cached pip list output instead of running pip show per agent
         let installed = pip_list.contains(package);
         let version = if installed {
-            // For pip, we need to run pip show to get version
-            let output = Command::new("pip").args(["show", package]).output().ok();
-            match output {
-                Some(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    self.parse_pip_version(&stdout)
-                }
-                None => None,
-            }
+            self.parse_pip_version_from_list(pip_list, package)
         } else {
             None
         };
@@ -207,6 +204,33 @@ impl StatusDetector {
             version,
             detection_method: "pip".to_string(),
         }
+    }
+
+    /// Parse pip version directly from `pip list --format=columns` cached output.
+    ///
+    /// Expected format:
+    /// ```text
+    /// Package    Version
+    /// ---------- -------
+    /// aider-chat 0.25.0
+    /// ```
+    fn parse_pip_version_from_list(&self, output: &str, package: &str) -> Option<String> {
+        // Skip first two lines (header + separator)
+        let lines: Vec<&str> = output.lines().skip(2).collect();
+        for line in lines {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Split on 2+ spaces to handle variable-width columns
+            let parts: Vec<&str> = trimmed.split(|c: char| c.is_whitespace())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if parts.len() >= 2 && parts[0] == package {
+                return Some(parts[1].to_string());
+            }
+        }
+        None
     }
 
     fn check_winget_from_cache(
@@ -293,15 +317,6 @@ impl StatusDetector {
         None
     }
 
-    fn parse_pip_version(&self, output: &str) -> Option<String> {
-        for line in output.lines() {
-            if line.starts_with("Version:") {
-                return Some(line.trim_start_matches("Version:").trim().to_string());
-            }
-        }
-        None
-    }
-
     fn parse_winget_version(&self, output: &str, package: &str) -> Option<String> {
         for line in output.lines() {
             if line.contains(package) {
@@ -355,11 +370,14 @@ mod tests {
     #[test]
     fn test_parse_pip_version() {
         let detector = StatusDetector::new(Platform::Windows);
-        let output =
-            "Name: aider-chat\nVersion: 0.25.0\nSummary: AI pair programming in your terminal";
+        let output = "Package    Version\n---------- -------\naider-chat 0.25.0\npip        25.2.1\nsetuptools 78.1.0";
         assert_eq!(
-            detector.parse_pip_version(output),
+            detector.parse_pip_version_from_list(output, "aider-chat"),
             Some("0.25.0".to_string())
+        );
+        assert_eq!(
+            detector.parse_pip_version_from_list(output, "nonexistent"),
+            None
         );
     }
 }

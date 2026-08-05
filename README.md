@@ -15,6 +15,8 @@
 - [支持的 Agent](#支持的-agent)
 - [CLI 命令](#cli-命令)
 - [GUI 界面](#gui-界面)
+- [自定义 URL 协议](#自定义-url-协议)
+- [Agent Harness 数据](#agent-harness-数据)
 - [核心模块](#核心模块)
 - [Agent 目录格式](#agent-目录格式)
 - [开发指南](#开发指南)
@@ -271,6 +273,22 @@ agenthub <command> [options]
 
 ---
 
+## 自定义 URL 协议
+
+AgentHub 计划使用 `agenthub://` 作为桌面应用的自定义 URL 协议，用于从外部应用唤起 AgentHub 并跳转到 Agent 详情、搜索、诊断和设置视图。
+
+当前协议仍是设计文档，尚未在 Tauri 后端注册。详细格式、安全约束、Tauri 配置示例和平台验证步骤见 [docs/url-protocol.md](docs/url-protocol.md)。
+
+---
+
+## Agent Harness 数据
+
+AgentHub 的 agent harness 负责统一管理 Agent 配置、原生配置入口、会话记录、Skills、Memory 和 Prompt 模板。
+
+当前桌面端数据根目录使用系统配置目录下的 `agenthub`，例如 Windows 为 `%APPDATA%\agenthub`，macOS 为 `~/Library/Application Support/agenthub`，Linux 为 `~/.config/agenthub`。详细路径、文件格式、原生 Agent 配置映射和安全约定见 [docs/agent-harness.md](docs/agent-harness.md)。
+
+---
+
 ## 核心模块
 
 `agenthub-core` 提供以下 Rust 模块：
@@ -446,7 +464,7 @@ cargo test -- --nocapture
 
 - ✅ **M0：基线确认** — 25 个 Agent 目录，平台安装映射
 - ✅ **M1：核心重构** — `agenthub-core` 共享库，统一数据源
-- ✅ **M2：可靠性与安全** — 32+ 单元测试，状态检测，错误分类
+- ✅ **M2：可靠性与安全** — 49 个单元测试，状态检测，错误分类
 
 ### 进行中
 

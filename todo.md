@@ -1,5 +1,20 @@
 # TODO
 
+## 当前优化波次（2026-08-06）
+
+### ✅ 基线已建立
+- [x] M3 全部工作已提交为 checkpoint（`ba1c73b`）并推送 `origin/main`
+- [x] 仓库卫生：`.mimocode`/`.reasonix`/`.commandcode` 工具本地状态移出追踪并加入 `.gitignore`
+
+### 🔄 进行中（并行委派）
+- [ ] **前端测试设施**（B）：Vitest + Vue Test Utils 配置，AgentList 搜索/筛选/批量选择/排序/状态展示组件测试
+- [ ] **Rust 代码卫生**（D）：clippy 0 警告 + 关键路径 unwrap()/expect() 降级为错误传播
+- [ ] **发布准备**（E）：校验和脚本 + 代码签名策略文档 + README 支持矩阵自动化生成
+
+### ⏳ 待启动（Wave 2，依赖 B/D 完成后避免文件冲突）
+- [ ] **M3 体验补全**（C）：逐项进度、取消（`cancel_operation` 命令 + `operation-cancelled` 事件契约已设计）、重试、失败详情
+- [ ] **可访问性**：键盘操作、焦点状态、对比度、窗口尺寸适配
+
 ## M3: Beta 体验
 
 ### ✅ Material You (Material 3) Expressive Design Refactor — Complete

@@ -1,22 +1,28 @@
 # TODO
 
-## 当前优化波次（2026-08-06）
+## 当前优化波次（2026-08-06）— ✅ 全部完成
+
+### ✅ 交付与推送
+- [x] 全部优化工作已提交 `23f2215`（feat: cancellation/retry/failure-details, vitest test infra, release automation）并推送 `origin/main`
+- [x] 工作区干净，无残留变更
+- [x] 早期三路后台委派（B/D/E）已停用：未落盘冲突改动，其结果被直接执行所覆盖，不产生二次合并
 
 ### ✅ 基线已建立
 - [x] M3 全部工作已提交为 checkpoint（`ba1c73b`）并推送 `origin/main`
 - [x] 仓库卫生：`.mimocode`/`.reasonix`/`.commandcode` 工具本地状态移出追踪并加入 `.gitignore`
 
-### 🔄 进行中（并行委派）
-- [x] **前端测试设施**（B）：Vitest + Vue Test Utils 配置完成，AgentList 11 项组件测试（搜索/筛选/批量选择/排序/状态/取消/重试/失败详情）全绿，`vue-tsc` 构建无回归
-- [x] **Rust 代码卫生**（D）：clippy 0 警告；经精确扫描确认生产代码 0 处 unwrap/expect（之前按文件统计的 90 处几乎全部在测试模块内），仅 2 处启动期 expect 为合理保留
-- [x] **发布准备**（E）：`scripts/generate-checksums.ps1/.sh`（实测通过）、`docs/signing-policy.md`、`scripts/generate-support-matrix.py`（已修正 README 与 agents.json 的 13 处漂移）、release.yml 校验和附加到 GitHub Release
-
-### ⏳ 待启动（Wave 2，依赖 B/D 完成后避免文件冲突）
-- [x] **M3 体验补全**（C）：取消机制（`cancel_operation` 命令 + `operation-cancelled` 事件 + 进程树 kill）、卡片/表格/批量进度面板的重试按钮、可展开失败详情（命令/退出码/stderr/stdout）
+### ✅ 本次优化内容
+- [x] **前端测试设施**（B）：Vitest 4.1 + Vue Test Utils + happy-dom 配置完成，AgentList 11 项组件测试（搜索/筛选/批量选择/排序/状态/取消/重试/失败详情）全绿，`vue-tsc` 构建无回归
+- [x] **Rust 代码卫生**（D）：clippy 0 警告；精确扫描确认生产代码 0 处 unwrap/expect（按文件粗算的 90 处几乎全部在测试模块内），仅 2 处启动期 expect 合理保留
+- [x] **发布准备**（E）：`scripts/generate-checksums.ps1/.sh`（实测通过）、`docs/signing-policy.md`、`scripts/generate-support-matrix.py`（修正 README 与 agents.json 的 13 处漂移）、release.yml 校验和附加到 GitHub Release
+- [x] **M3 体验补全**（C）：取消机制（`cancel_operation` 命令 + `operation-cancelled` 事件 + 进程树 kill）、卡片/表格/批量进度面板的取消/重试按钮、可展开失败详情（命令/退出码/stderr/stdout）
 - [x] **可访问性**：全局 `:focus-visible` 焦点环、`prefers-reduced-motion` 支持（ModalDialog 原有 Escape/焦点陷阱/焦点恢复保留）
-
-### 新增
 - [x] 修复 `run_command` 超时路径 bug：超时/取消时真正 kill 进程树（原实现注释承认无法 kill，子进程会残留）
+
+### 📊 验证结果
+- Rust：110 测试全过（81 core + 9 集成 + 15 tauri + 5 cli），clippy 0 警告，fmt 干净
+- 前端：11 测试全过，vue-tsc + vite build 通过
+- 变更：19 文件改动 + 4 新增（scripts/ ×3、signing-policy.md、vitest.config.ts、__tests__/）
 
 ## M3: Beta 体验
 

@@ -149,19 +149,19 @@ installers:
 ### M3：Beta 体验
 
 - [x] 将 Tauri 长耗时命令改为异步任务，避免阻塞界面。
-- [ ] 支持逐项进度、取消、重试和失败详情。
+- [x] 支持逐项进度、取消、重试和失败详情（`cancel_operation` 命令 + `operation-cancelled` 事件 + 进程树 kill + 失败详情展开）。
 - [x] 修复前端缓存刷新与安装后状态同步。
 - [x] 增加代理详情页，展示平台安装方式、来源和验证日期。
-- [ ] 完成键盘操作、焦点状态、对比度和窗口尺寸适配。
+- [x] 完成键盘操作、焦点状态、对比度和窗口尺寸适配（全局 `:focus-visible`、`prefers-reduced-motion`、ModalDialog 焦点陷阱）。
 - [ ] 邀请 3 至 5 名用户完成安装、查询和卸载任务测试。
 
 ### M4：发布准备
 
-- [ ] GitHub Actions 构建并测试 Windows、macOS、Linux。
-- [ ] 生成 CLI 二进制和桌面安装包，附带 SHA-256 校验和。
-- [ ] 明确代码签名策略；未签名产物必须在文档中说明。
-- [ ] 增加 `CONTRIBUTING.md`、安全策略、变更日志和问题模板。
-- [ ] 更新 README，使支持状态由清单自动生成，避免手工漂移。
+- [x] GitHub Actions 构建并测试 Windows、macOS、Linux。（2026-08-06 复核：ci.yml/release.yml 就绪）
+- [x] 生成 CLI 二进制和桌面安装包，附带 SHA-256 校验和（`scripts/generate-checksums.ps1/.sh`，release.yml 已集成并附加到 Release）。
+- [x] 明确代码签名策略；未签名产物必须在文档中说明（`docs/signing-policy.md`）。
+- [x] 增加 `CONTRIBUTING.md`、安全策略、变更日志和问题模板。
+- [x] 更新 README，使支持状态由清单自动生成，避免手工漂移（`scripts/generate-support-matrix.py`，已修正 README 与 agents.json 的漂移）。
 - [ ] 发布 `v1.0.0` 并完成安装、升级、卸载回归测试。
 
 ## 7. 验收标准

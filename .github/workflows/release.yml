@@ -70,6 +70,8 @@ jobs:
             ## AgentHub ${{ github.ref_name }}
             
             See [CHANGELOG](CHANGELOG.md) for details.
+
+            SHA-256 checksums are attached for every artifact. Signing status per platform: see [docs/signing-policy.md](docs/signing-policy.md). Unsigned artifacts are explicitly declared there.
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
@@ -92,3 +94,12 @@ jobs:
         with:
           name: checksums-${{ matrix.target }}
           path: SHA256SUMS-*
+
+      - name: Attach checksums to GitHub Release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if compgen -G 'SHA256SUMS-*' > /dev/null; then
+            gh release upload "${{ github.ref_name }}" SHA256SUMS-* --clobber
+          fi

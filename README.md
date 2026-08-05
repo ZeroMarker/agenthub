@@ -178,6 +178,8 @@ npm run tauri build
 cargo build --release
 ```
 
+发布产物的代码签名策略与未签名声明见 [docs/signing-policy.md](docs/signing-policy.md)，校验和由 `scripts/generate-checksums.*` 自动生成。
+
 ---
 
 ## 支持的 Agent
@@ -187,37 +189,37 @@ cargo build --release
 ### CLI Agent（7 个）
 
 | Agent | 提供商 | 包名 | 包管理器 | 状态 |
-|-------|--------|------|----------|------|
-| Codex | OpenAI | `@openai/codex` | npm | verified |
+|---|---|---|---|---|
 | Claude Code | Anthropic | `@anthropic-ai/claude-code` | npm | verified |
+| Codex | OpenAI | `@openai/codex` | npm | verified |
+| Grok CLI | xAI | `xAI.GrokBuild` | winget | community |
 | Kimi Code | Moonshot | `@moonshot-ai/kimi-code` | npm | community |
+| MiMo Code | Xiaomi | `@mimo-ai/cli` | npm | community |
 | Qwen Code | Alibaba | `@qwen-code/qwen-code` | npm | community |
-| Reasonix CLI | Reasonix | `ESEngine.ReasonixCLI` | winget | verified |
-| MiMo Code | Xiaomi | `@mimo-ai/cli` | npm | verified |
-| Grok CLI | xAI | `xAI.GrokBuild` | winget | verified |
+| Reasonix CLI | Reasonix | `ESEngine.ReasonixCLI` | winget | community |
 
 ### Desktop Agent（18 个）
 
 | Agent | 提供商 | Windows | macOS | 状态 |
-|-------|--------|---------|-------|------|
-| Cursor | Cursor | winget | brew | verified |
-| Windsurf | Codeium | winget | brew | verified |
-| Trae | ByteDance | winget | brew | verified |
-| Trae Solo | ByteDance | winget | brew | verified |
-| Codex Desktop | OpenAI | winget | brew | verified |
-| Claude Desktop | Anthropic | winget | brew | verified |
-| Kimi Desktop | Moonshot | winget | brew | community |
-| WorkBuddy | Tencent | winget | brew | community |
-| CodeBuddy | Tencent | winget | brew | community |
-| Qoder | Alibaba | winget | brew | community |
-| Qoder Work | Alibaba | winget | brew | community |
-| MiniMax Agent | MiniMax | winget | brew | community |
-| ZCode | ZhipuAI | winget | brew | community |
+|---|---|---|---|---|
 | Antigravity | Google | winget | brew | verified |
 | Antigravity IDE | Google | winget | brew | verified |
-| Reasonix | Reasonix | winget | brew | verified |
+| Claude Desktop | Anthropic | winget | brew | verified |
+| CodeBuddy | Tencent | winget | brew | verified |
+| Codex Desktop | OpenAI | winget | brew | verified |
+| Cursor | Cursor | winget | brew | verified |
+| Kimi Desktop | Moonshot | winget | brew | verified |
+| MiniMax Agent | MiniMax | winget | brew | verified |
 | OpenCode | OpenCode | winget | brew | verified |
 | OpenWork | DifferentAI | winget | — | community |
+| Qoder | Qoder | winget | brew | verified |
+| Qoder Work | Qoder | winget | brew | verified |
+| Reasonix | Reasonix | winget | brew | verified |
+| Trae | ByteDance | winget | brew | verified |
+| Trae Solo | ByteDance | winget | brew | verified |
+| Windsurf | Codeium | winget | brew | verified |
+| WorkBuddy | Tencent | winget | brew | verified |
+| ZCode | ZCode | winget | brew | verified |
 
 ### 支持状态说明
 
@@ -227,9 +229,6 @@ cargo build --release
 | `community` | 社区贡献，未经官方验证 |
 | `manual` | 无可靠包管理器来源，仅提供官网链接 |
 | `deprecated` | 已废弃，不再维护 |
-
----
-
 ## CLI 命令
 
 ```

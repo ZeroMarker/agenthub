@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import CardProgress from './CardProgress.vue'
 
 interface InstallerInfo {
@@ -11,6 +11,17 @@ interface Agent {
   installers: InstallerInfo[]
   catalog_verified_at: string | null; installer_verified_at: string | null
 }
+interface InstallResult {
+  success: boolean
+  message: string
+  agent_name: string
+  command: string
+  exit_code: number | null
+  stdout: string
+  stderr: string
+  duration_ms: number
+  timed_out: boolean
+}
 
 const props = defineProps<{
   agent: Agent
@@ -18,6 +29,7 @@ const props = defineProps<{
   installed: boolean
   version: string | null
   progress: { step: number; total_steps: number; message: string } | null
+  result: InstallResult | null
 }>()
 
 const emit = defineEmits<{
@@ -25,11 +37,15 @@ const emit = defineEmits<{
   openDetail: [agent: Agent]
   install: [name: string]
   uninstall: [name: string]
+  cancel: [name: string]
 }>()
 
 function getInstallerSummary(agent: Agent): string {
   return [...new Set(agent.installers.map(i => i.manager))].join(', ') || 'N/A'
 }
+
+const isCancelled = (r: InstallResult) =>
+  !r.success && (r.message === 'Operation cancelled' || r.stderr.includes('cancelled'))
 </script>
 
 <template>
@@ -56,7 +72,44 @@ function getInstallerSummary(agent: Agent): string {
       <span class="meta-provider">{{ agent.provider }}</span>
       <span class="meta-installers">{{ getInstallerSummary(agent) }}</span>
     </div>
-    <CardProgress v-if="progress" :progress="progress" />
+
+    <!-- In-flight operation: progress + cancel -->
+    <div v-if="progress" class="op-panel">
+      <CardProgress :progress="progress" />
+      <button class="m3-btn-outlined btn-sm" @click.stop="emit('cancel', agent.id)">Cancel</button>
+    </div>
+
+    <!-- Failed / cancelled operation: retry + expandable details -->
+    <div v-else-if="result && !result.success" class="op-panel">
+      <div :class="['op-badge', isCancelled(result) ? 'op-cancelled' : 'op-failed']">
+        {{ isCancelled(result) ? 'Cancelled' : 'Failed' }}
+      </div>
+      <div class="op-message">{{ result.message }}</div>
+      <div class="op-actions">
+        <button
+          v-if="!isCancelled(result)"
+          class="m3-btn-tonal btn-sm"
+          @click.stop="emit('install', agent.id)"
+        >Retry</button>
+        <button
+          v-else
+          class="m3-btn-tonal btn-sm"
+          @click.stop="emit('install', agent.id)"
+        >Install</button>
+      </div>
+      <details class="op-details" v-if="result.command || result.stderr || result.stdout">
+        <summary>Failure details</summary>
+        <pre class="op-pre"><template v-if="result.command">$ {{ result.command }}
+</template><template v-if="result.exit_code !== null">exit code: {{ result.exit_code }}
+</template><template v-if="result.timed_out">timed out after {{ result.duration_ms }}ms
+</template><template v-if="result.stderr">stderr:
+{{ result.stderr }}</template><template v-if="result.stdout">
+stdout:
+{{ result.stdout }}</template></pre>
+      </details>
+    </div>
+
+    <!-- Normal state: install/uninstall -->
     <div v-else class="card-actions">
       <button v-if="installed" class="m3-btn-tonal" @click.stop="emit('uninstall', agent.id)">Uninstall</button>
       <button v-else class="m3-btn-tonal" @click.stop="emit('install', agent.id)">Install</button>
@@ -116,4 +169,35 @@ function getInstallerSummary(agent: Agent): string {
   background: var(--md-sys-color-surface-variant);
   color: var(--md-sys-color-on-surface-variant);
 }
+
+
+/* Operation panel (progress/cancel, failure details) */
+.op-panel { display: flex; flex-direction: column; gap: 0.5rem; }
+.op-panel .btn-sm { align-self: flex-start; }
+.op-badge {
+  font: var(--md-sys-typescale-label-small);
+  font-weight: 600;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--md-sys-shape-full);
+  align-self: flex-start;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.op-failed { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+.op-cancelled { background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); }
+.op-message { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-on-surface-variant); }
+.op-actions { display: flex; gap: 0.5rem; }
+.op-details { font: var(--md-sys-typescale-label-small); color: var(--md-sys-color-on-surface-variant); }
+.op-details summary { cursor: pointer; }
+.op-pre {
+  font: var(--md-sys-typescale-body-small);
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface-variant);
+  border-radius: var(--md-sys-shape-xs);
+  padding: 0.5rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 </style>

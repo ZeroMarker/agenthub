@@ -284,3 +284,24 @@ code {
   opacity: 0.38;
   cursor: not-allowed;
 }
+
+/* ============================================================
+   Accessibility
+   ============================================================ */
+
+/* Visible focus ring for keyboard users (mouse clicks don't trigger it) */
+:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+  border-radius: var(--md-sys-shape-xs);
+}
+
+/* Honor reduced-motion preference globally */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

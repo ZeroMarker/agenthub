@@ -1,6 +1,8 @@
-﻿use crate::agent::{Agent, Platform};
+use crate::agent::{Agent, Platform};
 use crate::command_builder::{CommandOutput, CommandRunner, RealCommandRunner};
 use crate::error::{AgentHubError, Result};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Result of an install or uninstall operation.
@@ -61,10 +63,7 @@ impl Installer {
 
         Some(CommandPreview {
             command,
-            description: format!(
-                "{} {} via {:?}",
-                action, agent.name, installer.manager
-            ),
+            description: format!("{} {} via {:?}", action, agent.name, installer.manager),
             platform: self.platform,
         })
     }
@@ -121,6 +120,22 @@ impl Installer {
         dry_run: bool,
         timeout: Option<Duration>,
     ) -> Result<InstallResult> {
+        self.execute_install_cancellable(agent, dry_run, timeout, None)
+    }
+
+    /// Execute agent installation with an optional cancellation flag.
+    ///
+    /// * `dry_run` — if true, returns a successful result without executing anything
+    /// * `timeout` — optional maximum duration; `None` means no timeout
+    /// * `cancel` — when set, the running command is killed and the result
+    ///   reports failure with `timed_out: true` and "Operation cancelled" stderr
+    pub fn execute_install_cancellable(
+        &self,
+        agent: &Agent,
+        dry_run: bool,
+        timeout: Option<Duration>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<InstallResult> {
         let command = self.build_install_command(agent)?;
 
         if dry_run {
@@ -137,12 +152,10 @@ impl Installer {
             });
         }
 
-        let output = self.runner.run_command(&command, timeout)?;
-        let message = Self::format_message(
-            &output,
-            agent.name.as_str(),
-            "install",
-        );
+        let output = self
+            .runner
+            .run_command_cancellable(&command, timeout, cancel)?;
+        let message = Self::format_message(&output, agent.name.as_str(), "install");
 
         Ok(InstallResult {
             success: output.success,
@@ -167,6 +180,22 @@ impl Installer {
         dry_run: bool,
         timeout: Option<Duration>,
     ) -> Result<InstallResult> {
+        self.execute_uninstall_cancellable(agent, dry_run, timeout, None)
+    }
+
+    /// Execute agent uninstallation with an optional cancellation flag.
+    ///
+    /// * `dry_run` — if true, returns a successful result without executing anything
+    /// * `timeout` — optional maximum duration; `None` means no timeout
+    /// * `cancel` — when set, the running command is killed and the result
+    ///   reports failure with `timed_out: true` and "Operation cancelled" stderr
+    pub fn execute_uninstall_cancellable(
+        &self,
+        agent: &Agent,
+        dry_run: bool,
+        timeout: Option<Duration>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<InstallResult> {
         let command = self.build_uninstall_command(agent)?;
 
         if dry_run {
@@ -183,12 +212,10 @@ impl Installer {
             });
         }
 
-        let output = self.runner.run_command(&command, timeout)?;
-        let message = Self::format_message(
-            &output,
-            agent.name.as_str(),
-            "uninstall",
-        );
+        let output = self
+            .runner
+            .run_command_cancellable(&command, timeout, cancel)?;
+        let message = Self::format_message(&output, agent.name.as_str(), "uninstall");
 
         Ok(InstallResult {
             success: output.success,
@@ -205,7 +232,10 @@ impl Installer {
 
     fn format_message(output: &CommandOutput, agent_name: &str, action: &str) -> String {
         if output.timed_out {
-            format!("{} {} timed out after {}ms", agent_name, action, output.duration_ms)
+            format!(
+                "{} {} timed out after {}ms",
+                agent_name, action, output.duration_ms
+            )
         } else if output.success {
             format!("{} {}d successfully", agent_name, action)
         } else {
@@ -285,7 +315,9 @@ pub fn summarize_batch(results: &[InstallResult]) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::{Agent, AgentKind, InstallerConfig, PackageManager, Platform, SupportStatus};
+    use crate::agent::{
+        Agent, AgentKind, InstallerConfig, PackageManager, Platform, SupportStatus,
+    };
     use crate::command_builder::MockCommandRunner;
     use std::collections::HashMap;
 
@@ -333,9 +365,7 @@ mod tests {
         let runner = MockCommandRunner::success();
         let installer = Installer::new(Platform::Windows, Box::new(runner));
 
-        let result = installer
-            .execute_install(&agent, false, None)
-            .unwrap();
+        let result = installer.execute_install(&agent, false, None).unwrap();
 
         assert!(result.success, "Expected success, got: {}", result.message);
         assert_eq!(result.command, "npm install -g @test/package");
@@ -348,9 +378,7 @@ mod tests {
         let runner = MockCommandRunner::failure();
         let installer = Installer::new(Platform::Windows, Box::new(runner));
 
-        let result = installer
-            .execute_install(&agent, false, None)
-            .unwrap();
+        let result = installer.execute_install(&agent, false, None).unwrap();
 
         assert!(!result.success);
         assert!(result.message.contains("Failed"));
@@ -362,9 +390,7 @@ mod tests {
         let runner = MockCommandRunner::success();
         let installer = Installer::new(Platform::Windows, Box::new(runner));
 
-        let result = installer
-            .execute_install(&agent, true, None)
-            .unwrap();
+        let result = installer.execute_install(&agent, true, None).unwrap();
 
         assert!(result.success);
         assert!(result.message.contains("Dry run"));
@@ -405,9 +431,7 @@ mod tests {
         let runner = MockCommandRunner::success();
         let installer = Installer::new(Platform::Windows, Box::new(runner));
 
-        let result = installer
-            .execute_uninstall(&agent, false, None)
-            .unwrap();
+        let result = installer.execute_uninstall(&agent, false, None).unwrap();
 
         assert!(result.success, "Expected success, got: {}", result.message);
         assert_eq!(result.command, "npm uninstall -g @test/package");
@@ -419,9 +443,7 @@ mod tests {
         let runner = MockCommandRunner::success();
         let installer = Installer::new(Platform::Windows, Box::new(runner));
 
-        let result = installer
-            .execute_uninstall(&agent, true, None)
-            .unwrap();
+        let result = installer.execute_uninstall(&agent, true, None).unwrap();
 
         assert!(result.success);
         assert!(result.message.contains("Dry run"));
@@ -433,9 +455,7 @@ mod tests {
         let runner = MockCommandRunner::failure();
         let installer = Installer::new(Platform::Windows, Box::new(runner));
 
-        let result = installer
-            .execute_uninstall(&agent, false, None)
-            .unwrap();
+        let result = installer.execute_uninstall(&agent, false, None).unwrap();
 
         assert!(!result.success);
     }

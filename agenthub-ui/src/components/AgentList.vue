@@ -77,6 +77,7 @@ const sortDirection = ref<'asc' | 'desc'>('asc')
 const selectedAgent = ref<Agent | null>(null)
 const showDetailModal = ref(false)
 const lastRefresh = ref<number>(0)
+const lastResults = ref<Record<string, InstallResult>>({})
 
 function getCache(): CacheEntry | null {
   try {
@@ -219,6 +220,7 @@ async function searchAgents() {
 
 async function installAgent(name: string) {
   cardProgress.value[name] = { step: 1, total_steps: 3, message: 'Starting...' }
+  delete lastResults.value[name]
   message.value = ''
   try {
     const result = await invoke<InstallResult>('install_agent', { name })
@@ -231,9 +233,9 @@ async function installAgent(name: string) {
       messageType.value = 'success'
       setTimeout(() => message.value = '', 5000)
     } else {
+      delete cardProgress.value[name]
+      lastResults.value[name] = result
       const detail = result.stderr || result.stdout || result.message
-      cardProgress.value[name] = { step: 3, total_steps: 3, message: `❌ Failed: ${detail}` }
-      setTimeout(() => delete cardProgress.value[name], 4000)
       message.value = `❌ ${name}: ${detail}`
       messageType.value = 'error'
     }
@@ -246,6 +248,7 @@ async function installAgent(name: string) {
 
 async function uninstallAgent(name: string) {
   cardProgress.value[name] = { step: 1, total_steps: 3, message: 'Starting...' }
+  delete lastResults.value[name]
   message.value = ''
   try {
     const result = await invoke<InstallResult>('uninstall_agent', { name })
@@ -258,9 +261,9 @@ async function uninstallAgent(name: string) {
       messageType.value = 'success'
       setTimeout(() => message.value = '', 5000)
     } else {
+      delete cardProgress.value[name]
+      lastResults.value[name] = result
       const detail = result.stderr || result.stdout || result.message
-      cardProgress.value[name] = { step: 3, total_steps: 3, message: `❌ Failed: ${detail}` }
-      setTimeout(() => delete cardProgress.value[name], 4000)
       message.value = `❌ ${name}: ${detail}`
       messageType.value = 'error'
     }
@@ -268,6 +271,14 @@ async function uninstallAgent(name: string) {
     delete cardProgress.value[name]
     message.value = `❌ Error: ${error}`
     messageType.value = 'error'
+  }
+}
+
+async function cancelAgent(name: string) {
+  try {
+    await invoke<boolean>('cancel_operation', { name })
+  } catch (error) {
+    console.error('Failed to cancel operation:', error)
   }
 }
 
@@ -368,6 +379,7 @@ async function batchUninstall() {
 let unlistenInstall: UnlistenFn | null = null
 let unlistenUninstall: UnlistenFn | null = null
 let unlistenBatch: UnlistenFn | null = null
+let unlistenCancelled: UnlistenFn | null = null
 
 onMounted(() => {
   loadAgents().then(() => loadInstalledStatus())
@@ -382,6 +394,14 @@ onMounted(() => {
   listen('batch-progress', (event) => {
     batchProgress.value = event.payload as {current: number, total: number, agent: string, action: string}
   }).then(fn => unlistenBatch = fn)
+  listen('operation-cancelled', (event) => {
+    const p = event.payload as {name: string}
+    delete cardProgress.value[p.name]
+    delete lastResults.value[p.name]
+    message.value = `✋ ${p.name} operation cancelled`
+    messageType.value = 'success'
+    setTimeout(() => message.value = '', 5000)
+  }).then(fn => unlistenCancelled = fn)
 })
 
 onUnmounted(() => {
@@ -389,6 +409,7 @@ onUnmounted(() => {
   unlistenInstall?.()
   unlistenUninstall?.()
   unlistenBatch?.()
+  unlistenCancelled?.()
   if (searchTimeout) {
     clearTimeout(searchTimeout)
   }
@@ -480,6 +501,7 @@ onErrorCaptured((err, _instance, info) => {
           <div class="progress-fill" :style="{ width: (batchProgress.current / batchProgress.total * 100) + '%' }"></div>
         </div>
         <div class="progress-message">Processing: {{ batchProgress.agent }}</div>
+        <button class="m3-btn-outlined" @click="cancelAgent(batchProgress.agent)" style="margin-top: 1rem;">Cancel</button>
       </div>
     </div>
 
@@ -505,10 +527,12 @@ onErrorCaptured((err, _instance, info) => {
         :installed="!!installedMap.get(agent.id)?.installed"
         :version="installedMap.get(agent.id)?.version || null"
         :progress="cardProgress[agent.id] || null"
+        :result="lastResults[agent.id] || null"
         @toggle-select="toggleSelectAgent"
         @open-detail="openDetail"
         @install="installAgent"
         @uninstall="uninstallAgent"
+        @cancel="cancelAgent"
       />
     </div>
 
@@ -522,11 +546,13 @@ onErrorCaptured((err, _instance, info) => {
       :loading="loading"
       :progress="cardProgress"
       :installed-map="installedMap"
+      :results="lastResults"
       @toggle-sort="toggleSort"
       @toggle-select="toggleSelectAgent"
       @select-all="selectAllAgents"
       @install="installAgent"
       @uninstall="uninstallAgent"
+      @cancel="cancelAgent"
     />
 
     <EmptyState v-if="!loading && filteredAgents.length === 0" text="No agents found" />

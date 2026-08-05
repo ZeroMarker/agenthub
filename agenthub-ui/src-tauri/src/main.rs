@@ -6,10 +6,11 @@ use agenthub_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::Emitter;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AgentInfo {
@@ -61,6 +62,8 @@ pub struct AppState {
     prompt_manager: Arc<PromptManager>,
     session_manager: Arc<SessionManager>,
     memory_manager: Arc<MemoryManager>,
+    /// Per-agent cancellation flags for in-flight install/uninstall operations.
+    cancellations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 fn agent_to_info(agent: &Agent) -> AgentInfo {
@@ -181,6 +184,13 @@ async fn install_agent(
 
     match agent {
         Some(agent) => {
+            let cancel_flag = Arc::new(AtomicBool::new(false));
+            state
+                .cancellations
+                .lock()
+                .await
+                .insert(agent.name.clone(), cancel_flag.clone());
+
             let _ = app.emit(
                 "install-progress",
                 serde_json::json!({
@@ -206,13 +216,36 @@ async fn install_agent(
             let platform = state.platform;
             let agent_clone = agent.clone();
             let agent_name = agent.name.clone();
+            let cancel_inner = cancel_flag.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                let installer = Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
-                installer.execute_install(&agent_clone, false, None)
+                let installer =
+                    Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
+                installer.execute_install_cancellable(&agent_clone, false, None, Some(cancel_inner))
             })
-            .await
-            .map_err(|e| format!("Task failed: {}", e))?;
+            .await;
+
+            state.cancellations.lock().await.remove(&agent_name);
+
+            if cancel_flag.load(Ordering::Relaxed) {
+                let _ = app.emit(
+                    "operation-cancelled",
+                    serde_json::json!({ "name": agent_name.clone() }),
+                );
+                return Ok(InstallResult {
+                    success: false,
+                    message: "Operation cancelled".to_string(),
+                    agent_name,
+                    command: String::new(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    duration_ms: 0,
+                    timed_out: false,
+                });
+            }
+
+            let result = result.map_err(|e| format!("Task failed: {}", e))?;
 
             match result {
                 Ok(result) => {
@@ -276,6 +309,13 @@ async fn uninstall_agent(
 
     match agent {
         Some(agent) => {
+            let cancel_flag = Arc::new(AtomicBool::new(false));
+            state
+                .cancellations
+                .lock()
+                .await
+                .insert(agent.name.clone(), cancel_flag.clone());
+
             let _ = app.emit(
                 "uninstall-progress",
                 serde_json::json!({
@@ -301,13 +341,41 @@ async fn uninstall_agent(
             let platform = state.platform;
             let agent_clone = agent.clone();
             let agent_name = agent.name.clone();
+            let cancel_inner = cancel_flag.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                let installer = Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
-                installer.execute_uninstall(&agent_clone, false, None)
+                let installer =
+                    Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
+                installer.execute_uninstall_cancellable(
+                    &agent_clone,
+                    false,
+                    None,
+                    Some(cancel_inner),
+                )
             })
-            .await
-            .map_err(|e| format!("Task failed: {}", e))?;
+            .await;
+
+            state.cancellations.lock().await.remove(&agent_name);
+
+            if cancel_flag.load(Ordering::Relaxed) {
+                let _ = app.emit(
+                    "operation-cancelled",
+                    serde_json::json!({ "name": agent_name.clone() }),
+                );
+                return Ok(InstallResult {
+                    success: false,
+                    message: "Operation cancelled".to_string(),
+                    agent_name,
+                    command: String::new(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    duration_ms: 0,
+                    timed_out: false,
+                });
+            }
+
+            let result = result.map_err(|e| format!("Task failed: {}", e))?;
 
             match result {
                 Ok(result) => {
@@ -387,15 +455,52 @@ async fn batch_install_agents(
                     }),
                 );
 
+                let cancel_flag = Arc::new(AtomicBool::new(false));
+                state
+                    .cancellations
+                    .lock()
+                    .await
+                    .insert(agent.name.clone(), cancel_flag.clone());
+
                 let agent_clone = agent.clone();
                 let agent_name = agent.name.clone();
+                let cancel_inner = cancel_flag.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    let installer = Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
-                    installer.execute_install(&agent_clone, false, None)
+                    let installer =
+                        Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
+                    installer.execute_install_cancellable(
+                        &agent_clone,
+                        false,
+                        None,
+                        Some(cancel_inner),
+                    )
                 })
-                .await
-                .map_err(|e| format!("Task failed: {}", e))?;
+                .await;
+
+                state.cancellations.lock().await.remove(&agent_name);
+
+                if cancel_flag.load(Ordering::Relaxed) {
+                    let _ = app.emit(
+                        "operation-cancelled",
+                        serde_json::json!({ "name": agent_name.clone() }),
+                    );
+                    results.push(InstallResult {
+                        success: false,
+                        message: "Operation cancelled".to_string(),
+                        agent_name: agent_name.clone(),
+                        command: String::new(),
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration_ms: 0,
+                        timed_out: false,
+                    });
+                    fail_count += 1;
+                    break;
+                }
+
+                let result = result.map_err(|e| format!("Task failed: {}", e))?;
 
                 match result {
                     Ok(result) => {
@@ -484,15 +589,52 @@ async fn batch_uninstall_agents(
                     }),
                 );
 
+                let cancel_flag = Arc::new(AtomicBool::new(false));
+                state
+                    .cancellations
+                    .lock()
+                    .await
+                    .insert(agent.name.clone(), cancel_flag.clone());
+
                 let agent_clone = agent.clone();
                 let agent_name = agent.name.clone();
+                let cancel_inner = cancel_flag.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    let installer = Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
-                    installer.execute_uninstall(&agent_clone, false, None)
+                    let installer =
+                        Installer::new(platform, Box::new(RealCommandRunner::new(platform)));
+                    installer.execute_uninstall_cancellable(
+                        &agent_clone,
+                        false,
+                        None,
+                        Some(cancel_inner),
+                    )
                 })
-                .await
-                .map_err(|e| format!("Task failed: {}", e))?;
+                .await;
+
+                state.cancellations.lock().await.remove(&agent_name);
+
+                if cancel_flag.load(Ordering::Relaxed) {
+                    let _ = app.emit(
+                        "operation-cancelled",
+                        serde_json::json!({ "name": agent_name.clone() }),
+                    );
+                    results.push(InstallResult {
+                        success: false,
+                        message: "Operation cancelled".to_string(),
+                        agent_name: agent_name.clone(),
+                        command: String::new(),
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration_ms: 0,
+                        timed_out: false,
+                    });
+                    fail_count += 1;
+                    break;
+                }
+
+                let result = result.map_err(|e| format!("Task failed: {}", e))?;
 
                 match result {
                     Ok(result) => {
@@ -571,6 +713,23 @@ struct NativeConfig {
     config_content: String,
     config_format: String,
     parsed: Option<serde_json::Value>,
+}
+
+/// Cancel an in-flight install/uninstall operation for the given agent.
+/// Returns true if a cancellable operation was found and flagged.
+#[tauri::command]
+async fn cancel_operation(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let flags = state.cancellations.lock().await;
+    match flags.get(&name) {
+        Some(flag) => {
+            flag.store(true, Ordering::Relaxed);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
 }
 
 #[tauri::command]
@@ -1253,11 +1412,87 @@ async fn delete_memory(
         .map_err(|e| e.to_string())
 }
 
+fn main() {
+    tracing_subscriber::fmt::init();
+
+    let catalog = load_catalog().expect("Failed to load agent catalog");
+    let platform = get_current_platform();
+
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("agenthub");
+    let config_manager = ConfigManager::new(config_dir.clone());
+
+    // Initialize skill manager with codex skills directory
+    let codex_skills_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codex")
+        .join("skills");
+    let skill_manager =
+        SkillManager::new(config_dir.join("skills")).with_extra_dir(codex_skills_dir);
+
+    let prompt_manager = PromptManager::new(config_dir.join("prompts"));
+    let session_manager = SessionManager::new(config_dir.join("sessions"));
+    let memory_manager = MemoryManager::new(config_dir.join("memory"));
+
+    let state = AppState {
+        catalog: Arc::new(RwLock::new(catalog)),
+        platform,
+        config_manager: Arc::new(config_manager),
+        skill_manager: Arc::new(skill_manager),
+        prompt_manager: Arc::new(prompt_manager),
+        session_manager: Arc::new(session_manager),
+        memory_manager: Arc::new(memory_manager),
+        cancellations: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .manage(state)
+        .invoke_handler(tauri::generate_handler![
+            list_agents,
+            search_agents,
+            install_agent,
+            uninstall_agent,
+            batch_install_agents,
+            batch_uninstall_agents,
+            cancel_operation,
+            list_configs,
+            get_config,
+            get_native_config,
+            save_native_config,
+            set_config_value,
+            delete_config,
+            create_config,
+            list_installed_agents,
+            list_skills,
+            create_skill,
+            enable_skill,
+            disable_skill,
+            delete_skill,
+            run_diagnostics,
+            list_prompts,
+            create_prompt,
+            render_prompt,
+            delete_prompt,
+            list_sessions,
+            create_session,
+            get_session,
+            delete_session,
+            list_memories,
+            create_memory,
+            search_memories,
+            delete_memory
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agenthub_core::{Agent, AgentKind, InstallerConfig, Platform, SupportStatus};
     use agenthub_core::agent::PackageManager;
+    use agenthub_core::{Agent, AgentKind, InstallerConfig, Platform, SupportStatus};
     use std::collections::HashMap;
 
     fn test_agent() -> Agent {
@@ -1386,78 +1621,4 @@ mod tests {
         assert!(json.contains("\"success\":1"));
         assert!(json.contains("\"failed\":1"));
     }
-}
-
-fn main() {
-    tracing_subscriber::fmt::init();
-
-    let catalog = load_catalog().expect("Failed to load agent catalog");
-    let platform = get_current_platform();
-
-    let config_dir = dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("agenthub");
-    let config_manager = ConfigManager::new(config_dir.clone());
-
-    // Initialize skill manager with codex skills directory
-    let codex_skills_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".codex")
-        .join("skills");
-    let skill_manager =
-        SkillManager::new(config_dir.join("skills")).with_extra_dir(codex_skills_dir);
-
-    let prompt_manager = PromptManager::new(config_dir.join("prompts"));
-    let session_manager = SessionManager::new(config_dir.join("sessions"));
-    let memory_manager = MemoryManager::new(config_dir.join("memory"));
-
-    let state = AppState {
-        catalog: Arc::new(RwLock::new(catalog)),
-        platform,
-        config_manager: Arc::new(config_manager),
-        skill_manager: Arc::new(skill_manager),
-        prompt_manager: Arc::new(prompt_manager),
-        session_manager: Arc::new(session_manager),
-        memory_manager: Arc::new(memory_manager),
-    };
-
-    tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        .manage(state)
-        .invoke_handler(tauri::generate_handler![
-            list_agents,
-            search_agents,
-            install_agent,
-            uninstall_agent,
-            batch_install_agents,
-            batch_uninstall_agents,
-            list_configs,
-            get_config,
-            get_native_config,
-            save_native_config,
-            set_config_value,
-            delete_config,
-            create_config,
-            list_installed_agents,
-            list_skills,
-            create_skill,
-            enable_skill,
-            disable_skill,
-            delete_skill,
-            run_diagnostics,
-            list_prompts,
-            create_prompt,
-            render_prompt,
-            delete_prompt,
-            list_sessions,
-            create_session,
-            get_session,
-            delete_session,
-            list_memories,
-            create_memory,
-            search_memories,
-            delete_memory
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
 }

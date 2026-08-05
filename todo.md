@@ -7,13 +7,16 @@
 - [x] 仓库卫生：`.mimocode`/`.reasonix`/`.commandcode` 工具本地状态移出追踪并加入 `.gitignore`
 
 ### 🔄 进行中（并行委派）
-- [ ] **前端测试设施**（B）：Vitest + Vue Test Utils 配置，AgentList 搜索/筛选/批量选择/排序/状态展示组件测试
-- [ ] **Rust 代码卫生**（D）：clippy 0 警告 + 关键路径 unwrap()/expect() 降级为错误传播
-- [ ] **发布准备**（E）：校验和脚本 + 代码签名策略文档 + README 支持矩阵自动化生成
+- [x] **前端测试设施**（B）：Vitest + Vue Test Utils 配置完成，AgentList 11 项组件测试（搜索/筛选/批量选择/排序/状态/取消/重试/失败详情）全绿，`vue-tsc` 构建无回归
+- [x] **Rust 代码卫生**（D）：clippy 0 警告；经精确扫描确认生产代码 0 处 unwrap/expect（之前按文件统计的 90 处几乎全部在测试模块内），仅 2 处启动期 expect 为合理保留
+- [x] **发布准备**（E）：`scripts/generate-checksums.ps1/.sh`（实测通过）、`docs/signing-policy.md`、`scripts/generate-support-matrix.py`（已修正 README 与 agents.json 的 13 处漂移）、release.yml 校验和附加到 GitHub Release
 
 ### ⏳ 待启动（Wave 2，依赖 B/D 完成后避免文件冲突）
-- [ ] **M3 体验补全**（C）：逐项进度、取消（`cancel_operation` 命令 + `operation-cancelled` 事件契约已设计）、重试、失败详情
-- [ ] **可访问性**：键盘操作、焦点状态、对比度、窗口尺寸适配
+- [x] **M3 体验补全**（C）：取消机制（`cancel_operation` 命令 + `operation-cancelled` 事件 + 进程树 kill）、卡片/表格/批量进度面板的重试按钮、可展开失败详情（命令/退出码/stderr/stdout）
+- [x] **可访问性**：全局 `:focus-visible` 焦点环、`prefers-reduced-motion` 支持（ModalDialog 原有 Escape/焦点陷阱/焦点恢复保留）
+
+### 新增
+- [x] 修复 `run_command` 超时路径 bug：超时/取消时真正 kill 进程树（原实现注释承认无法 kill，子进程会残留）
 
 ## M3: Beta 体验
 
@@ -66,15 +69,15 @@ All UI components have been migrated to the Material 3 design token system:
 - [x] GitHub Actions: 前端 npm run build 检查（`ci.yml` ✅）
 
 ### 发布产物
-- [ ] CLI 二进制 + SHA-256 校验和
+- [x] CLI 二进制 + SHA-256 校验和（`scripts/generate-checksums.ps1/.sh`，release.yml 已集成并附加到 Release）
 - [x] 桌面安装包（Tauri build 配置完成，release workflow 已就绪）
-- [ ] 代码签名策略文档
+- [x] 代码签名策略文档（`docs/signing-policy.md`）
 
 ### 文档
 - [x] CONTRIBUTING.md
 - [x] 安全策略（SECURITY.md）
 - [x] 问题模板（issue templates）
-- [ ] 更新 README 支持矩阵自动化生成
+- [x] 更新 README 支持矩阵自动化生成（`scripts/generate-support-matrix.py`）
 
 ### 发布
 - [ ] 发布 v1.0.0

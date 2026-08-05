@@ -104,7 +104,9 @@ impl StatusDetector {
                 .args(["/C", "pip", "list", "--format=columns"])
                 .output()
         } else {
-            Command::new("pip").args(["list", "--format=columns"]).output()
+            Command::new("pip")
+                .args(["list", "--format=columns"])
+                .output()
         };
 
         match output {
@@ -223,7 +225,8 @@ impl StatusDetector {
                 continue;
             }
             // Split on 2+ spaces to handle variable-width columns
-            let parts: Vec<&str> = trimmed.split(|c: char| c.is_whitespace())
+            let parts: Vec<&str> = trimmed
+                .split(|c: char| c.is_whitespace())
                 .filter(|s| !s.is_empty())
                 .collect();
             if parts.len() >= 2 && parts[0] == package {

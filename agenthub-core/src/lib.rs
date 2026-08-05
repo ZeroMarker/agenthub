@@ -13,7 +13,10 @@ pub mod status;
 
 pub use agent::{Agent, AgentKind, InstallerConfig, PackageManager, Platform, SupportStatus};
 pub use catalog::Catalog;
-pub use command_builder::{CommandBuilder, CommandOutput, CommandRunner, MockCommandRunner, MockResponse, RealCommandRunner};
+pub use command_builder::{
+    CommandBuilder, CommandOutput, CommandRunner, MockCommandRunner, MockResponse,
+    RealCommandRunner,
+};
 pub use config::{AgentConfig, ConfigManager, ConfigValue, Environment};
 pub use diagnostic::{CheckStatus, DiagnosticCheck, DiagnosticManager, DiagnosticReport};
 pub use error::{AgentHubError, Result};

@@ -20,11 +20,31 @@ fn test_all_agents_have_required_fields() {
 
     for agent in catalog.agents() {
         assert!(!agent.id.is_empty(), "Agent has empty id");
-        assert!(!agent.name.is_empty(), "Agent '{}' has empty name", agent.id);
-        assert!(!agent.description.is_empty(), "Agent '{}' has empty description", agent.id);
-        assert!(!agent.homepage.is_empty(), "Agent '{}' has empty homepage", agent.id);
-        assert!(!agent.provider.is_empty(), "Agent '{}' has empty provider", agent.id);
-        assert!(!agent.installers.is_empty(), "Agent '{}' has no installers", agent.id);
+        assert!(
+            !agent.name.is_empty(),
+            "Agent '{}' has empty name",
+            agent.id
+        );
+        assert!(
+            !agent.description.is_empty(),
+            "Agent '{}' has empty description",
+            agent.id
+        );
+        assert!(
+            !agent.homepage.is_empty(),
+            "Agent '{}' has empty homepage",
+            agent.id
+        );
+        assert!(
+            !agent.provider.is_empty(),
+            "Agent '{}' has empty provider",
+            agent.id
+        );
+        assert!(
+            !agent.installers.is_empty(),
+            "Agent '{}' has no installers",
+            agent.id
+        );
     }
 }
 
@@ -72,7 +92,10 @@ fn test_cli_agents_have_at_least_one_non_manual_installer() {
 
     let cli_agents = catalog.filter_by_kind(AgentKind::CLI);
     for agent in cli_agents {
-        let has_auto_installer = agent.installers.values().any(|c| c.manager != PackageManager::Manual);
+        let has_auto_installer = agent
+            .installers
+            .values()
+            .any(|c| c.manager != PackageManager::Manual);
         assert!(
             has_auto_installer,
             "CLI agent '{}' has only manual installers",
@@ -92,7 +115,10 @@ fn test_catalog_search_includes_all_fields() {
 
     // Search by description
     let by_desc = catalog.search("AI");
-    assert!(!by_desc.is_empty(), "Should find agents with 'AI' in description");
+    assert!(
+        !by_desc.is_empty(),
+        "Should find agents with 'AI' in description"
+    );
 
     // Search by provider
     let by_provider = catalog.search("Google");

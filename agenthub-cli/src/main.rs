@@ -1,6 +1,4 @@
-use agenthub_core::{
-    Agent, Catalog, DiagnosticManager, Installer, Platform, RealCommandRunner,
-};
+use agenthub_core::{Agent, Catalog, DiagnosticManager, Installer, Platform, RealCommandRunner};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -200,17 +198,15 @@ pub fn cmd_info(name: &str, catalog: &Catalog) -> String {
     for (p, config) in &agent.installers {
         let current = if *p == platform { " (current)" } else { "" };
         let pkg = config.package.as_deref().unwrap_or("N/A");
-        out.push_str(&format!("  {:?}{}: {:?} {}\n", p, current, config.manager, pkg));
+        out.push_str(&format!(
+            "  {:?}{}: {:?} {}\n",
+            p, current, config.manager, pkg
+        ));
     }
     out
 }
 
-pub fn cmd_install(
-    _name: &str,
-    dry_run: bool,
-    agent: &Agent,
-    platform: Platform,
-) -> String {
+pub fn cmd_install(_name: &str, dry_run: bool, agent: &Agent, platform: Platform) -> String {
     let runner = RealCommandRunner::new(platform);
     let installer = Installer::new(platform, Box::new(runner));
 
@@ -219,12 +215,7 @@ pub fn cmd_install(
             "Will execute: {}\nDescription:  {}",
             cmd.command, cmd.description
         ),
-        None => {
-            return format!(
-                "No installer available for {} on this platform",
-                agent.name
-            )
-        }
+        None => return format!("No installer available for {} on this platform", agent.name),
     };
 
     let result = match installer.execute_install(agent, dry_run, None) {
@@ -246,12 +237,7 @@ pub fn cmd_install(
     }
 }
 
-pub fn cmd_uninstall(
-    _name: &str,
-    dry_run: bool,
-    agent: &Agent,
-    platform: Platform,
-) -> String {
+pub fn cmd_uninstall(_name: &str, dry_run: bool, agent: &Agent, platform: Platform) -> String {
     let runner = RealCommandRunner::new(platform);
     let installer = Installer::new(platform, Box::new(runner));
 
@@ -309,29 +295,19 @@ fn main() {
     let platform = get_platform();
 
     let result = match cli.command {
-        Commands::List { kind } => {
-            match load_catalog() {
-                Ok(catalog) => cmd_list(kind, &catalog),
-                Err(e) => format!("Error: {}", e),
-            }
-        }
-        Commands::Search { query, kind } => {
-            match load_catalog() {
-                Ok(catalog) => cmd_search(&query, kind, &catalog),
-                Err(e) => format!("Error: {}", e),
-            }
-        }
-        Commands::Info { name } => {
-            match load_catalog() {
-                Ok(catalog) => cmd_info(&name, &catalog),
-                Err(e) => format!("Error: {}", e),
-            }
-        }
-        Commands::Install {
-            name,
-            dry_run,
-            yes,
-        } => {
+        Commands::List { kind } => match load_catalog() {
+            Ok(catalog) => cmd_list(kind, &catalog),
+            Err(e) => format!("Error: {}", e),
+        },
+        Commands::Search { query, kind } => match load_catalog() {
+            Ok(catalog) => cmd_search(&query, kind, &catalog),
+            Err(e) => format!("Error: {}", e),
+        },
+        Commands::Info { name } => match load_catalog() {
+            Ok(catalog) => cmd_info(&name, &catalog),
+            Err(e) => format!("Error: {}", e),
+        },
+        Commands::Install { name, dry_run, yes } => {
             let catalog = match load_catalog() {
                 Ok(c) => c,
                 Err(e) => {
@@ -359,11 +335,7 @@ fn main() {
             }
             cmd_install(&name, dry_run, &agent, platform)
         }
-        Commands::Uninstall {
-            name,
-            dry_run,
-            yes,
-        } => {
+        Commands::Uninstall { name, dry_run, yes } => {
             let catalog = match load_catalog() {
                 Ok(c) => c,
                 Err(e) => {
@@ -524,7 +496,11 @@ mod tests {
     fn test_load_catalog_from_project_root() {
         // Running from project root, agents.json should be found
         let result = load_catalog();
-        assert!(result.is_ok(), "expected catalog to load: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "expected catalog to load: {:?}",
+            result.err()
+        );
     }
 
     const TEST_AGENTS_JSON: &str = r#"{

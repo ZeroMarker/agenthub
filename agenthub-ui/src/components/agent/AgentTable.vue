@@ -17,6 +17,7 @@ const props = defineProps<{
   loading: boolean
   progress: Record<string, { step: number; total_steps: number; message: string }>
   installedMap: Map<string, { installed: boolean; version: string | null }>
+  results: Record<string, InstallResult | null>
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   selectAll: []
   install: [name: string]
   uninstall: [name: string]
+  cancel: [name: string]
 }>()
 
 function getSortIcon(field: string): string {
@@ -34,6 +36,21 @@ function getSortIcon(field: string): string {
 function getInstallerSummary(agent: Agent): string {
   return [...new Set(agent.installers.map(i => i.manager))].join(', ') || 'N/A'
 }
+
+interface InstallResult {
+  success: boolean
+  message: string
+  agent_name: string
+  command: string
+  exit_code: number | null
+  stdout: string
+  stderr: string
+  duration_ms: number
+  timed_out: boolean
+}
+
+const isCancelled = (r: InstallResult) =>
+  !r.success && (r.message === 'Operation cancelled' || r.stderr.includes('cancelled'))
 </script>
 
 <template>
@@ -67,6 +84,23 @@ function getInstallerSummary(agent: Agent): string {
           <td>
             <div v-if="progress[agent.id]">
               <CardProgress :progress="progress[agent.id]" />
+              <button class="m3-btn-outlined btn-sm" @click="emit('cancel', agent.id)">Cancel</button>
+            </div>
+            <div v-else-if="results[agent.id] && !results[agent.id]!.success" class="table-op">
+              <span :class="['op-badge', isCancelled(results[agent.id]!) ? 'op-cancelled' : 'op-failed']">
+                {{ isCancelled(results[agent.id]!) ? 'Cancelled' : 'Failed' }}
+              </span>
+              <div class="op-actions">
+                <button class="m3-btn-tonal btn-sm" @click="emit('install', agent.id)">
+                  {{ isCancelled(results[agent.id]!) ? 'Install' : 'Retry' }}
+                </button>
+                <details class="op-details">
+                  <summary>Details</summary>
+                  <pre class="op-pre">{{ results[agent.id]!.message }}<template v-if="results[agent.id]!.command">
+$ {{ results[agent.id]!.command }}</template><template v-if="results[agent.id]!.stderr">
+{{ results[agent.id]!.stderr }}</template></pre>
+                </details>
+              </div>
             </div>
             <div v-else class="table-actions">
               <button v-if="installedMap.get(agent.id)?.installed" class="m3-btn-tonal btn-sm" @click="emit('uninstall', agent.id)">Uninstall</button>
@@ -114,4 +148,11 @@ code { font-size: 0.85em; background: var(--md-sys-color-surface-variant); paddi
 .table-actions { display: flex; gap: 0.375rem; align-items: center; }
 .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.8rem; }
 .version-chip { font: var(--md-sys-typescale-label-small); padding: 0.125rem 0.5rem; border-radius: var(--md-sys-shape-xs); background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); }
+.table-op { display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; }
+.op-badge { font: var(--md-sys-typescale-label-small); font-weight: 600; padding: 0.125rem 0.5rem; border-radius: var(--md-sys-shape-full); text-transform: uppercase; letter-spacing: 0.5px; }
+.op-failed { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+.op-cancelled { background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); }
+.op-actions { display: flex; gap: 0.375rem; align-items: center; }
+.op-details summary { cursor: pointer; font: var(--md-sys-typescale-label-small); color: var(--md-sys-color-on-surface-variant); }
+.op-pre { font: var(--md-sys-typescale-body-small); background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); border-radius: var(--md-sys-shape-xs); padding: 0.375rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-width: 420px; }
 </style>

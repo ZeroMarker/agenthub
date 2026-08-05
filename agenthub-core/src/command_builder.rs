@@ -1,6 +1,7 @@
 use crate::agent::{PackageManager, Platform};
 use crate::error::{AgentHubError, Result};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 /// Output from a command execution.
@@ -57,6 +58,25 @@ impl CommandBuilder {
     /// When `timeout` is `Some`, the process is killed and `timed_out` is set
     /// to `true` in the result if it exceeds the duration.
     pub fn run_command(&self, command: &str, timeout: Option<Duration>) -> Result<CommandOutput> {
+        self.run_command_cancellable(command, timeout, None)
+    }
+
+    /// Execute a command with an optional timeout and cancellation flag.
+    ///
+    /// Same semantics as [`run_command`](Self::run_command), but also polls the
+    /// given `cancel` flag while the child process runs. When the flag becomes
+    /// `true`, the process tree is killed and the returned output carries
+    /// `success: false` with `stderr` set to "Operation cancelled by user".
+    ///
+    /// The child process is ALWAYS killed on timeout/cancel (the wait happens
+    /// in a thread while this function retains the PID, so `kill` actually
+    /// terminates the process tree).
+    pub fn run_command_cancellable(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<CommandOutput> {
         let start = std::time::Instant::now();
         let (program, args): (String, Vec<String>) = if self.platform == Platform::Windows {
             ("cmd".into(), vec!["/C".into(), command.into()])
@@ -78,82 +98,104 @@ impl CommandBuilder {
             .map_err(|e| {
                 AgentHubError::InstallerError(format!("Failed to spawn process: {}", e))
             })?;
+        let pid = child.id();
+        let deadline = timeout.map(|dur| start + dur);
 
-        match timeout {
-            Some(dur) => {
-                // Move child into a thread that captures stdout/stderr
-                let (tx, rx) = mpsc::channel();
+        // Capture output in a thread while this function keeps the PID so the
+        // process can be killed on timeout/cancel.
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let output = child.wait_with_output();
+            let _ = tx.send(output);
+        });
 
-                std::thread::spawn(move || {
-                    let output = child.wait_with_output();
-                    let _ = tx.send(output);
-                });
-
-                match rx.recv_timeout(dur) {
-                    Ok(Ok(output)) => {
-                        let duration = start.elapsed();
-                        Ok(CommandOutput {
-                            success: output.status.success(),
-                            exit_code: output.status.code(),
-                            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                            timed_out: false,
-                            duration_ms: duration.as_millis() as u64,
-                        })
-                    }
-                    Ok(Err(e)) => Err(AgentHubError::InstallerError(format!(
+        let mut cancelled = false;
+        let mut timed_out = false;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(Ok(output)) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    return Ok(CommandOutput {
+                        success: output.status.success() && !cancelled,
+                        exit_code: if cancelled {
+                            None
+                        } else {
+                            output.status.code()
+                        },
+                        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                        stderr: if cancelled {
+                            "Operation cancelled by user".to_string()
+                        } else {
+                            stderr
+                        },
+                        timed_out,
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    });
+                }
+                Ok(Err(e)) => {
+                    return Err(AgentHubError::InstallerError(format!(
                         "Process wait failed: {}",
                         e
-                    ))),
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        // Kill the child process by its ID
-                        // We can't access `child` anymore (moved into thread),
-                        // but we know the stdout/stderr pipes won't be read.
-                        // For a more robust approach, use Child::kill before the move.
-                        // Since the thread owns child, it will be dropped when
-                        // the thread exits, eventually terminating the process.
-                        let duration = start.elapsed();
-                        Ok(CommandOutput {
-                            success: false,
-                            exit_code: None,
-                            stdout: String::new(),
-                            stderr: "Process timed out".to_string(),
-                            timed_out: true,
-                            duration_ms: duration.as_millis() as u64,
-                        })
-                    }
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        Err(AgentHubError::InstallerError(
-                            "Process channel disconnected".to_string(),
-                        ))
+                    )))
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if !cancelled && !timed_out {
+                        if let Some(flag) = &cancel {
+                            if flag.load(Ordering::Relaxed) {
+                                cancelled = true;
+                                Self::kill_process(pid);
+                            }
+                        }
+                        if cancelled {
+                            // keep waiting for the killed child to report
+                        } else if let Some(d) = deadline {
+                            if std::time::Instant::now() >= d {
+                                timed_out = true;
+                                Self::kill_process(pid);
+                            }
+                        }
                     }
                 }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(AgentHubError::InstallerError(
+                        "Process channel disconnected".to_string(),
+                    ));
+                }
             }
-            None => {
-                let output = child.wait_with_output().map_err(|e| {
-                    AgentHubError::InstallerError(format!("Process wait failed: {}", e))
-                })?;
-                let duration = start.elapsed();
-                Ok(CommandOutput {
-                    success: output.status.success(),
-                    exit_code: output.status.code(),
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                    timed_out: false,
-                    duration_ms: duration.as_millis() as u64,
-                })
-            }
+        }
+    }
+
+    /// Kill a process tree by PID (taskkill /T on Windows, kill -TERM elsewhere).
+    fn kill_process(pid: u32) {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
         }
     }
 }
 
 /// Trait for executing commands, enabling mocking in tests.
 pub trait CommandRunner: Send + Sync {
-    fn run_command(
+    fn run_command(&self, command: &str, timeout: Option<Duration>) -> Result<CommandOutput>;
+
+    /// Execute a command with a cancellation flag. Default implementation
+    /// ignores the flag (used by mocks); real runners override it.
+    fn run_command_cancellable(
         &self,
         command: &str,
         timeout: Option<Duration>,
-    ) -> Result<CommandOutput>;
+        _cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<CommandOutput> {
+        self.run_command(command, timeout)
+    }
 
     /// Build a platform-aware command string for installation.
     fn install_command(&self, manager: &PackageManager, package: &str) -> Option<String>;
@@ -175,13 +217,19 @@ impl RealCommandRunner {
 }
 
 impl CommandRunner for RealCommandRunner {
-    fn run_command(
+    fn run_command(&self, command: &str, timeout: Option<Duration>) -> Result<CommandOutput> {
+        let builder = CommandBuilder::new(self.platform);
+        builder.run_command(command, timeout)
+    }
+
+    fn run_command_cancellable(
         &self,
         command: &str,
         timeout: Option<Duration>,
+        cancel: Option<Arc<AtomicBool>>,
     ) -> Result<CommandOutput> {
         let builder = CommandBuilder::new(self.platform);
-        builder.run_command(command, timeout)
+        builder.run_command_cancellable(command, timeout, cancel)
     }
 
     fn install_command(&self, manager: &PackageManager, package: &str) -> Option<String> {
@@ -276,11 +324,7 @@ impl MockResponse {
 }
 
 impl CommandRunner for MockCommandRunner {
-    fn run_command(
-        &self,
-        _command: &str,
-        _timeout: Option<Duration>,
-    ) -> Result<CommandOutput> {
+    fn run_command(&self, _command: &str, _timeout: Option<Duration>) -> Result<CommandOutput> {
         if self.responses.is_empty() {
             return Ok(CommandOutput {
                 success: true,
@@ -422,6 +466,50 @@ mod tests {
     }
 
     #[test]
+    fn test_run_command_cancellable_kills_process() {
+        let builder = CommandBuilder::new(Platform::Windows);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_kill = cancel.clone();
+
+        // Long-running command: ping 30 times on Windows, sleep 30 on Unix.
+        #[cfg(target_os = "windows")]
+        let cmd = "ping -n 30 127.0.0.1";
+        #[cfg(not(target_os = "windows"))]
+        let cmd = "sleep 30";
+
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            cancel_for_kill.store(true, Ordering::Relaxed);
+        });
+
+        let result = builder
+            .run_command_cancellable(cmd, Some(Duration::from_secs(10)), Some(cancel))
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.stderr.contains("cancelled"));
+        assert!(result.duration_ms < 10_000);
+    }
+
+    #[test]
+    fn test_run_command_timeout_kills_process() {
+        let builder = CommandBuilder::new(Platform::Windows);
+
+        #[cfg(target_os = "windows")]
+        let cmd = "ping -n 30 127.0.0.1";
+        #[cfg(not(target_os = "windows"))]
+        let cmd = "sleep 30";
+
+        let result = builder
+            .run_command(cmd, Some(Duration::from_millis(300)))
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.timed_out);
+        assert!(result.duration_ms < 10_000);
+    }
+
+    #[test]
     fn test_mock_runner_success() {
         let runner = MockCommandRunner::success();
         let result = runner.run_command("npm install -g test", None).unwrap();
@@ -449,8 +537,12 @@ mod tests {
 
     #[test]
     fn test_mock_runner_custom_response() {
-        let runner = MockCommandRunner::new()
-            .with_response(MockResponse::new(true, Some(0), "custom output", ""));
+        let runner = MockCommandRunner::new().with_response(MockResponse::new(
+            true,
+            Some(0),
+            "custom output",
+            "",
+        ));
         let result = runner.run_command("npm list", None).unwrap();
         assert!(result.success);
         assert_eq!(result.stdout, "custom output");

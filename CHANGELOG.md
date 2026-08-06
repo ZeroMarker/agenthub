@@ -2,9 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-08-06 (Wave 3: security + intelligence + orchestration)
+## [Unreleased]
 
-### Added
+## [1.1.0] - 2026-08-06
+
+### Added (Wave 3: security + intelligence + orchestration)
 - **Secret keystore (Config)**: file-backed `SecretStore` (`secrets.yaml`, 0600 permissions) — secret values never live in agent config files or templates; redacted listing, rotation with archived previous values, and migration of legacy inline secrets out of config files
 - **API key rotation**: `rotate_secret` archives the old value (grace-period rollback) while activating the new one
 - **Memory vector search**: local embeddings (FNV-1a feature-hashed char n-grams → 256-dim, no network/model weights) with `search_entries_vector` and `hybrid_search` (BM25 + vector, 50/50 normalized blend) returning scored `MemoryMatch` results
@@ -22,9 +24,7 @@ All notable changes to this project will be documented in this file.
 - Backup format v1 extended with defaulted `workflows`/`memory_graph` fields (old backups still restore)
 - README/CONTRIBUTING document the low-resource build/test strategy
 
-## [Unreleased] - 2026-08-06 (Wave 2: portability + observability)
-
-### Added
+### Added (Wave 2: portability + observability)
 - **Config templates**: reusable `ConfigTemplate` (settings / env vars / secret key reservations / custom), CRUD, save-from-config (secret values never persisted) and apply-to-agent
 - **Session budget & alerts**: daily/monthly USD limits (`sessions/budget.yaml`), `check_budget` aggregates today/this-month spend and emits threshold alerts
 - **Session context handoff**: `export_context` (last-N messages as portable JSON) and `fork_session` (carry messages/model/tags/project into a new session, optionally for another agent)
@@ -39,9 +39,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - `SessionManager::set_budget` now creates the sessions directory automatically
 
-## [Unreleased] - 2026-08-06 (Wave 1)
-
-### Added
+### Added (Wave 1: overview + audit/backup + cost tracking + prompt versioning + BM25)
 - **Overview 模块（概览，只读聚合）**: workspace status overview (`OverviewReport` in `overview.rs`), `agenthub status`, GUI dashboard view
 - **横切能力（非模块）**: append-only audit log (`audit/events.jsonl`), whole-workspace backup/restore (configs, prompts + versions, sessions + templates, memories, audit)
 - **CLI**: `agenthub status` (overview), `agenthub audit [--action --target --last-days --limit]`, `agenthub backup [--output]`, `agenthub restore <file>`

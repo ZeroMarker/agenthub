@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-08-06 (Wave 3: security + intelligence + orchestration)
+
+### Added
+- **Secret keystore (Config)**: file-backed `SecretStore` (`secrets.yaml`, 0600 permissions) — secret values never live in agent config files or templates; redacted listing, rotation with archived previous values, and migration of legacy inline secrets out of config files
+- **API key rotation**: `rotate_secret` archives the old value (grace-period rollback) while activating the new one
+- **Memory vector search**: local embeddings (FNV-1a feature-hashed char n-grams → 256-dim, no network/model weights) with `search_entries_vector` and `hybrid_search` (BM25 + vector, 50/50 normalized blend) returning scored `MemoryMatch` results
+- **Memory knowledge graph**: entity extraction (tags / title tokens / quoted phrases) with weighted co-occurrence edges, persisted to `memory/graph.json`; `build_graph` / `load_graph` / `neighbors` / `summary`
+- **Skill workflows**: ordered step pipelines (`skill[:opt][;k=v]`) validated against installed skills (existence, enabled, dependency commands, version compatibility); optional steps skip without failing the run
+- **Prompt extraction from sessions**: `extract_from_session` turns a session message into a reusable template by replacing URLs, paths, versions, numbers, quoted text and identifiers with `{{placeholder}}` variables
+- **HTML dashboard (Overview)**: `render_dashboard_html` produces a self-contained browser view (inline CSS/JS + embedded JSON) — no server needed
+- **Monitor JSON + watch**: `MonitorReport::to_json` and `alert_summary` for cron/systemd; `agenthub monitor --json` / `--watch <sec>` loop mode
+- **Backup extension**: workflows and the memory graph are now included in backups; secret values remain intentionally excluded
+- **CLI**: `config secret set|get|delete|list`, `config rotate`, `config migrate`, `memory search-vector|search-hybrid`, `memory graph build|entities|neighbors|export`, `skill workflow list|show|create|delete|run`, `prompt extract`, `status --html`, `monitor --json/--watch`
+- **Tauri**: `get/set/delete/list/rotate/migrate_secret`, `search_memories_vector/hybrid`, `build/get_memory_graph`, `graph_neighbors`, `list/create/delete/run_workflow`, `extract_prompt_from_session`, `get_dashboard_html`
+- **Low-resource CI**: `docs/low-resource-ci.md` guide + `.github/workflows/ci-low-resource.yml` for self-hosted runners with RAM < 2 GB / storage < 40 GB (limits parallelism, drops debug info, tests core+cli only, cache write on main only)
+
+### Changed
+- Backup format v1 extended with defaulted `workflows`/`memory_graph` fields (old backups still restore)
+- README/CONTRIBUTING document the low-resource build/test strategy
+
 ## [Unreleased] - 2026-08-06 (Wave 2: portability + observability)
 
 ### Added

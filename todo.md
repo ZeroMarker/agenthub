@@ -2,6 +2,51 @@
 
 > 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill）；**保留 overview（概览）为独立只读模块**；审计日志、备份/恢复作为横切能力（非模块），详见 goal.md v0.5。
 
+## 长期规划第三波（2026-08-06）— ✅ 完成（安全存储 + 智能检索 + 工作流编排）
+
+### ✅ Config 密钥链存储 + API Key 轮换
+- [x] `SecretStore`：文件密钥链（`secrets.yaml`，0600 权限），值永不出现在 agent 配置/模板中；`redact` 脱敏列表；轮换历史归档（`previous` 可回滚）
+- [x] 内联密钥迁移（`migrate_secret`：旧配置明文值搬入密钥链并清空配置文件）；`get_secret` 兼容旧内联值回退
+- [x] CLI `config secret set|get|delete|list` / `config rotate` / `config migrate`；Tauri `get/set/delete/list/rotate/migrate_secret`
+- [x] 说明：OS keyring 已评估（libsecret/Keychain/DPAPI 系统依赖、headless Linux 不可用），当前文件密钥链零依赖，未来可换 keyring 后端
+
+### ✅ Memory 向量检索 + 知识图谱
+- [x] 本地向量嵌入（FNV-1a 特征哈希字符 3-gram → 256 维，L2 归一化，无网络/无模型权重）+ `search_entries_vector`（title×3/tags×2/content×1 加权）
+- [x] `hybrid_search`：BM25 与向量分数独立归一化后 50/50 融合，返回 `MemoryMatch`（score + method）
+- [x] 知识图谱：实体抽取（tags / 标题 token / 内容引号短语）+ 共现关系权重，持久化 `memory/graph.json`；`build_graph`/`load_graph`/`neighbors`/`summary`
+- [x] CLI `memory search-vector|search-hybrid` / `memory graph build|entities|neighbors|export`；Tauri `search_memories_vector/hybrid`、`build/get_memory_graph`、`graph_neighbors`
+
+### ✅ Skill 工作流编排
+- [x] `Workflow`（id/name/description/steps），步骤含 `args` 与 `optional`；`run_workflow` 逐步骤校验（存在/启用/依赖命令/版本兼容），可选步骤失败标记 skipped 不阻断
+- [x] CLI `skill workflow list|show|create|delete|run`（步骤语法 `skill[:opt][;k=v;...]`）；Tauri `list/create/delete/run_workflow`
+
+### ✅ Prompt 从会话提取
+- [x] `extract_from_message` / `extract_from_session`：URL/路径/版本号/数字/引号文本/异形标识符 → `{{占位符}}` 变量模板，保存为新 prompt（tag=extracted，category=session-extracted）
+- [x] CLI `prompt extract <session> [--message N] [--id] [--name] [--description]`；Tauri `extract_prompt_from_session`
+
+### ✅ Overview Web 仪表盘（浏览器独立视图）
+- [x] `render_dashboard_html`：自包含 HTML（内联 CSS/JS + 嵌入 JSON `__AGENTHUB_DASHBOARD__`），无服务器
+- [x] CLI `status --html <file>`；Tauri `get_dashboard_html`
+
+### ✅ 横切：监控 JSON + 定时化入口
+- [x] `MonitorReport::to_json` + `alert_summary`（供 cron/systemd 消费）；CLI `monitor --json` / `monitor --watch <sec>` 循环
+
+### ✅ 备份扩展
+- [x] 备份纳入 workflows + memory_graph（secrets 值有意排除，restore 不重建密钥链）
+
+### 📊 验证结果
+- Rust：207 测试全过（159 core + 9 集成 + 34 cli + 5 tauri），clippy 0 警告，fmt 干净
+- 前端：11 测试全过，vue-tsc + vite build 通过
+- 提交 `ddc2bae` + 文档提交 `a9467f2` 已推送 origin/main
+
+### 本波未覆盖（留待后续）
+- Config：OS keyring 后端（已评估，留接口）、API Key 轮换通知/审计接入
+- Memory：向量索引持久化（当前每次搜索即时嵌入）、知识图谱可视化前端
+- Skill：技能市场（需网络）、插件系统
+- Prompt：社区共享、提示词效果追踪（关联会话结果）
+- Overview：仪表盘交互化（当前静态导出）
+- 横切：告警推送渠道（邮件/webhook）
+
 ## 长期规划第二波（2026-08-06）— ✅ 完成（数据可移植性 + 可观测性）
 
 ### ✅ Config 配置模板
@@ -39,11 +84,11 @@
 - 前端：11 测试全过，vue-tsc + vite build 通过
 
 ### 本波未覆盖（留待后续）
-- Config：API Key 密钥链存储（需 keyring/系统依赖，待评估）、API Key 轮换
-- Memory：向量检索、知识图谱
-- Skill：技能市场（需网络）、工作流编排、插件系统
-- Overview：Web 仪表盘（浏览器独立视图）
-- 横切：监控定时化/告警推送（当前为手动 CLI/UI 触发）
+- Config：OS keyring 后端（已评估）、API Key 轮换通知/审计接入
+- Memory：向量索引持久化、知识图谱可视化前端
+- Skill：技能市场（需网络）、插件系统
+- Overview：仪表盘交互化（当前静态导出）
+- 横切：告警推送渠道（邮件/webhook）
 
 ## 长期规划第一波（2026-08-06）— ✅ 完成
 

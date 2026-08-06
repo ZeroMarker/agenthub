@@ -79,15 +79,15 @@ jobs:
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
-          # Find all release artifacts
-          ARTIFACTS_DIR="agenthub-ui/src-tauri/target/${{ matrix.target }}/release"
-          if [ -d "$ARTIFACTS_DIR" ]; then
-            cd "$ARTIFACTS_DIR"
-            for f in agenthub* *.msi *.dmg *.AppImage *.deb *.rpm; do
-              [ -f "$f" ] || continue
-              sha256sum "$f" >> "${GITHUB_WORKSPACE}/SHA256SUMS-${{ matrix.target }}"
-            done
-          fi
+          # Release artifacts live under target/<triple>/release/bundle/...
+          # plus the raw binary in the release dir itself. Use find so we
+          # cover all bundle subdirectories (appimage/deb/rpm/nsis/macos).
+          cd "agenthub-ui/src-tauri/target/${{ matrix.target }}/release"
+          find . -type f \( -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' \
+            -o -name '*.deb' -o -name '*.rpm' -o -name '*.exe' -o -name '*.tar.gz' \
+            -o -name 'agenthub*' \) -print0 | sort -z | xargs -0 -r sha256sum \
+            > "${GITHUB_WORKSPACE}/SHA256SUMS-${{ matrix.target }}"
+          wc -l "${GITHUB_WORKSPACE}/SHA256SUMS-${{ matrix.target }}"
 
       - name: Upload checksums
         uses: actions/upload-artifact@v4

@@ -467,7 +467,10 @@ mod tests {
 
     #[test]
     fn test_run_command_cancellable_kills_process() {
+        #[cfg(target_os = "windows")]
         let builder = CommandBuilder::new(Platform::Windows);
+        #[cfg(not(target_os = "windows"))]
+        let builder = CommandBuilder::new(Platform::Linux);
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_kill = cancel.clone();
 
@@ -493,7 +496,10 @@ mod tests {
 
     #[test]
     fn test_run_command_timeout_kills_process() {
+        #[cfg(target_os = "windows")]
         let builder = CommandBuilder::new(Platform::Windows);
+        #[cfg(not(target_os = "windows"))]
+        let builder = CommandBuilder::new(Platform::Linux);
 
         #[cfg(target_os = "windows")]
         let cmd = "ping -n 30 127.0.0.1";

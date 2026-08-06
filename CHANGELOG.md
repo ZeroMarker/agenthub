@@ -5,8 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-08-06
 
 ### Added
-- **横切能力（非模块）**: append-only audit log (`audit/events.jsonl`), whole-workspace backup/restore (configs, prompts + versions, sessions + templates, memories, audit), and workspace status overview (`OverviewReport` in `overview.rs`)
-- **CLI**: `agenthub status`, `agenthub audit [--action --target --last-days --limit]`, `agenthub backup [--output]`, `agenthub restore <file>`
+- **Overview 模块（概览，只读聚合）**: workspace status overview (`OverviewReport` in `overview.rs`), `agenthub status`, GUI dashboard view
+- **横切能力（非模块）**: append-only audit log (`audit/events.jsonl`), whole-workspace backup/restore (configs, prompts + versions, sessions + templates, memories, audit)
+- **CLI**: `agenthub status` (overview), `agenthub audit [--action --target --last-days --limit]`, `agenthub backup [--output]`, `agenthub restore <file>`
 - **GUI**: Overview view with dashboard stat cards, filterable audit log table, and backup/restore controls
 - **Session cost tracking**: built-in model pricing table (17 common models) with fallback, `record_usage` accumulation, `replay_session` markdown export, and reusable session templates
 - **Prompt version control**: automatic snapshot on every update, `list_versions` / `get_version` / `rollback`, plus usage counters (`usage_count` / `last_used_at`) and required-variable validation with defaults

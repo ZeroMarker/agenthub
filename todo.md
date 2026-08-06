@@ -1,15 +1,18 @@
 # TODO
 
-> 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill），审计日志、备份/恢复、状态概览作为横切能力（非模块），详见 goal.md v0.4。
+> 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill）；**保留 overview（概览）为独立只读模块**；审计日志、备份/恢复作为横切能力（非模块），详见 goal.md v0.5。
 
 ## 长期规划第一波（2026-08-06）— ✅ 完成
 
-### ✅ 横切能力：审计日志 / 备份恢复 / 状态概览（此前完全未实现）
+### ✅ Overview 概览模块（此前完全未实现）
+- [x] **状态概览** `overview.rs`：`StatusOverview` 聚合目录/已安装/配置/提示词/会话/记忆/技能/审计；`overview_with_status` 便于测试
+- [x] **CLI**：`agenthub status`
+- [x] **Tauri + UI**：`get_status_overview` 命令；新增概览视图（仪表盘卡片 + 可过滤审计表 + 备份/恢复入口）
+
+### ✅ 横切能力：审计日志 / 备份恢复（此前完全未实现）
 - [x] **审计日志** `audit.rs`：append-only JSONL 日志、`AuditQuery` 过滤（action/target/actor/since/until/limit）、action_counts、clear、import_events
 - [x] **备份/恢复** `backup.rs`：全工作区快照（configs、prompts+版本历史、sessions+模板、memories、audit）为单个 JSON；restore 校验 format_version 并回写全部数据
-- [x] **状态概览** `overview.rs`：`StatusOverview` 聚合目录/已安装/配置/提示词/会话/记忆/技能/审计；`overview_with_status` 便于测试
-- [x] **CLI**：`agenthub status` / `audit` / `backup` / `restore`
-- [x] **Tauri + UI**：`get_status_overview`/`list_audit`/`clear_audit`/`create_backup`/`restore_backup` 命令；新增概览视图（仪表盘卡片 + 可过滤审计表 + 备份/恢复）；install/uninstall 自动记录审计事件
+- [x] **CLI**：`agenthub audit` / `backup` / `restore`；Tauri `list_audit`/`clear_audit`/`create_backup`/`restore_backup`；install/uninstall 自动记录审计事件
 
 ### ✅ Session 成本追踪 + 回放 + 模板
 - [x] `PricingTable` 内置 17 个常见模型价格（USD/1M tokens）+ 未知模型回退价
@@ -35,6 +38,7 @@
 - Skill：技能市场（需网络）、工作流编排、版本兼容性检查、插件系统（归并自原 management）
 - Memory：向量检索、知识图谱
 - Session：成本阈值告警（成本监控延伸）
+- Overview：Web 仪表盘、时间维度趋势
 - 横切：监控与告警（Agent 可用性、API 状态、成本阈值）
 
 ## 当前优化波次（2026-08-06）— ✅ 全部完成
@@ -126,9 +130,9 @@ All UI components have been migrated to the Material 3 design token system:
 - [x] 发布 v1.0.0（2026-08-06，GitHub Release + 9 平台产物 + SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.0.0）
 - [x] 安装/升级/卸载回归测试（CLI: npm install→upgrade 0.145.0→0.146.1→uninstall ✅；.deb: dpkg install→reinstall→remove ✅；AppImage: 启动冒烟 ✅；校验和 sha256sum -c 全部通过 ✅）
 
-## 长期规划（goal.md 六大模块 + 横切能力）
+## 长期规划（goal.md：六大业务模块 + Overview 概览 + 横切能力）
 
-> Management 已从规划中移除：统一入口/生命周期/批量操作归 package，权限与密钥归 config，成本监控归 session，插件归 skill；审计/备份/状态概览为横切能力（非模块）。
+> Management 已从规划中移除：统一入口/生命周期/批量操作/健康检查归 package，权限与密钥归 config，成本监控归 session，插件归 skill；overview（概览）保留为独立只读模块；审计/备份/监控为横切能力（非模块）。
 
 ### Package 安装管理
 - [x] 生命周期管理（安装→配置→使用→更新→卸载）✅（v1.0 已有）
@@ -164,8 +168,12 @@ All UI components have been migrated to the Material 3 design token system:
 - [ ] 向量检索、知识图谱
 - [ ] 记忆导入/导出/同步
 
+### Overview 概览模块（只读聚合，不承载业务逻辑）
+- [x] 状态概览 `agenthub status` / GUI 仪表盘 ✅（2026-08-06 首波）
+- [ ] Web 仪表盘（浏览器独立视图）
+- [ ] 时间维度趋势（成本 / 会话数 / 审计量）
+
 ### 横切能力（非模块，工具而非业务模块）
 - [x] 审计日志 ✅（2026-08-06 首波，install/uninstall 已接入）
 - [x] 备份/恢复 ✅（2026-08-06 首波）
-- [x] 状态概览/仪表盘 ✅（2026-08-06 首波）
 - [ ] 监控与告警（Agent 可用性、API 状态、成本阈值）

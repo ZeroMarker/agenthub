@@ -60,6 +60,18 @@ npm run build
 - Update CHANGELOG.md under the Unreleased section
 - Ensure CI passes (format, clippy, test, build)
 
+## Low-Resource Machines
+
+On machines with limited resources (RAM < 2 GB, storage < 40 GB), see
+[`docs/low-resource-ci.md`](docs/low-resource-ci.md) for build/test strategies and
+the dedicated GitHub Actions workflow (`.github/workflows/ci-low-resource.yml`).
+Key points:
+
+- Limit parallelism: `export CARGO_BUILD_JOBS=2`
+- Skip the Tauri desktop build for quick verification: `cargo test -p agenthub-core -p agenthub-cli`
+- Keep the `target/` directory and cargo caches under control (`cargo clean -p`, prune caches)
+- Frontend: `export NODE_OPTIONS="--max-old-space-size=512"`
+
 ## Adding a New Agent
 
 1. Add the agent entry to `agents.json`

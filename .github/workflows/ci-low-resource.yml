@@ -1,0 +1,85 @@
+name: CI (low-resource)
+
+# 低配置（RAM < 2 GB、存储 < 40 GB）Linux 机器上的构建与测试。
+# 适用于自托管 runner；详细说明见 docs/low-resource-ci.md。
+#
+# 与 ci.yml 的差异：
+#   - 不构建 Tauri 桌面端（避免 webkit 依赖与高内存链接）
+#   - 限制 cargo 并行度（CARGO_BUILD_JOBS=2）与前端 Node 堆内存
+#   - 关闭 debug info 与增量编译，降低内存/磁盘占用
+#   - rust-cache 仅在 main 分支写缓存，避免磁盘被缓存占满
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  core:
+    # 按实际 runner labels 修改，例如 [self-hosted, linux, low-resource]
+    runs-on: [self-hosted, linux, low-resource]
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resource check
+        run: |
+          echo "== disk =="; df -h /
+          echo "== memory =="; free -m
+          echo "== cpu =="; nproc
+
+      - name: Free disk space
+        run: |
+          rm -rf ~/.cargo/registry/cache
+          df -h /
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache (write only on main)
+        uses: swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+
+      - name: Install core build deps (no webkit needed)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+
+      - name: Test core + cli
+        run: cargo test -p agenthub-core -p agenthub-cli
+
+      - name: Clippy (core + cli)
+        run: cargo clippy -p agenthub-core -p agenthub-cli -- -D warnings
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+  frontend:
+    runs-on: [self-hosted, linux, low-resource]
+    env:
+      NODE_OPTIONS: --max-old-space-size=512
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: agenthub-ui
+
+      - name: Type check + build
+        run: npm run build
+        working-directory: agenthub-ui

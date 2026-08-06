@@ -456,6 +456,20 @@ cargo test -- --nocapture
 - Clippy lint (`cargo clippy -D warnings`)
 - 前端构建 (`npm run build`)
 
+### 低资源 CI（`.github/workflows/ci-low-resource.yml`）
+
+触发条件：push / PR 到 `main`（也可 `workflow_dispatch` 手动触发）
+
+面向 **RAM < 2 GB、存储 < 40 GB** 的低配 Linux 自托管 runner：
+
+- 只测核心库与 CLI（`cargo test -p agenthub-core -p agenthub-cli`），跳过 Tauri 桌面构建
+- 限制并行度（`CARGO_BUILD_JOBS=2`）、关闭 debug info 与增量编译
+- 前端限制 Node 堆内存（`NODE_OPTIONS=--max-old-space-size=512`）
+- rust-cache 仅在 main 分支写缓存，防止磁盘被缓存占满
+
+使用前请将 `runs-on` 的 labels 改为你自己的 runner labels。完整策略与本地复现方法见
+[`docs/low-resource-ci.md`](docs/low-resource-ci.md)。
+
 ### 发布流水线（`.github/workflows/release.yml`）
 
 触发条件：推送 `v*` tag

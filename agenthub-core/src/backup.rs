@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use crate::audit::{AuditEvent, AuditManager};
 use crate::config::{AgentConfig, ConfigManager};
 use crate::error::{AgentHubError, Result};
+use crate::graph::KnowledgeGraph;
 use crate::memory::{MemoryEntry, MemoryManager};
 use crate::prompt::{PromptManager, PromptTemplate};
 use crate::session::{Session, SessionManager, SessionTemplate};
+use crate::workflow::{Workflow, WorkflowManager};
 
 /// Current backup file format version.
 pub const BACKUP_FORMAT_VERSION: u32 = 1;
@@ -21,6 +23,10 @@ pub struct BackupCounts {
     pub sessions: usize,
     pub session_templates: usize,
     pub memories: usize,
+    #[serde(default)]
+    pub workflows: usize,
+    #[serde(default)]
+    pub memory_graph: bool,
     pub audit_events: usize,
 }
 
@@ -45,6 +51,10 @@ pub struct BackupData {
     #[serde(default)]
     pub session_templates: Vec<SessionTemplate>,
     pub memories: Vec<MemoryEntry>,
+    #[serde(default)]
+    pub workflows: Vec<Workflow>,
+    #[serde(default)]
+    pub memory_graph: Option<KnowledgeGraph>,
     #[serde(default)]
     pub audit_events: Vec<AuditEvent>,
 }
@@ -94,6 +104,8 @@ impl BackupManager {
         let sessions = session_manager.list_sessions()?;
         let session_templates = session_manager.list_templates()?;
         let memories = memory_manager.list_entries(None)?;
+        let workflows = WorkflowManager::new(self.base_dir.join("skills")).list_workflows()?;
+        let memory_graph = memory_manager.load_graph().ok();
         let audit_events = audit_manager.load_all()?;
 
         let counts = BackupCounts {
@@ -103,6 +115,8 @@ impl BackupManager {
             sessions: sessions.len(),
             session_templates: session_templates.len(),
             memories: memories.len(),
+            workflows: workflows.len(),
+            memory_graph: memory_graph.is_some(),
             audit_events: audit_events.len(),
         };
 
@@ -132,8 +146,14 @@ impl BackupManager {
             sessions,
             session_templates,
             memories,
+            workflows,
+            memory_graph,
             audit_events,
         };
+
+        // Note: secret VALUES are intentionally never included in backups; only
+        // key names live in the config files themselves. Restoring a backup
+        // does not recreate keystore entries.
 
         let content = serde_json::to_string_pretty(&data).map_err(|e| {
             AgentHubError::BackupError(format!("Failed to serialize backup: {}", e))
@@ -200,6 +220,20 @@ impl BackupManager {
         }
         for memory in &data.memories {
             memory_manager.save_entry(memory)?;
+        }
+        let workflow_manager = WorkflowManager::new(self.base_dir.join("skills"));
+        for workflow in &data.workflows {
+            workflow_manager.save_workflow(workflow)?;
+        }
+        if let Some(graph) = &data.memory_graph {
+            std::fs::create_dir_all(memory_manager.memory_dir()).map_err(|e| {
+                AgentHubError::BackupError(format!("Failed to create memory dir: {}", e))
+            })?;
+            std::fs::write(
+                memory_manager.memory_dir().join("graph.json"),
+                graph.to_json()?,
+            )
+            .map_err(|e| AgentHubError::BackupError(format!("Failed to write graph: {}", e)))?;
         }
 
         // Replace the audit log with the backup's events.
@@ -273,6 +307,20 @@ mod tests {
         audit_manager
             .record("cli", "install", "agent-a", None, true)
             .unwrap();
+
+        let workflow_manager = WorkflowManager::new(base_dir.join("skills"));
+        workflow_manager
+            .create_workflow(
+                "ci",
+                "CI",
+                "checks",
+                vec![crate::workflow::WorkflowStep {
+                    skill: "rust-dev".to_string(),
+                    args: std::collections::HashMap::new(),
+                    optional: false,
+                }],
+            )
+            .unwrap();
     }
 
     #[test]
@@ -291,6 +339,7 @@ mod tests {
         assert_eq!(manifest.counts.prompt_versions, 1);
         assert_eq!(manifest.counts.sessions, 1);
         assert_eq!(manifest.counts.memories, 1);
+        assert_eq!(manifest.counts.workflows, 1);
         assert_eq!(manifest.counts.audit_events, 1);
 
         // Backup operation itself is audited
@@ -364,6 +413,8 @@ mod tests {
                     sessions: 0,
                     session_templates: 0,
                     memories: 0,
+                    workflows: 0,
+                    memory_graph: false,
                     audit_events: 0,
                 },
             },
@@ -373,6 +424,8 @@ mod tests {
             sessions: Vec::new(),
             session_templates: Vec::new(),
             memories: Vec::new(),
+            workflows: Vec::new(),
+            memory_graph: None,
             audit_events: Vec::new(),
         };
         std::fs::write(&backup_path, serde_json::to_string_pretty(&data).unwrap()).unwrap();

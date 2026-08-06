@@ -2,7 +2,7 @@ use agenthub_core::{
     Agent, AgentKind, AuditManager, AuditQuery, BackupManager, Catalog, ConfigManager, ConfigValue,
     DiagnosticManager, Installer, MemoryManager, MemoryScope, MemoryType, Monitor, OverviewReport,
     Platform, PricingTable, PromptManager, RealCommandRunner, Result, SessionManager, SkillManager,
-    StatusOverview,
+    StatusOverview, WorkflowManager, WorkflowStep,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -2098,6 +2098,216 @@ async fn run_monitor(
     state.monitor.run(&catalog).map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Wave 3 commands: secret keystore, memory vector/graph, workflows, prompt
+// extraction, HTML dashboard
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+async fn get_secret(
+    agent: String,
+    key: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Option<String>, String> {
+    state
+        .config_manager
+        .get_secret(&agent, &key)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_secret(
+    agent: String,
+    key: String,
+    value: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    state
+        .config_manager
+        .set_secret(&agent, &key, &value)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_secret(
+    agent: String,
+    key: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .config_manager
+        .delete_secret(&agent, &key)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_secrets(
+    agent: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::SecretInfo>, String> {
+    state
+        .config_manager
+        .list_secrets(agent.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn rotate_secret(
+    agent: String,
+    key: String,
+    new_value: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::SecretRotationResult, String> {
+    state
+        .config_manager
+        .rotate_secret(&agent, &key, &new_value)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn migrate_secret(
+    agent: String,
+    key: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .config_manager
+        .migrate_secret(&agent, &key)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn search_memories_vector(
+    query: String,
+    top_k: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::MemoryMatch>, String> {
+    state
+        .memory_manager
+        .search_entries_vector(&query, top_k.unwrap_or(20))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn search_memories_hybrid(
+    query: String,
+    top_k: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::MemoryMatch>, String> {
+    state
+        .memory_manager
+        .hybrid_search(&query, top_k.unwrap_or(20))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn build_memory_graph(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::GraphSummary, String> {
+    let graph = state
+        .memory_manager
+        .build_graph()
+        .map_err(|e| e.to_string())?;
+    Ok(graph.summary())
+}
+
+#[tauri::command]
+async fn get_memory_graph(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::KnowledgeGraph, String> {
+    state.memory_manager.load_graph().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn graph_neighbors(
+    entity: String,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::GraphEdge>, String> {
+    let graph = state
+        .memory_manager
+        .load_graph()
+        .map_err(|e| e.to_string())?;
+    Ok(graph.neighbors(&entity.to_lowercase(), limit.unwrap_or(10)))
+}
+
+#[tauri::command]
+async fn list_workflows(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::Workflow>, String> {
+    let manager = WorkflowManager::new(state.skill_manager.skills_dir().to_path_buf());
+    manager.list_workflows().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_workflow(
+    id: String,
+    name: String,
+    description: String,
+    steps: Vec<WorkflowStep>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::Workflow, String> {
+    let manager = WorkflowManager::new(state.skill_manager.skills_dir().to_path_buf());
+    manager
+        .create_workflow(&id, &name, &description, steps)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_workflow(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let manager = WorkflowManager::new(state.skill_manager.skills_dir().to_path_buf());
+    manager.delete_workflow(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn run_workflow(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::WorkflowRunReport, String> {
+    let manager = WorkflowManager::new(state.skill_manager.skills_dir().to_path_buf());
+    manager
+        .run_workflow(&state.skill_manager, &id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn extract_prompt_from_session(
+    session_id: String,
+    message_index: Option<usize>,
+    id: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::PromptExtraction, String> {
+    let fallback_id = format!("{}-prompt", session_id);
+    let fallback_name = fallback_id.clone();
+    state
+        .prompt_manager
+        .extract_from_session(
+            &state.session_manager,
+            &session_id,
+            message_index,
+            id.as_deref().unwrap_or(&fallback_id),
+            name.as_deref().unwrap_or(&fallback_name),
+            description.as_deref().unwrap_or("Extracted from a session"),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_dashboard_html(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    let catalog = state.catalog.read().await;
+    state
+        .overview_report
+        .render_dashboard_html(&catalog, 14)
+        .map_err(|e| e.to_string())
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -2212,7 +2422,24 @@ fn main() {
             fork_session,
             check_skill_compatibility,
             get_trend,
-            run_monitor
+            run_monitor,
+            get_secret,
+            set_secret,
+            delete_secret,
+            list_secrets,
+            rotate_secret,
+            migrate_secret,
+            search_memories_vector,
+            search_memories_hybrid,
+            build_memory_graph,
+            get_memory_graph,
+            graph_neighbors,
+            list_workflows,
+            create_workflow,
+            delete_workflow,
+            run_workflow,
+            extract_prompt_from_session,
+            get_dashboard_html
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

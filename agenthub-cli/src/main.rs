@@ -2,9 +2,11 @@ use agenthub_core::{
     Agent, AuditManager, AuditQuery, BackupManager, Catalog, ConfigManager, ConfigValue,
     DiagnosticManager, ImportSummary, Installer, MemoryManager, MemoryScope, Monitor,
     OverviewReport, Platform, PromptManager, RealCommandRunner, SessionManager, SkillManager,
+    WorkflowManager, WorkflowStep,
 };
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
@@ -68,6 +70,9 @@ enum Commands {
         /// Also print a daily trend for the last N days
         #[arg(long)]
         trend: Option<usize>,
+        /// Render a self-contained HTML dashboard to this file
+        #[arg(long = "html")]
+        html: Option<PathBuf>,
     },
     /// Query the audit log
     Audit {
@@ -98,6 +103,9 @@ enum Commands {
     /// Manage reusable config templates
     #[command(name = "config-template", subcommand)]
     ConfigTemplate(ConfigTemplateCmd),
+    /// Manage agent configs and the secret keystore
+    #[command(subcommand)]
+    Config(ConfigCmd),
     /// Export/import prompt templates
     #[command(subcommand)]
     Prompt(PromptArgs),
@@ -107,11 +115,18 @@ enum Commands {
     /// Session budget & context handoff
     #[command(subcommand)]
     Session(SessionArgs),
-    /// Skill version compatibility checks
+    /// Skill version compatibility checks and workflow orchestration
     #[command(subcommand)]
     Skill(SkillArgs),
     /// Run the monitoring pass (diagnostics + budget + compatibility)
-    Monitor,
+    Monitor {
+        /// Print the report as JSON instead of a human table
+        #[arg(long)]
+        json: bool,
+        /// Re-run every N seconds until interrupted (for cron/systemd loops)
+        #[arg(long)]
+        watch: Option<u64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -142,6 +157,41 @@ enum ConfigTemplateCmd {
 }
 
 #[derive(Subcommand)]
+enum ConfigCmd {
+    /// Manage secrets in the keystore (values never written to config files)
+    #[command(subcommand)]
+    Secret(SecretCmd),
+    /// Rotate a secret: archive the current value, activate a new one
+    Rotate {
+        agent: String,
+        key: String,
+        new_value: String,
+    },
+    /// Move a legacy inline secret from a config file into the keystore
+    Migrate { agent: String, key: String },
+}
+
+#[derive(Subcommand)]
+enum SecretCmd {
+    /// Store a secret value in the keystore
+    Set {
+        agent: String,
+        key: String,
+        value: String,
+    },
+    /// Print a secret value (handle with care)
+    Get { agent: String, key: String },
+    /// Delete a secret from the keystore
+    Delete { agent: String, key: String },
+    /// List stored secret keys with redacted values
+    List {
+        /// Restrict to one agent
+        #[arg(long)]
+        agent: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum PromptArgs {
     /// Export a prompt template (with version history) as JSON
     Export {
@@ -161,6 +211,23 @@ enum PromptArgs {
         #[arg(long)]
         force: bool,
     },
+    /// Extract a prompt template from a session message
+    Extract {
+        /// Session id
+        session: String,
+        /// Message index to extract from (default: the last message)
+        #[arg(long)]
+        message: Option<usize>,
+        /// Id for the new prompt (default: "<session-id>-prompt")
+        #[arg(long)]
+        id: Option<String>,
+        /// Display name for the new prompt
+        #[arg(long)]
+        name: Option<String>,
+        /// Description for the new prompt
+        #[arg(long)]
+        description: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -179,6 +246,43 @@ enum MemoryArgs {
         /// Skip entries whose path already exists
         #[arg(long)]
         merge: bool,
+    },
+    /// Vector (embedding) semantic search
+    SearchVector {
+        query: String,
+        #[arg(long, default_value_t = 10)]
+        top_k: usize,
+    },
+    /// Hybrid BM25 + vector search
+    SearchHybrid {
+        query: String,
+        #[arg(long, default_value_t = 10)]
+        top_k: usize,
+    },
+    /// Knowledge graph operations
+    #[command(subcommand)]
+    Graph(GraphCmd),
+}
+
+#[derive(Subcommand)]
+enum GraphCmd {
+    /// Build (or rebuild) the knowledge graph from all memories
+    Build,
+    /// List graph entities (most frequent first)
+    Entities {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Show entities related to a given entity
+    Neighbors {
+        entity: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// Export the graph as JSON
+    Export {
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -221,6 +325,30 @@ enum SkillArgs {
         #[arg(default_value = "*")]
         name: String,
     },
+    /// Orchestrate skills into reusable workflows
+    #[command(subcommand)]
+    Workflow(WorkflowCmd),
+}
+
+#[derive(Subcommand)]
+enum WorkflowCmd {
+    /// List workflows
+    List,
+    /// Show a workflow
+    Show { id: String },
+    /// Create a workflow (steps as skill1,skill2 or skill1;args;optional)
+    Create {
+        id: String,
+        name: String,
+        description: String,
+        /// Step: `skill` or `skill:opt` (optional) or `skill;key=value;...`
+        #[arg(long = "step", required = true)]
+        steps: Vec<String>,
+    },
+    /// Delete a workflow
+    Delete { id: String },
+    /// Validate a workflow against installed skills (dry-run plan)
+    Run { id: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -925,49 +1053,494 @@ pub fn cmd_skill_check_compat(base_dir: &Path, name: &str) -> String {
     }
 }
 
-pub fn cmd_monitor(base_dir: &Path, catalog: &Catalog) -> String {
-    let monitor = Monitor::new(base_dir.to_path_buf(), get_platform());
-    match monitor.run(catalog) {
-        Ok(report) => {
-            let status = if report.healthy {
-                "✅ HEALTHY"
-            } else {
-                "⚠️ ISSUES FOUND"
-            };
-            let mut out = format!("AgentHub Monitor — {}\n", status);
-            out.push_str(&format!("{}\n", "=".repeat(50)));
-            out.push_str(&format!("版本:       {}\n", report.agenthub_version));
-            out.push_str(&format!(
-                "已安装:     {} / 目录 {}\n",
-                report.installed_agents,
-                catalog.agents().len()
-            ));
-            out.push_str(&format!(
-                "诊断:       {} passed, {} warnings, {} failed\n",
-                report.diagnostics_passed, report.diagnostics_warnings, report.diagnostics_failed
-            ));
-            out.push_str(&format!(
-                "预算:       今日 ${:.4} / 本月 ${:.4}\n",
-                report.budget.daily_spent_usd, report.budget.monthly_spent_usd
-            ));
-            if !report.missing_agents.is_empty() {
-                out.push_str(&format!(
-                    "未安装(verified): {}\n",
-                    report.missing_agents.join(", ")
-                ));
+// ---------------------------------------------------------------------------
+// Wave 3: config keystore, prompt extraction, memory vector/graph, workflows,
+// status --html
+// ---------------------------------------------------------------------------
+
+pub fn cmd_config_secret_set(base_dir: &Path, agent: &str, key: &str, value: &str) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    // Ensure a config exists for the agent so settings and secrets stay together.
+    if manager.load_config(agent).is_err() {
+        if let Err(e) = manager.create_config(agent) {
+            return format!("Error: {}", e);
+        }
+    }
+    match manager.set_secret(agent, key, value) {
+        Ok(()) => format!(
+            "✅ Secret '{}' stored for '{}' (keystore: {})",
+            key,
+            agent,
+            {
+                let store = manager.secret_store();
+                store
+                    .base_dir()
+                    .join("secrets.yaml")
+                    .to_string_lossy()
+                    .into_owned()
             }
-            if !report.incompatible_skills.is_empty() {
-                out.push_str(&format!(
-                    "不兼容技能: {}\n",
-                    report.incompatible_skills.join(", ")
-                ));
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_secret_get(base_dir: &Path, agent: &str, key: &str) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    match manager.get_secret(agent, key) {
+        Ok(Some(value)) => value,
+        Ok(None) => format!("Secret '{}' not found for '{}'", key, agent),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_secret_delete(base_dir: &Path, agent: &str, key: &str) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    match manager.delete_secret(agent, key) {
+        Ok(true) => format!("✅ Secret '{}' deleted for '{}'", key, agent),
+        Ok(false) => format!("Secret '{}' not found for '{}'", key, agent),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_secret_list(base_dir: &Path, agent: Option<&str>) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    match manager.list_secrets(agent) {
+        Ok(infos) => {
+            if infos.is_empty() {
+                return "No secrets stored.".to_string();
             }
-            for warning in &report.warnings {
-                out.push_str(&format!("⚠️ {}\n", warning));
+            let mut out = format!(
+                "{:<40} {:<20} {:<10} {:<16}\n",
+                "KEY", "CREATED", "ROTATIONS", "VALUE"
+            );
+            out.push_str(&format!("{}\n", "-".repeat(90)));
+            for info in &infos {
+                out.push_str(&format!(
+                    "{:<40} {:<20} {:<10} {:<16}\n",
+                    info.key,
+                    info.created_at.format("%Y-%m-%d %H:%M"),
+                    info.rotated_count,
+                    info.redacted_value
+                ));
             }
             out
         }
-        Err(e) => format!("❌ Monitor failed: {}", e),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_secret_rotate(
+    base_dir: &Path,
+    agent: &str,
+    key: &str,
+    new_value: &str,
+) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    match manager.rotate_secret(agent, key, new_value) {
+        Ok(result) => format!(
+            "✅ Rotated '{}': {} previous value(s) archived at {}",
+            result.key,
+            result.previous_count,
+            result.rotated_at.format("%Y-%m-%d %H:%M:%S")
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_secret_migrate(base_dir: &Path, agent: &str, key: &str) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    match manager.migrate_secret(agent, key) {
+        Ok(true) => format!(
+            "✅ Migrated inline secret '{}' for '{}' into the keystore",
+            key, agent
+        ),
+        Ok(false) => format!("Nothing to migrate for '{}' (no inline value found)", key),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_prompt_extract(
+    base_dir: &Path,
+    session_id: &str,
+    message_index: Option<usize>,
+    id: Option<&str>,
+    name: Option<&str>,
+    description: Option<&str>,
+) -> String {
+    let prompt_manager = PromptManager::new(base_dir.join("prompts"));
+    let session_manager = SessionManager::new(base_dir.join("sessions"));
+    let fallback_id = format!("{}-prompt", session_id);
+    let new_id = id.unwrap_or(&fallback_id);
+    let fallback_name = new_id.to_string();
+    let new_name = name.unwrap_or(&fallback_name);
+    let new_desc = description
+        .unwrap_or("Extracted from a session")
+        .to_string();
+    match prompt_manager.extract_from_session(
+        &session_manager,
+        session_id,
+        message_index,
+        new_id,
+        new_name,
+        &new_desc,
+    ) {
+        Ok(extraction) => format!(
+            "✅ Extracted prompt '{}' from session {} message #{} ({})\n\nTemplate:\n{}",
+            extraction.prompt.id,
+            extraction.source_session_id,
+            extraction.source_message_index,
+            extraction.source_role,
+            extraction.prompt.template
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_memory_search_vector(base_dir: &Path, query: &str, top_k: usize) -> String {
+    let manager = MemoryManager::new(base_dir.join("memory"));
+    match manager.search_entries_vector(query, top_k) {
+        Ok(matches) => {
+            if matches.is_empty() {
+                return "No matching memories.".to_string();
+            }
+            let mut out = String::new();
+            for m in &matches {
+                out.push_str(&format!(
+                    "[{:.3}] {} — {}\n",
+                    m.score, m.entry.path, m.entry.title
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_memory_search_hybrid(base_dir: &Path, query: &str, top_k: usize) -> String {
+    let manager = MemoryManager::new(base_dir.join("memory"));
+    match manager.hybrid_search(query, top_k) {
+        Ok(matches) => {
+            if matches.is_empty() {
+                return "No matching memories.".to_string();
+            }
+            let mut out = String::new();
+            for m in &matches {
+                out.push_str(&format!(
+                    "[{:.3} {}] {} — {}\n",
+                    m.score, m.method, m.entry.path, m.entry.title
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_memory_graph_build(base_dir: &Path) -> String {
+    let manager = MemoryManager::new(base_dir.join("memory"));
+    match manager.build_graph() {
+        Ok(graph) => {
+            let summary = graph.summary();
+            format!(
+                "✅ Knowledge graph built: {} nodes, {} edges\nTop entities: {}",
+                summary.node_count,
+                summary.edge_count,
+                summary.top_entities.join(", ")
+            )
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_memory_graph_entities(base_dir: &Path, limit: usize) -> String {
+    let manager = MemoryManager::new(base_dir.join("memory"));
+    match manager.load_graph() {
+        Ok(graph) => {
+            let mut out = format!(
+                "{:<32} {:<10} {:<8} {:<10}\n",
+                "ENTITY", "KIND", "OCCUR", "SOURCE"
+            );
+            out.push_str(&format!("{}\n", "-".repeat(70)));
+            for node in graph.nodes.iter().take(limit) {
+                out.push_str(&format!(
+                    "{:<32} {:<10} {:<8} {:<10}\n",
+                    node.label,
+                    format!("{:?}", node.kind),
+                    node.occurrences,
+                    node.memories.len()
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}\nRun `agenthub memory graph build` first.", e),
+    }
+}
+
+pub fn cmd_memory_graph_neighbors(base_dir: &Path, entity: &str, limit: usize) -> String {
+    let manager = MemoryManager::new(base_dir.join("memory"));
+    match manager.load_graph() {
+        Ok(graph) => {
+            let id = entity.to_lowercase();
+            let neighbors = graph.neighbors(&id, limit);
+            if neighbors.is_empty() {
+                return format!("No relations found for '{}'.", entity);
+            }
+            let mut out = format!("Relations of '{}':\n", entity);
+            for edge in &neighbors {
+                let other = if edge.source == id {
+                    &edge.target
+                } else {
+                    &edge.source
+                };
+                out.push_str(&format!("  {} (weight {})\n", other, edge.weight));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}\nRun `agenthub memory graph build` first.", e),
+    }
+}
+
+pub fn cmd_memory_graph_export(base_dir: &Path, output: Option<PathBuf>) -> String {
+    let manager = MemoryManager::new(base_dir.join("memory"));
+    match manager.load_graph() {
+        Ok(graph) => {
+            let json = match graph.to_json() {
+                Ok(j) => j,
+                Err(e) => return format!("Error: {}", e),
+            };
+            match output {
+                Some(path) => {
+                    if let Err(e) = std::fs::write(&path, &json) {
+                        return format!("Error: {}", e);
+                    }
+                    format!("✅ Graph exported to {}", path.display())
+                }
+                None => json,
+            }
+        }
+        Err(e) => format!("Error: {}\nRun `agenthub memory graph build` first.", e),
+    }
+}
+
+pub fn cmd_status_html(base_dir: &Path, catalog: &Catalog, output: PathBuf) -> String {
+    let report = OverviewReport::new(base_dir.to_path_buf(), get_platform());
+    match report.render_dashboard_html(catalog, 14) {
+        Ok(html) => {
+            if let Some(parent) = output.parent() {
+                if !parent.as_os_str().is_empty() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+            }
+            match std::fs::write(&output, html) {
+                Ok(()) => format!(
+                    "✅ Dashboard written to {} (open in a browser)",
+                    output.display()
+                ),
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_workflow_list(base_dir: &Path) -> String {
+    let manager = WorkflowManager::new(base_dir.join("skills"));
+    match manager.list_workflows() {
+        Ok(workflows) => {
+            if workflows.is_empty() {
+                return "No workflows defined.".to_string();
+            }
+            let mut out = format!("{:<20} {:<30} {:<8}\n", "ID", "NAME", "STEPS");
+            out.push_str(&format!("{}\n", "-".repeat(60)));
+            for wf in &workflows {
+                out.push_str(&format!(
+                    "{:<20} {:<30} {:<8}\n",
+                    wf.id,
+                    wf.name,
+                    wf.steps.len()
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_workflow_show(base_dir: &Path, id: &str) -> String {
+    let manager = WorkflowManager::new(base_dir.join("skills"));
+    match manager.get_workflow(id) {
+        Ok(wf) => {
+            let mut out = format!("{} — {}\n{}", wf.name, wf.id, wf.description);
+            out.push_str(&format!("\n{} steps:\n", wf.steps.len()));
+            for (i, step) in wf.steps.iter().enumerate() {
+                let opt = if step.optional { " (optional)" } else { "" };
+                let args = if step.args.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " args={}",
+                        serde_json::to_string(&step.args).unwrap_or_default()
+                    )
+                };
+                out.push_str(&format!("  {}. {}{}{}\n", i + 1, step.skill, opt, args));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_workflow_create(
+    base_dir: &Path,
+    id: &str,
+    name: &str,
+    description: &str,
+    step_specs: &[String],
+) -> String {
+    let mut steps = Vec::new();
+    for spec in step_specs {
+        // Formats: "skill", "skill:opt", "skill;key=value;key2=value2"
+        let (skill_part, optional) = match spec.split_once(':') {
+            Some((s, "opt")) => (s.to_string(), true),
+            _ => (spec.split(';').next().unwrap_or(spec).to_string(), false),
+        };
+        let mut args = HashMap::new();
+        for kv in spec.split(';').skip(1) {
+            if let Some((k, v)) = kv.split_once('=') {
+                args.insert(k.to_string(), v.to_string());
+            }
+        }
+        steps.push(WorkflowStep {
+            skill: skill_part,
+            args,
+            optional,
+        });
+    }
+    let manager = WorkflowManager::new(base_dir.join("skills"));
+    match manager.create_workflow(id, name, description, steps) {
+        Ok(wf) => format!(
+            "✅ Workflow '{}' created with {} step(s)",
+            wf.id,
+            wf.steps.len()
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_workflow_delete(base_dir: &Path, id: &str) -> String {
+    let manager = WorkflowManager::new(base_dir.join("skills"));
+    match manager.delete_workflow(id) {
+        Ok(true) => format!("✅ Workflow '{}' deleted", id),
+        Ok(false) => format!("Workflow '{}' not found", id),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_workflow_run(base_dir: &Path, id: &str) -> String {
+    let workflow_manager = WorkflowManager::new(base_dir.join("skills"));
+    let skill_manager = SkillManager::new(base_dir.join("skills"));
+    match workflow_manager.run_workflow(&skill_manager, id) {
+        Ok(report) => {
+            let status = if report.ok { "✅ PASS" } else { "❌ FAIL" };
+            let mut out = format!("Workflow '{}' — {}\n", report.workflow_id, status);
+            for step in &report.steps {
+                let mark = if step.ok { "✅" } else { "❌" };
+                let skipped = if step.skipped {
+                    " (skipped, optional)"
+                } else {
+                    ""
+                };
+                out.push_str(&format!(
+                    "  {} {}{} — {}\n",
+                    mark, step.skill, skipped, step.message
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_monitor(base_dir: &Path, catalog: &Catalog, json: bool, watch: Option<u64>) -> String {
+    let monitor = Monitor::new(base_dir.to_path_buf(), get_platform());
+
+    let run_once = |json: bool| -> String {
+        match monitor.run(catalog) {
+            Ok(report) => {
+                if json {
+                    return match report.to_json() {
+                        Ok(j) => j,
+                        Err(e) => format!("❌ Monitor failed: {}", e),
+                    };
+                }
+                let status = if report.healthy {
+                    "✅ HEALTHY"
+                } else {
+                    "⚠️ ISSUES FOUND"
+                };
+                let mut out = format!("AgentHub Monitor — {}\n", status);
+                out.push_str(&format!("{}\n", "=".repeat(50)));
+                out.push_str(&format!("版本:       {}\n", report.agenthub_version));
+                out.push_str(&format!(
+                    "已安装:     {} / 目录 {}\n",
+                    report.installed_agents,
+                    catalog.agents().len()
+                ));
+                out.push_str(&format!(
+                    "诊断:       {} passed, {} warnings, {} failed\n",
+                    report.diagnostics_passed,
+                    report.diagnostics_warnings,
+                    report.diagnostics_failed
+                ));
+                out.push_str(&format!(
+                    "预算:       今日 ${:.4} / 本月 ${:.4}\n",
+                    report.budget.daily_spent_usd, report.budget.monthly_spent_usd
+                ));
+                if !report.missing_agents.is_empty() {
+                    out.push_str(&format!(
+                        "未安装(verified): {}\n",
+                        report.missing_agents.join(", ")
+                    ));
+                }
+                if !report.incompatible_skills.is_empty() {
+                    out.push_str(&format!(
+                        "不兼容技能: {}\n",
+                        report.incompatible_skills.join(", ")
+                    ));
+                }
+                for warning in &report.warnings {
+                    out.push_str(&format!("⚠️ {}\n", warning));
+                }
+                out
+            }
+            Err(e) => format!("❌ Monitor failed: {}", e),
+        }
+    };
+
+    match watch {
+        Some(interval) if interval > 0 => {
+            let mut out = String::new();
+            out.push_str(&format!(
+                "[watch] monitoring every {}s — Ctrl-C to stop\n",
+                interval
+            ));
+            loop {
+                match monitor.run(catalog) {
+                    Ok(report) => {
+                        out.push_str(&format!(
+                            "[{}] {}\n",
+                            Utc::now().format("%H:%M:%S"),
+                            report.alert_summary()
+                        ));
+                    }
+                    Err(e) => {
+                        out.push_str(&format!("[{}] ❌ {}\n", Utc::now().format("%H:%M:%S"), e))
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs(interval));
+            }
+        }
+        _ => run_once(json),
     }
 }
 
@@ -1049,8 +1622,11 @@ fn main() {
             cmd_uninstall(&name, dry_run, &agent, platform)
         }
         Commands::Doctor => cmd_doctor(),
-        Commands::Status { trend } => match load_catalog() {
-            Ok(catalog) => cmd_status(&data_dir(), &catalog, trend),
+        Commands::Status { trend, html } => match load_catalog() {
+            Ok(catalog) => match html {
+                Some(path) => cmd_status_html(&data_dir(), &catalog, path),
+                None => cmd_status(&data_dir(), &catalog, trend),
+            },
             Err(e) => format!("Error: {}", e),
         },
         Commands::Audit {
@@ -1091,6 +1667,26 @@ fn main() {
                 cmd_config_template_apply(&data_dir(), &agent, &template)
             }
         },
+        Commands::Config(cmd) => match cmd {
+            ConfigCmd::Secret(cmd) => match cmd {
+                SecretCmd::Set { agent, key, value } => {
+                    cmd_config_secret_set(&data_dir(), &agent, &key, &value)
+                }
+                SecretCmd::Get { agent, key } => cmd_config_secret_get(&data_dir(), &agent, &key),
+                SecretCmd::Delete { agent, key } => {
+                    cmd_config_secret_delete(&data_dir(), &agent, &key)
+                }
+                SecretCmd::List { agent } => cmd_config_secret_list(&data_dir(), agent.as_deref()),
+            },
+            ConfigCmd::Rotate {
+                agent,
+                key,
+                new_value,
+            } => cmd_config_secret_rotate(&data_dir(), &agent, &key, &new_value),
+            ConfigCmd::Migrate { agent, key } => {
+                cmd_config_secret_migrate(&data_dir(), &agent, &key)
+            }
+        },
         Commands::Prompt(cmd) => match cmd {
             PromptArgs::Export { id, output } => {
                 cmd_prompt_export(&data_dir(), &id, output.as_deref())
@@ -1099,12 +1695,40 @@ fn main() {
                 cmd_prompt_export_all(&data_dir(), output.as_deref())
             }
             PromptArgs::Import { file, force } => cmd_prompt_import(&data_dir(), &file, force),
+            PromptArgs::Extract {
+                session,
+                message,
+                id,
+                name,
+                description,
+            } => cmd_prompt_extract(
+                &data_dir(),
+                &session,
+                message,
+                id.as_deref(),
+                name.as_deref(),
+                description.as_deref(),
+            ),
         },
         Commands::Memory(cmd) => match cmd {
             MemoryArgs::Export { scope, output } => {
                 cmd_memory_export(&data_dir(), scope.as_deref(), output.as_deref())
             }
             MemoryArgs::Import { file, merge } => cmd_memory_import(&data_dir(), &file, merge),
+            MemoryArgs::SearchVector { query, top_k } => {
+                cmd_memory_search_vector(&data_dir(), &query, top_k)
+            }
+            MemoryArgs::SearchHybrid { query, top_k } => {
+                cmd_memory_search_hybrid(&data_dir(), &query, top_k)
+            }
+            MemoryArgs::Graph(cmd) => match cmd {
+                GraphCmd::Build => cmd_memory_graph_build(&data_dir()),
+                GraphCmd::Entities { limit } => cmd_memory_graph_entities(&data_dir(), limit),
+                GraphCmd::Neighbors { entity, limit } => {
+                    cmd_memory_graph_neighbors(&data_dir(), &entity, limit)
+                }
+                GraphCmd::Export { output } => cmd_memory_graph_export(&data_dir(), output),
+            },
         },
         Commands::Session(cmd) => match cmd {
             SessionArgs::Budget { cmd } => match cmd {
@@ -1119,9 +1743,21 @@ fn main() {
         },
         Commands::Skill(cmd) => match cmd {
             SkillArgs::CheckCompat { name } => cmd_skill_check_compat(&data_dir(), &name),
+            SkillArgs::Workflow(cmd) => match cmd {
+                WorkflowCmd::List => cmd_workflow_list(&data_dir()),
+                WorkflowCmd::Show { id } => cmd_workflow_show(&data_dir(), &id),
+                WorkflowCmd::Create {
+                    id,
+                    name,
+                    description,
+                    steps,
+                } => cmd_workflow_create(&data_dir(), &id, &name, &description, &steps),
+                WorkflowCmd::Delete { id } => cmd_workflow_delete(&data_dir(), &id),
+                WorkflowCmd::Run { id } => cmd_workflow_run(&data_dir(), &id),
+            },
         },
-        Commands::Monitor => match load_catalog() {
-            Ok(catalog) => cmd_monitor(&data_dir(), &catalog),
+        Commands::Monitor { json, watch } => match load_catalog() {
+            Ok(catalog) => cmd_monitor(&data_dir(), &catalog, json, watch),
             Err(e) => format!("Error: {}", e),
         },
     };
@@ -1594,10 +2230,137 @@ mod tests {
     fn test_cmd_monitor_runs() {
         let temp = TempDir::new().unwrap();
         let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
-        let output = cmd_monitor(temp.path(), &catalog);
+        let output = cmd_monitor(temp.path(), &catalog, false, None);
         assert!(output.contains("AgentHub Monitor"));
         assert!(output.contains("诊断:"));
         assert!(output.contains("预算:"));
+    }
+
+    // ---- Wave 3 commands ----
+
+    #[test]
+    fn test_cmd_monitor_json() {
+        let temp = TempDir::new().unwrap();
+        let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
+        let output = cmd_monitor(temp.path(), &catalog, true, None);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed.get("healthy").is_some());
+        assert!(parsed.get("budget").is_some());
+    }
+
+    #[test]
+    fn test_cmd_config_secret_flow() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        let out = cmd_config_secret_set(base, "agent-a", "api_key", "sk-secret");
+        assert!(out.contains("✅"));
+
+        let out = cmd_config_secret_list(base, None);
+        assert!(out.contains("agent-a.api_key"));
+        assert!(!out.contains("sk-secret")); // redacted
+
+        let out = cmd_config_secret_get(base, "agent-a", "api_key");
+        assert_eq!(out, "sk-secret");
+
+        let out = cmd_config_secret_rotate(base, "agent-a", "api_key", "sk-new");
+        assert!(out.contains("1 previous value"));
+        assert_eq!(cmd_config_secret_get(base, "agent-a", "api_key"), "sk-new");
+
+        let out = cmd_config_secret_delete(base, "agent-a", "api_key");
+        assert!(out.contains("✅"));
+        assert!(cmd_config_secret_get(base, "agent-a", "api_key").contains("not found"));
+    }
+
+    #[test]
+    fn test_cmd_prompt_extract_from_session() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let session_manager = SessionManager::new(base.join("sessions"));
+        let session = session_manager.create_session("S1", "codex").unwrap();
+        session_manager
+            .add_message(&session.id, "user", "Deploy /srv/app now")
+            .unwrap();
+
+        let out = cmd_prompt_extract(base, &session.id, None, None, None, None);
+        assert!(out.contains("✅ Extracted prompt"));
+        assert!(out.contains("{{path}}"));
+
+        // Session with no messages errors gracefully
+        let empty = session_manager.create_session("S2", "codex").unwrap();
+        let out = cmd_prompt_extract(base, &empty.id, None, None, None, None);
+        assert!(out.starts_with("Error:"));
+    }
+
+    #[test]
+    fn test_cmd_memory_vector_and_graph() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let memory_manager = MemoryManager::new(base.join("memory"));
+        memory_manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Postgres database schema",
+                "Use postgres with \"users table\" indexes.",
+                agenthub_core::MemoryType::Reference,
+            )
+            .unwrap();
+
+        let out = cmd_memory_search_vector(base, "postgres database", 5);
+        assert!(out.contains("Postgres database schema"));
+        assert!(out.contains("[0."));
+
+        let out = cmd_memory_graph_build(base);
+        assert!(out.contains("Knowledge graph built"));
+        let out = cmd_memory_graph_entities(base, 10);
+        assert!(out.to_lowercase().contains("postgres"));
+        let out = cmd_memory_graph_neighbors(base, "users table", 5);
+        assert!(out.contains("postgres"));
+    }
+
+    #[test]
+    fn test_cmd_workflow_flow() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        let out = cmd_workflow_create(
+            base,
+            "ci",
+            "CI",
+            "checks",
+            &["rust-dev".to_string(), "release:opt".to_string()],
+        );
+        assert!(out.contains("✅ Workflow 'ci' created"));
+
+        let out = cmd_workflow_list(base);
+        assert!(out.contains("ci"));
+
+        let out = cmd_workflow_show(base, "ci");
+        assert!(out.contains("rust-dev"));
+        assert!(out.contains("release"));
+
+        // Run against empty skill set: rust-dev (required) fails, release optional skipped
+        let out = cmd_workflow_run(base, "ci");
+        assert!(out.contains("❌ FAIL"));
+        assert!(out.contains("skill not installed"));
+        assert!(out.contains("skipped"));
+
+        let out = cmd_workflow_delete(base, "ci");
+        assert!(out.contains("✅"));
+    }
+
+    #[test]
+    fn test_cmd_status_html() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
+        let out_path = temp.path().join("dash.html");
+        let out = cmd_status_html(base, &catalog, out_path.clone());
+        assert!(out.contains("Dashboard written"));
+        let html = std::fs::read_to_string(&out_path).unwrap();
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("__AGENTHUB_DASHBOARD__"));
     }
 
     const TEST_AGENTS_JSON: &str = r#"{

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::agent::Platform;
 use crate::catalog::Catalog;
 use crate::diagnostic::{DiagnosticManager, DiagnosticReport};
-use crate::error::Result;
+use crate::error::{AgentHubError, Result};
 use crate::session::{BudgetReport, SessionManager};
 use crate::skill::SkillManager;
 use crate::status::{AgentStatus, StatusDetector};
@@ -35,6 +35,32 @@ pub struct MonitorReport {
     pub diagnostics_passed: usize,
     pub diagnostics_warnings: usize,
     pub diagnostics_failed: usize,
+}
+
+impl MonitorReport {
+    /// Serialize the report as pretty JSON (for cron/systemd integration and
+    /// machine-readable alerting).
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(|e| {
+            AgentHubError::ManagementError(format!("Failed to serialize report: {}", e))
+        })
+    }
+
+    /// One-line alert summary, empty when healthy. Suitable for watch/cron logs.
+    pub fn alert_summary(&self) -> String {
+        if self.healthy {
+            format!(
+                "OK: {} installed agents, budget within limits",
+                self.installed_agents
+            )
+        } else {
+            format!(
+                "WARN ({}): {}",
+                self.warnings.len(),
+                self.warnings.join("; ")
+            )
+        }
+    }
 }
 
 /// Cross-cutting monitor: runs the checks that feed the report.

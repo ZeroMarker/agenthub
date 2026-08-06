@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::secrets::{RotationResult, SecretInfo, SecretStore};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -322,6 +323,90 @@ impl ConfigManager {
     pub fn get_env_var(&self, agent_id: &str, key: &str) -> Result<Option<String>> {
         let config = self.load_config(agent_id)?;
         Ok(config.environment_variables.get(key).cloned())
+    }
+
+    // ---------------------------------------------------------------------
+    // Secret keystore (values never stored in agent config files)
+    // ---------------------------------------------------------------------
+
+    /// Open the file-backed secret keystore for this workspace.
+    pub fn secret_store(&self) -> SecretStore {
+        SecretStore::new(self.config_dir.clone())
+    }
+
+    /// Store a secret in the keystore and remove any inline copy from the
+    /// agent config file (values live only in `secrets.yaml`, never in the
+    /// agent YAML).
+    pub fn set_secret(&self, agent_id: &str, key: &str, value: &str) -> Result<()> {
+        self.secret_store().set(agent_id, key, value)?;
+        // Drop any inline plaintext copy from the config file.
+        if self.agent_config_path(agent_id).exists() {
+            let mut config = self.load_config(agent_id).ok();
+            if let Some(config) = config.as_mut() {
+                if config.secrets.remove(key).is_some() {
+                    config.metadata.updated_at = Utc::now();
+                    self.save_config(config)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Read a secret from the keystore, falling back to a legacy inline value
+    /// in the agent config file (if any).
+    pub fn get_secret(&self, agent_id: &str, key: &str) -> Result<Option<String>> {
+        let store = self.secret_store();
+        if let Some(value) = store.get(agent_id, key) {
+            return Ok(Some(value));
+        }
+        // Legacy fallback: inline secret in the config file.
+        if self.agent_config_path(agent_id).exists() {
+            if let Ok(config) = self.load_config(agent_id) {
+                if let Some(value) = config.secrets.get(key) {
+                    if !value.is_empty() {
+                        return Ok(Some(value.clone()));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn delete_secret(&self, agent_id: &str, key: &str) -> Result<bool> {
+        self.secret_store().delete(agent_id, key)
+    }
+
+    /// List stored secret keys (redacted values only), optionally for one agent.
+    pub fn list_secrets(&self, agent_id: Option<&str>) -> Result<Vec<SecretInfo>> {
+        Ok(self.secret_store().list(agent_id))
+    }
+
+    /// Rotate a secret: archive the current value, activate the new one.
+    pub fn rotate_secret(
+        &self,
+        agent_id: &str,
+        key: &str,
+        new_value: &str,
+    ) -> Result<RotationResult> {
+        self.secret_store().rotate(agent_id, key, new_value)
+    }
+
+    /// Move a legacy inline secret value from the agent config file into the
+    /// keystore, then blank it in the file. Returns true when a value moved.
+    pub fn migrate_secret(&self, agent_id: &str, key: &str) -> Result<bool> {
+        if !self.agent_config_path(agent_id).exists() {
+            return Ok(false);
+        }
+        let mut config = self.load_config(agent_id)?;
+        match config.secrets.remove(key) {
+            Some(value) if !value.is_empty() => {
+                self.secret_store().set(agent_id, key, &value)?;
+                config.metadata.updated_at = Utc::now();
+                self.save_config(&config)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     pub fn delete_config(&self, agent_id: &str) -> Result<bool> {
@@ -819,5 +904,77 @@ mod tests {
         assert!(template
             .environment_variables
             .contains_key("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn test_secret_keystore_roundtrip_and_rotation() {
+        let (manager, _temp) = create_test_manager();
+        manager.create_config("agent-a").unwrap();
+
+        manager
+            .set_secret("agent-a", "api_key", "sk-top-secret")
+            .unwrap();
+        assert_eq!(
+            manager.get_secret("agent-a", "api_key").unwrap().as_deref(),
+            Some("sk-top-secret")
+        );
+
+        // Secret value must NOT appear in the agent config file.
+        let config = manager.load_config("agent-a").unwrap();
+        assert!(!serde_yaml::to_string(&config)
+            .unwrap()
+            .contains("sk-top-secret"));
+
+        // Listing returns redacted values only.
+        let infos = manager.list_secrets(Some("agent-a")).unwrap();
+        assert_eq!(infos.len(), 1);
+        assert!(!infos[0].redacted_value.contains("top-secret"));
+
+        // Rotation archives the old value.
+        let rotation = manager
+            .rotate_secret("agent-a", "api_key", "sk-new-key")
+            .unwrap();
+        assert!(rotation.rotated);
+        assert_eq!(
+            manager.get_secret("agent-a", "api_key").unwrap().as_deref(),
+            Some("sk-new-key")
+        );
+        let infos = manager.list_secrets(Some("agent-a")).unwrap();
+        assert_eq!(infos[0].rotated_count, 1);
+
+        // Delete.
+        assert!(manager.delete_secret("agent-a", "api_key").unwrap());
+        assert_eq!(manager.get_secret("agent-a", "api_key").unwrap(), None);
+    }
+
+    #[test]
+    fn test_secret_migrate_from_inline_config() {
+        let (manager, _temp) = create_test_manager();
+        manager.create_config("agent-a").unwrap();
+        let mut config = manager.load_config("agent-a").unwrap();
+        config
+            .secrets
+            .insert("api_key".to_string(), "legacy-inline".to_string());
+        manager.save_config(&config).unwrap();
+
+        // Legacy fallback read works.
+        assert_eq!(
+            manager.get_secret("agent-a", "api_key").unwrap().as_deref(),
+            Some("legacy-inline")
+        );
+
+        // Migration moves the value into the keystore and blanks the config.
+        assert!(manager.migrate_secret("agent-a", "api_key").unwrap());
+        assert_eq!(
+            manager.get_secret("agent-a", "api_key").unwrap().as_deref(),
+            Some("legacy-inline")
+        );
+        let config = manager.load_config("agent-a").unwrap();
+        assert!(!serde_yaml::to_string(&config)
+            .unwrap()
+            .contains("legacy-inline"));
+
+        // Migrating again is a no-op.
+        assert!(!manager.migrate_secret("agent-a", "api_key").unwrap());
     }
 }

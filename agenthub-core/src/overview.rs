@@ -195,6 +195,135 @@ impl OverviewReport {
 
         Ok(points)
     }
+
+    /// Render a self-contained HTML dashboard (inline CSS/JS + embedded JSON)
+    /// that can be opened in any browser — the "Web dashboard" slice of the
+    /// Overview module, with no server needed.
+    pub fn render_dashboard_html(&self, catalog: &Catalog, trend_days: usize) -> Result<String> {
+        let overview = self.overview(catalog)?;
+        let trend = self.trend(trend_days)?;
+        let data = serde_json::to_string_pretty(&DashboardData {
+            overview: &overview,
+            trend: &trend,
+        })
+        .map_err(|e| {
+            crate::error::AgentHubError::ManagementError(format!(
+                "Failed to serialize dashboard data: {}",
+                e
+            ))
+        })?;
+
+        let cards = format!(
+            r#"<div class="card"><div class="card-value">{total}</div><div class="card-label">Catalog agents</div></div>
+<div class="card"><div class="card-value">{installed}</div><div class="card-label">Installed</div></div>
+<div class="card"><div class="card-value">{configs}</div><div class="card-label">Configs</div></div>
+<div class="card"><div class="card-value">{prompts}</div><div class="card-label">Prompts</div></div>
+<div class="card"><div class="card-value">{sessions}</div><div class="card-label">Sessions</div></div>
+<div class="card"><div class="card-value">{memories}</div><div class="card-label">Memories</div></div>
+<div class="card"><div class="card-value">{skills}</div><div class="card-label">Skills ({enabled} enabled)</div></div>
+<div class="card"><div class="card-value">{audit}</div><div class="card-label">Audit events</div></div>"#,
+            total = overview.catalog.total,
+            installed = overview.installed_agents,
+            configs = overview.configs,
+            prompts = overview.prompts,
+            sessions = overview.sessions.total,
+            memories = overview.memories.total,
+            skills = overview.skills_total,
+            enabled = overview.skills_enabled,
+            audit = overview.audit_events,
+        );
+
+        let max_cost = trend
+            .iter()
+            .map(|p| p.cost_usd)
+            .fold(0.0f64, f64::max)
+            .max(0.01);
+        let max_tokens = trend.iter().map(|p| p.tokens).max().unwrap_or(0).max(1);
+
+        let mut rows = String::new();
+        for point in &trend {
+            let cost_pct = (point.cost_usd / max_cost * 100.0).max(0.5);
+            let tokens_pct = (point.tokens as f64 / max_tokens as f64 * 100.0).max(0.5);
+            rows.push_str(&format!(
+                r#"<tr>
+<td class="date">{date}</td>
+<td>{started}</td><td>{completed}</td>
+<td><div class="meter"><div class="meter-fill meter-cost" style="width:{cost_pct:.0}%"></div></div>${cost:.3}</td>
+<td><div class="meter"><div class="meter-fill meter-tokens" style="width:{tokens_pct:.0}%"></div></div>{tokens}</td>
+<td>{memories}</td><td>{audit}</td>
+</tr>"#,
+                date = point.date,
+                started = point.sessions_started,
+                completed = point.sessions_completed,
+                cost_pct = cost_pct,
+                cost = point.cost_usd,
+                tokens_pct = tokens_pct,
+                tokens = point.tokens,
+                memories = point.memories_created,
+                audit = point.audit_events,
+            ));
+        }
+
+        Ok(format!(
+            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentHub Dashboard</title>
+<style>
+:root {{ --primary:#6750a4; --surface:#fef7ff; --surface2:#f3edf7; --on-surface:#1d1b20; --outline:#79747e; }}
+* {{ box-sizing:border-box; margin:0; padding:0; }}
+body {{ font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--surface); color:var(--on-surface); padding:32px; }}
+h1 {{ font-size:1.6rem; margin-bottom:4px; }}
+.subtitle {{ color:var(--outline); font-size:.85rem; margin-bottom:24px; }}
+.grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:16px; margin-bottom:32px; }}
+.card {{ background:var(--surface2); border-radius:16px; padding:20px; text-align:center; }}
+.card-value {{ font-size:1.8rem; font-weight:700; color:var(--primary); }}
+.card-label {{ font-size:.8rem; color:var(--outline); margin-top:4px; }}
+h2 {{ font-size:1.1rem; margin-bottom:16px; }}
+table {{ width:100%; border-collapse:collapse; background:var(--surface2); border-radius:16px; overflow:hidden; }}
+th,td {{ padding:10px 14px; text-align:left; font-size:.85rem; border-bottom:1px solid #e6e0e9; }}
+th {{ background:#e8def8; color:var(--primary); }}
+td.date {{ font-variant-numeric:tabular-nums; white-space:nowrap; }}
+.meter {{ width:120px; height:8px; background:#e6e0e9; border-radius:99px; display:inline-block; vertical-align:middle; margin-right:8px; }}
+.meter-fill {{ height:100%; border-radius:99px; }}
+.meter-cost {{ background:#b3261e; }}
+.meter-tokens {{ background:#6750a4; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --primary:#d0bcff; --surface:#141218; --surface2:#211f26; --on-surface:#e6e0e9; --outline:#938f99; }} th {{ background:#4a4458; }} .meter {{ background:#49454f; }} }}
+</style>
+</head>
+<body>
+<h1>AgentHub Dashboard</h1>
+<div class="subtitle">{platform} · v{version} · generated {generated} UTC</div>
+<div class="grid">{cards}</div>
+<h2>Daily trend (last {days} days)</h2>
+<table>
+<thead><tr><th>Date</th><th>Started</th><th>Completed</th><th>Cost</th><th>Tokens</th><th>Memories</th><th>Audit</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>
+<script>
+// Raw data embedded for tooling: window.__AGENTHUB_DASHBOARD__
+window.__AGENTHUB_DASHBOARD__ = {data};
+</script>
+</body>
+</html>"#,
+            platform = overview.platform,
+            version = overview.agenthub_version,
+            generated = overview.generated_at.format("%Y-%m-%d %H:%M:%S"),
+            days = trend_days,
+            cards = cards,
+            rows = rows,
+            data = data,
+        ))
+    }
+}
+
+/// Serialized payload embedded in the dashboard HTML.
+#[derive(Debug, Serialize)]
+struct DashboardData<'a> {
+    overview: &'a StatusOverview,
+    trend: &'a [TrendPoint],
 }
 
 #[cfg(test)]
@@ -379,5 +508,30 @@ mod tests {
 
         // Other days empty
         assert_eq!(points[0].sessions_started, 0);
+    }
+
+    // ---- HTML dashboard ----
+
+    #[test]
+    fn test_render_dashboard_html() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().to_path_buf();
+        ConfigManager::new(base.clone())
+            .create_config("test-cli")
+            .unwrap();
+        PromptManager::new(base.join("prompts"))
+            .create_prompt("p1", "P1", "d", "t")
+            .unwrap();
+        let catalog = Catalog::from_json(TEST_AGENTS_JSON).unwrap();
+        let report = OverviewReport::new(base, Platform::Linux);
+
+        let html = report.render_dashboard_html(&catalog, 7).unwrap();
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("AgentHub Dashboard"));
+        assert!(html.contains("Catalog agents"));
+        assert!(html.contains("Daily trend"));
+        assert!(html.contains("__AGENTHUB_DASHBOARD__"));
+        assert!(html.contains("\"overview\""));
+        assert!(html.contains("\"trend\""));
     }
 }

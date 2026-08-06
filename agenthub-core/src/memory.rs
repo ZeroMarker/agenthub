@@ -76,6 +76,16 @@ fn default_importance() -> u8 {
     5
 }
 
+/// A scored search result from vector or hybrid search.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryMatch {
+    pub entry: MemoryEntry,
+    /// Normalized relevance score in 0..1.
+    pub score: f64,
+    /// Search method used: "vector" or "hybrid".
+    pub method: String,
+}
+
 pub struct MemoryManager {
     memory_dir: PathBuf,
 }
@@ -354,13 +364,115 @@ impl MemoryManager {
             .into_iter()
             .filter(|e| !e.decayed)
             .collect();
+        if entries.is_empty() || tokenize(query).is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let scored = self.bm25_scores(query, &entries);
+
+        Ok(scored
+            .into_iter()
+            .take(top_k)
+            .filter(|(score, _)| *score > 0.0)
+            .map(|(_, idx)| entries[idx].clone())
+            .collect())
+    }
+
+    /// Vector (embedding) semantic search. Decayed entries are excluded.
+    /// Uses local feature-hashed character n-gram embeddings (no network), with
+    /// the same title 3x / tags 2x / content 1x weighting as BM25. Returns
+    /// scored matches with cosine similarity in descending order.
+    pub fn search_entries_vector(&self, query: &str, top_k: usize) -> Result<Vec<MemoryMatch>> {
+        let entries: Vec<MemoryEntry> = self
+            .list_entries(None)?
+            .into_iter()
+            .filter(|e| !e.decayed)
+            .collect();
         if entries.is_empty() {
             return Ok(Vec::new());
         }
 
-        let query_terms = tokenize(query);
-        if query_terms.is_empty() {
+        let query_vec = embed_text(query);
+        let mut scored: Vec<(f64, &MemoryEntry)> = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            let combined = weighted_embedding(entry);
+            let score = cosine_similarity(&query_vec, &combined) as f64;
+            scored.push((score, entry));
+        }
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(top_k);
+
+        Ok(scored
+            .into_iter()
+            .filter(|(score, _)| *score > 0.0)
+            .map(|(score, entry)| MemoryMatch {
+                entry: entry.clone(),
+                score,
+                method: "vector".to_string(),
+            })
+            .collect())
+    }
+
+    /// Hybrid search: BM25 and vector scores are independently normalized to
+    /// 0..1 and blended 50/50. Decayed entries are excluded.
+    pub fn hybrid_search(&self, query: &str, top_k: usize) -> Result<Vec<MemoryMatch>> {
+        let entries: Vec<MemoryEntry> = self
+            .list_entries(None)?
+            .into_iter()
+            .filter(|e| !e.decayed)
+            .collect();
+        if entries.is_empty() || tokenize(query).is_empty() {
             return Ok(Vec::new());
+        }
+
+        let bm25 = self.bm25_scores(query, &entries);
+        let max_bm25 = bm25.iter().map(|(s, _)| *s).fold(0.0f64, f64::max);
+        let bm25_map: std::collections::HashMap<usize, f64> = bm25
+            .into_iter()
+            .map(|(s, i)| (i, if max_bm25 > 0.0 { s / max_bm25 } else { 0.0 }))
+            .collect();
+
+        let query_vec = embed_text(query);
+        let mut vector_scores: Vec<f64> = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            vector_scores.push(cosine_similarity(&query_vec, &weighted_embedding(entry)) as f64);
+        }
+        let max_vec = vector_scores.iter().fold(0.0f64, |a, &b| a.max(b));
+
+        let mut scored: Vec<(f64, usize)> = entries
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| {
+                let nv = if max_vec > 0.0 {
+                    vector_scores[idx] / max_vec
+                } else {
+                    0.0
+                };
+                let nb = bm25_map.get(&idx).copied().unwrap_or(0.0);
+                (0.5 * nb + 0.5 * nv, idx)
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(top_k);
+
+        Ok(scored
+            .into_iter()
+            .filter(|(score, _)| *score > 0.0)
+            .map(|(score, idx)| MemoryMatch {
+                entry: entries[idx].clone(),
+                score,
+                method: "hybrid".to_string(),
+            })
+            .collect())
+    }
+
+    /// Internal BM25 scorer shared by `search_entries_bm25` and `hybrid_search`.
+    fn bm25_scores(&self, query: &str, entries: &[MemoryEntry]) -> Vec<(f64, usize)> {
+        let query_terms = tokenize(query);
+        if query_terms.is_empty() || entries.is_empty() {
+            return Vec::new();
         }
 
         // Build weighted token streams for each document.
@@ -368,17 +480,14 @@ impl MemoryManager {
             .iter()
             .map(|e| {
                 let mut tokens = Vec::new();
-                // Title x3
                 for _ in 0..3 {
                     tokens.extend(tokenize(&e.title));
                 }
-                // Tags x2
                 for tag in &e.tags {
                     for _ in 0..2 {
                         tokens.extend(tokenize(tag));
                     }
                 }
-                // Content x1
                 tokens.extend(tokenize(&e.content));
                 tokens
             })
@@ -391,7 +500,6 @@ impl MemoryManager {
         const K1: f64 = 1.5;
         const B: f64 = 0.75;
 
-        // Term frequency per document.
         let mut tfs: Vec<std::collections::HashMap<String, f64>> = Vec::with_capacity(n);
         for doc in &docs {
             let mut tf: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
@@ -418,13 +526,7 @@ impl MemoryManager {
         }
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(top_k);
-
-        Ok(scored
-            .into_iter()
-            .filter(|(score, _)| *score > 0.0)
-            .map(|(_, idx)| entries[idx].clone())
-            .collect())
+        scored
     }
 
     /// Mark an entry as recently accessed (used to keep it from decaying).
@@ -568,8 +670,86 @@ pub struct MemoryStats {
     pub decayed: usize,
 }
 
+// ---------------------------------------------------------------------------
+// Local embedding: feature-hashed character n-grams -> fixed-dim vector.
+//
+// No network, no model weights: each text is lowercased, split into
+// overlapping 3-character windows, each window is FNV-1a hashed and votes for
+// one bucket of a fixed-size vector, which is then L2-normalized. Two texts
+// with many shared n-grams get high cosine similarity. Dimensionality is
+// deterministic across runs and platforms.
+// ---------------------------------------------------------------------------
+
+/// Dimensionality of the local embedding space.
+pub const EMBEDDING_DIM: usize = 256;
+
+/// FNV-1a 64-bit hash (deterministic, no std dependency beyond u64 ops).
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in bytes {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+/// Embed text into the local embedding space (L2-normalized vector).
+/// Character 3-grams (or individual chars for very short text).
+pub fn embed_text(text: &str) -> Vec<f32> {
+    let mut vec = vec![0.0f32; EMBEDDING_DIM];
+    let lower = text.to_lowercase();
+    let chars: Vec<char> = lower.chars().collect();
+    if chars.len() < 3 {
+        for c in chars {
+            let mut buf = [0u8; 4];
+            let s = c.encode_utf8(&mut buf);
+            let h = fnv1a(s.as_bytes());
+            vec[(h as usize) % EMBEDDING_DIM] += 1.0;
+        }
+    } else {
+        for w in chars.windows(3) {
+            let s: String = w.iter().collect();
+            let h = fnv1a(s.as_bytes());
+            vec[(h as usize) % EMBEDDING_DIM] += 1.0;
+        }
+    }
+    normalize(&mut vec);
+    vec
+}
+
+fn normalize(vec: &mut [f32]) {
+    let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for x in vec.iter_mut() {
+            *x /= norm;
+        }
+    }
+}
+
+/// Cosine similarity between two equal-length vectors.
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+/// Weighted embedding for a memory entry: title 3x, tags 2x, content 1x.
+fn weighted_embedding(entry: &MemoryEntry) -> Vec<f32> {
+    let mut combined = vec![0.0f32; EMBEDDING_DIM];
+    let title = embed_text(&entry.title);
+    let tags = embed_text(&entry.tags.join(" "));
+    let content = embed_text(&entry.content);
+    for i in 0..EMBEDDING_DIM {
+        combined[i] = 3.0 * title[i] + 2.0 * tags[i] + content[i];
+    }
+    normalize(&mut combined);
+    combined
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use tempfile::TempDir;
 
@@ -1005,5 +1185,109 @@ mod tests {
         assert_eq!(summary.imported, 1);
         let entries = manager.list_entries(None).unwrap();
         assert_eq!(entries[0].content, "changed");
+    }
+
+    // -------------------------------------------------------------------
+    // Vector & hybrid search
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn test_embedding_deterministic_and_normalized() {
+        let a = embed_text("rust project build system");
+        let b = embed_text("rust project build system");
+        assert_eq!(a.len(), EMBEDDING_DIM);
+        assert_eq!(a, b);
+        let norm: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_cosine_similarity_same_vs_different() {
+        let a = embed_text("deployment pipeline configuration");
+        let b = embed_text("deployment pipeline configuration");
+        let c = embed_text("banana bread recipe");
+        assert!(cosine_similarity(&a, &b) > 0.99);
+        assert!(cosine_similarity(&a, &c) < cosine_similarity(&a, &b));
+    }
+
+    #[test]
+    fn test_vector_search_ranks_relevant_first() {
+        let (manager, _temp) = create_test_manager();
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Database schema design",
+                "Use postgres with indexes on the users table and foreign keys.",
+                MemoryType::Reference,
+            )
+            .unwrap();
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Pasta cooking notes",
+                "Boil spaghetti for ten minutes with salt.",
+                MemoryType::Free,
+            )
+            .unwrap();
+
+        let matches = manager
+            .search_entries_vector("postgres database schema", 5)
+            .unwrap();
+        assert!(!matches.is_empty());
+        assert_eq!(matches[0].entry.title, "Database schema design");
+        assert_eq!(matches[0].method, "vector");
+        assert!(matches[0].score >= matches[1].score);
+    }
+
+    #[test]
+    fn test_hybrid_search_combines_methods() {
+        let (manager, _temp) = create_test_manager();
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "API rate limiting",
+                "Apply token bucket at the gateway for public endpoints.",
+                MemoryType::Learning,
+            )
+            .unwrap();
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Unrelated recipe",
+                "Mix flour eggs and milk for pancakes.",
+                MemoryType::Free,
+            )
+            .unwrap();
+
+        let matches = manager.hybrid_search("rate limiting gateway", 5).unwrap();
+        assert!(!matches.is_empty());
+        assert_eq!(matches[0].entry.title, "API rate limiting");
+        assert_eq!(matches[0].method, "hybrid");
+        // Scores normalized to 0..1
+        assert!((0.0..=1.0).contains(&matches[0].score));
+    }
+
+    #[test]
+    fn test_vector_search_excludes_decayed() {
+        let (manager, _temp) = create_test_manager();
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Old project notes",
+                "Some details about the legacy monorepo setup.",
+                MemoryType::Free,
+            )
+            .unwrap();
+        let mut entry = manager.list_entries(None).unwrap().remove(0);
+        entry.decayed = true;
+        manager.save_entry(&entry).unwrap();
+
+        let matches = manager.search_entries_vector("legacy monorepo", 5).unwrap();
+        assert!(matches.is_empty());
     }
 }

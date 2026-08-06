@@ -82,6 +82,15 @@ pub struct PromptManager {
     prompts_dir: PathBuf,
 }
 
+/// Result of extracting a prompt template from a session message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptExtraction {
+    pub prompt: PromptTemplate,
+    pub source_session_id: String,
+    pub source_message_index: usize,
+    pub source_role: String,
+}
+
 impl PromptManager {
     pub fn new(prompts_dir: PathBuf) -> Self {
         Self { prompts_dir }
@@ -367,6 +376,76 @@ impl PromptManager {
         Ok(prompt)
     }
 
+    /// Create a prompt template from a session message. Variable-like tokens in
+    /// the message (URLs, file paths, versions, numbers, quoted text, exotic
+    /// identifiers) are replaced with `{{placeholder}}` variables so the same
+    /// template can be reused with different values.
+    pub fn extract_from_message(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        source_session_id: &str,
+        source_message_index: usize,
+        source_role: &str,
+        message: &str,
+    ) -> Result<PromptExtraction> {
+        let (template, variables) = templateize_message(message);
+        let prompt = self.create_prompt(id, name, description, &template)?;
+        let mut prompt = prompt;
+        prompt.variables = variables;
+        prompt.tags = vec!["extracted".to_string()];
+        prompt.category = Some("session-extracted".to_string());
+        prompt.author = Some(source_session_id.to_string());
+        self.save_prompt(&prompt)?;
+
+        Ok(PromptExtraction {
+            prompt,
+            source_session_id: source_session_id.to_string(),
+            source_message_index,
+            source_role: source_role.to_string(),
+        })
+    }
+
+    /// Extract a prompt from one message of a stored session.
+    /// `message_index` selects which message (default: the last one).
+    pub fn extract_from_session(
+        &self,
+        session_manager: &crate::session::SessionManager,
+        session_id: &str,
+        message_index: Option<usize>,
+        new_id: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<PromptExtraction> {
+        let session = session_manager.get_session(session_id)?;
+        if session.messages.is_empty() {
+            return Err(AgentHubError::PromptError(format!(
+                "Session {} has no messages to extract from",
+                session_id
+            )));
+        }
+        let idx = message_index.unwrap_or(session.messages.len() - 1);
+        if idx >= session.messages.len() {
+            return Err(AgentHubError::PromptError(format!(
+                "Message index {} out of range for session {} ({} messages)",
+                idx,
+                session_id,
+                session.messages.len()
+            )));
+        }
+        let message = &session.messages[idx];
+        self.extract_from_message(
+            new_id,
+            name,
+            description,
+            session_id,
+            idx,
+            &message.role,
+            &message.content,
+        )
+    }
+
     pub fn save_prompt(&self, prompt: &PromptTemplate) -> Result<()> {
         std::fs::create_dir_all(self.templates_dir()).map_err(|e| {
             AgentHubError::PromptError(format!("Failed to create prompts dir: {}", e))
@@ -491,6 +570,308 @@ impl PromptManager {
         self.save_prompt(&prompt)?;
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Message templateization: replace variable-like tokens with {{placeholders}}.
+// ---------------------------------------------------------------------------
+
+fn templateize_message(message: &str) -> (String, Vec<PromptVariable>) {
+    let mut template = message.to_string();
+    let mut var_names: Vec<String> = Vec::new();
+
+    let mut add_var = |name: &str| {
+        if !var_names.iter().any(|n| n == name) {
+            var_names.push(name.to_string());
+        }
+    };
+
+    // URLs first (they also contain '/').
+    template = replace_urls(&template);
+    if template.contains("{{url}}") {
+        add_var("url");
+    }
+
+    // File paths: whitespace-delimited tokens containing '/' or '\'.
+    template = replace_paths(&template);
+    if template.contains("{{path}}") {
+        add_var("path");
+    }
+
+    // Semantic versions like 2.1.0 / v2.1 / 1.2.3-beta.
+    template = replace_versions(&template);
+    if template.contains("{{version}}") {
+        add_var("version");
+    }
+
+    // Quoted text.
+    template = replace_quoted(&template);
+    if template.contains("{{quoted_text}}") {
+        add_var("quoted_text");
+    }
+
+    // Bare numbers.
+    template = replace_numbers(&template);
+    if template.contains("{{number}}") {
+        add_var("number");
+    }
+
+    // Exotic identifiers (digits / underscores / hyphens / mixed case).
+    template = replace_identifiers(&template);
+    if template.contains("{{identifier}}") {
+        add_var("identifier");
+    }
+
+    let variables: Vec<PromptVariable> = var_names
+        .into_iter()
+        .map(|name| PromptVariable {
+            name: name.clone(),
+            var_type: "string".to_string(),
+            required: false,
+            description: Some(match name.as_str() {
+                "url" => "URL to use".to_string(),
+                "path" => "File path to use".to_string(),
+                "version" => "Version number".to_string(),
+                "number" => "Numeric value".to_string(),
+                "quoted_text" => "Quoted text value".to_string(),
+                _ => "Value".to_string(),
+            }),
+            default: None,
+        })
+        .collect();
+
+    (template, variables)
+}
+
+/// Replace `http(s)://...` runs (up to whitespace) with `{{url}}`.
+fn replace_urls(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(pos) = rest.find("://") {
+        let scheme_start = rest[..pos]
+            .rfind(|c: char| !c.is_ascii_alphanumeric())
+            .map_or(0, |i| i + 1);
+        let start = scheme_start.min(pos);
+        let after = &rest[pos + 3..];
+        let end = after
+            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            .unwrap_or(after.len());
+        out.push_str(&rest[..start]);
+        out.push_str("{{url}}");
+        rest = &rest[pos + 3 + end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Replace whitespace-delimited path-like tokens with `{{path}}`.
+fn replace_paths(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(|c: char| !c.is_whitespace()) {
+        let end = rest[start..]
+            .find(char::is_whitespace)
+            .map(|i| start + i)
+            .unwrap_or(rest.len());
+        let token = &rest[start..end];
+        out.push_str(&rest[..start]);
+        if is_path_token(token) {
+            out.push_str("{{path}}");
+        } else {
+            out.push_str(token);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_path_token(token: &str) -> bool {
+    if token.contains("://") || token.is_empty() || token.len() < 3 {
+        return false;
+    }
+    let has_sep = token.contains('/') || token.contains('\\');
+    if !has_sep {
+        return false;
+    }
+    // A trailing slash (e.g. "and/") or punctuation-only segment is not a path.
+    let trimmed = token.trim_end_matches([',', '.', ';', ')']);
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Windows drive: C:\...
+    if token.len() >= 3 && token.as_bytes()[1] == b':' {
+        return true;
+    }
+    // Require at least two segments with a non-trivial last segment.
+    let last = trimmed.rsplit(['/', '\\']).next().unwrap_or("");
+    !last.is_empty() && trimmed.matches(['/', '\\']).count() >= 1
+}
+
+/// Replace `v?N.N(.N)?` version runs with `{{version}}`.
+fn replace_versions(text: &str) -> String {
+    let bytes: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let start = i;
+        // optional leading 'v'
+        let mut j = i;
+        if bytes.get(j) == Some(&'v') || bytes.get(j) == Some(&'V') {
+            j += 1;
+        }
+        if !is_digit_at(&bytes, j) {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        // N.N or N.N.N
+        let mut k = j;
+        while is_digit_at(&bytes, k) {
+            k += 1;
+        }
+        if k < bytes.len() && bytes[k] == '.' && is_digit_at(&bytes, k + 1) {
+            k += 1;
+            while is_digit_at(&bytes, k) {
+                k += 1;
+            }
+            if k < bytes.len() && bytes[k] == '.' && is_digit_at(&bytes, k + 1) {
+                k += 1;
+                while is_digit_at(&bytes, k) {
+                    k += 1;
+                }
+            }
+            // boundary: previous char not alphanumeric (or start)
+            let prev_ok = start == 0 || !bytes[start - 1].is_alphanumeric();
+            let next_ok = k >= bytes.len() || !bytes[k].is_alphanumeric();
+            if prev_ok && next_ok {
+                out.push_str("{{version}}");
+                i = k;
+                continue;
+            }
+        }
+        // Not a version; keep the leading 'v' if present
+        for c in &bytes[start..j] {
+            out.push(*c);
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    out
+}
+
+fn is_digit_at(bytes: &[char], i: usize) -> bool {
+    bytes.get(i).is_some_and(|c| c.is_ascii_digit())
+}
+
+/// Replace `"..."` quoted runs (content kept as placeholder) with `"{{quoted_text}}"`.
+fn replace_quoted(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('"') {
+        out.push_str(&rest[..=open]);
+        let after = &rest[open + 1..];
+        match after.find('"') {
+            Some(close) => {
+                out.push_str("{{quoted_text}}");
+                out.push('"');
+                rest = &after[close + 1..];
+            }
+            None => {
+                out.push_str(after);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Replace standalone numbers with `{{number}}`.
+fn replace_numbers(text: &str) -> String {
+    let bytes: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            let prev_ok = start == 0 || !bytes[start - 1].is_alphanumeric();
+            let next_ok = i >= bytes.len() || !bytes[i].is_alphanumeric();
+            if prev_ok && next_ok {
+                out.push_str("{{number}}");
+                continue;
+            }
+            for c in &bytes[start..i] {
+                out.push(*c);
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Replace identifier-like tokens (letters/digits/_/- with digits or mixed
+/// case, length >= 3, not already inside a placeholder) with `{{identifier}}`.
+fn replace_identifiers(text: &str) -> String {
+    let bytes: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Copy existing {{...}} placeholders verbatim.
+        if bytes[i] == '{' && bytes.get(i + 1) == Some(&'{') {
+            let mut j = i + 2;
+            while j < bytes.len() && !(bytes[j] == '}' && bytes.get(j + 1) == Some(&'}')) {
+                j += 1;
+            }
+            let end = (j + 2).min(bytes.len());
+            for c in &bytes[i..end] {
+                out.push(*c);
+            }
+            i = end;
+            continue;
+        }
+        if bytes[i].is_ascii_alphabetic() && is_identifier_char(bytes[i]) {
+            let start = i;
+            let mut has_digit = false;
+            let mut has_upper = false;
+            let mut has_sep = false;
+            while i < bytes.len() && is_identifier_char(bytes[i]) {
+                if bytes[i].is_ascii_digit() {
+                    has_digit = true;
+                }
+                if bytes[i].is_uppercase() {
+                    has_upper = true;
+                }
+                if bytes[i] == '_' || bytes[i] == '-' {
+                    has_sep = true;
+                }
+                i += 1;
+            }
+            let token: String = bytes[start..i].iter().collect();
+            // Not an identifier if it's a plain lowercase word with no digit/sep.
+            let exotic = has_digit || has_sep || has_upper;
+            let prev_ok = start == 0 || !is_identifier_char(bytes[start - 1]);
+            let next_ok = i >= bytes.len() || !is_identifier_char(bytes[i]);
+            if token.len() >= 3 && exotic && prev_ok && next_ok {
+                out.push_str("{{identifier}}");
+                continue;
+            }
+            out.push_str(&token);
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn is_identifier_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
 #[cfg(test)]
@@ -822,5 +1203,90 @@ mod tests {
         let bundle = manager.export_prompts(Some(&["a".to_string()])).unwrap();
         assert_eq!(bundle.prompts.len(), 1);
         assert_eq!(bundle.prompts[0].id, "a");
+    }
+
+    // -------------------------------------------------------------------
+    // Session extraction
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn test_templateize_message_placeholders() {
+        let (template, vars) = templateize_message(
+            "Deploy https://example.com/app to /var/www/release and bump to v2.1.0 with the \"blue-green\" strategy",
+        );
+        assert!(template.contains("{{url}}"));
+        assert!(template.contains("{{path}}"));
+        assert!(template.contains("{{version}}"));
+        assert!(template.contains("{{quoted_text}}"));
+        // variable list contains deduplicated names
+        let names: Vec<&str> = vars.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"url"));
+        assert!(names.contains(&"path"));
+        assert!(names.contains(&"version"));
+    }
+
+    #[test]
+    fn test_templateize_message_identifier() {
+        let (template, vars) =
+            templateize_message("Run release_2024_build now and check the claude-sonnet-4 results");
+        assert!(template.contains("{{identifier}}"));
+        let names: Vec<&str> = vars.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"identifier"));
+    }
+
+    #[test]
+    fn test_extract_from_message_creates_prompt() {
+        let (manager, _temp) = create_test_manager();
+        let extraction = manager
+            .extract_from_message(
+                "deploy-prompt",
+                "Deploy",
+                "From session",
+                "ses_123",
+                3,
+                "user",
+                "Deploy https://example.com to /srv/app",
+            )
+            .unwrap();
+        assert_eq!(extraction.source_session_id, "ses_123");
+        assert_eq!(extraction.source_role, "user");
+        assert_eq!(extraction.source_message_index, 3);
+        assert!(extraction.prompt.template.contains("{{url}}"));
+        assert_eq!(extraction.prompt.tags, vec!["extracted"]);
+
+        // Saved and readable
+        let prompt = manager.get_prompt("deploy-prompt").unwrap();
+        assert!(!prompt.variables.is_empty());
+    }
+
+    #[test]
+    fn test_extract_from_session() {
+        use crate::session::SessionManager;
+        let (manager, _temp) = create_test_manager();
+        let temp = tempfile::tempdir().unwrap();
+        let session_manager = SessionManager::new(temp.path().join("sessions"));
+
+        let session = session_manager
+            .create_session("claude-code", "deploy")
+            .unwrap();
+        session_manager
+            .add_message(
+                &session.id,
+                "user",
+                "Deploy /srv/app with https://example.com",
+            )
+            .unwrap();
+
+        let extraction = manager
+            .extract_from_session(&session_manager, &session.id, None, "from-ses", "From", "d")
+            .unwrap();
+        assert_eq!(extraction.source_message_index, 0);
+        assert!(extraction.prompt.template.contains("{{path}}"));
+        assert!(extraction.prompt.template.contains("{{url}}"));
+
+        // Out of range index errors
+        assert!(manager
+            .extract_from_session(&session_manager, &session.id, Some(5), "x", "X", "d")
+            .is_err());
     }
 }

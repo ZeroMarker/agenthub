@@ -86,8 +86,8 @@ All UI components have been migrated to the Material 3 design token system:
 - [x] 更新 README 支持矩阵自动化生成（`scripts/generate-support-matrix.py`）
 
 ### 发布
-- [ ] 发布 v1.0.0
-- [ ] 安装/升级/卸载回归测试
+- [x] 发布 v1.0.0（2026-08-06，GitHub Release + 9 平台产物 + SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.0.0）
+- [x] 安装/升级/卸载回归测试（CLI: npm install→upgrade 0.145.0→0.146.1→uninstall ✅；.deb: dpkg install→reinstall→remove ✅；AppImage: 启动冒烟 ✅；校验和 sha256sum -c 全部通过 ✅）
 
 ## 长期规划（goal.md 七大模块）
 

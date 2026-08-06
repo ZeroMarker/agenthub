@@ -84,6 +84,22 @@ jobs:
           # target/<triple>/release/bundle/{appimage,deb,rpm,nsis,macos}.
           # Hash exactly the files tauri-action uploads to the release.
           cd "target/${{ matrix.target }}/release"
+
+          # macOS: tauri-action uploads the app tarball under a versioned name
+          # (AgentHub.app.tar.gz -> AgentHub_<version>_<arch>.app.tar.gz).
+          # Rename the local file so checksums match the uploaded asset name.
+          ARCH=""
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin) ARCH="aarch64" ;;
+            x86_64-apple-darwin)  ARCH="x64" ;;
+          esac
+          if [ -n "$ARCH" ]; then
+            VERSION=$(grep -m1 '^version' ../../../Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+            for f in $(find . -type f -name 'AgentHub.app.tar.gz'); do
+              mv "$f" "$(dirname "$f")/AgentHub_${VERSION}_${ARCH}.app.tar.gz"
+            done
+          fi
+
           find . -type f -name 'AgentHub*' \( -name '*.AppImage' -o -name '*.deb' \
             -o -name '*.rpm' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
             -o -name '*.app.tar.gz' \) -print0 | sort -z | xargs -0 sha256sum \

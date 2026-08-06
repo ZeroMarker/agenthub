@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-06
+
 ### Added
 - **Material 3 Expressive design (UI)**: spring overshoot easing, expressive shape scale
   (16/24/32/40px), M3 state-layer colors; spring micro-interactions on buttons/chips/cards,

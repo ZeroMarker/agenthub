@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Material 3 Expressive design (UI)**: spring overshoot easing, expressive shape scale
+  (16/24/32/40px), M3 state-layer colors; spring micro-interactions on buttons/chips/cards,
+  tertiary pill active indicator on the nav rail, expressive modal entrance
+
+### Changed
+- Release workflow: `tauri-apps/tauri-action` upgraded `@v0` → `@v1` (v1.0.0); current
+  inputs are compatible, no breaking-change migration needed
+
 ## [1.1.0] - 2026-08-06
 
 ### Added (Wave 3: security + intelligence + orchestration)

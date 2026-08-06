@@ -2,6 +2,14 @@
 
 > 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill）；**保留 overview（概览）为独立只读模块**；审计日志、备份/恢复作为横切能力（非模块），详见 goal.md v0.5。
 
+## 发布记录（2026-08-06）— ✅ v1.1.0 已发布
+
+- [x] v1.1.0（wave 3）：9 平台产物 + 4 SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.1.0
+- [x] 发版中 tauri-action 创建 release 403 排查：probe 证实 GITHUB_TOKEN 有写权限（POST 201）；workflow_dispatch 下 tauri-action 正常；最终以「预创建 draft release → push tag」绕过，4/4 平台上传成功
+- [x] tauri-action 升级 `@v0` → `@v1`（v1.0.0，2026-06-29），inputs 全兼容
+- [x] UI：Material 3 Expressive 增强（spring 动效、expressive 形状、导航激活指示条）
+- [x] 遗留：v1.1.0 发版时 push-tag 场景的 tauri-action 403 根因未定（GitHub 端行为）；后续发版可复用「预建 draft」流程
+
 ## 长期规划第三波（2026-08-06）— ✅ 完成（安全存储 + 智能检索 + 工作流编排）
 
 ### ✅ Config 密钥链存储 + API Key 轮换

@@ -86,6 +86,7 @@ jobs:
           find . -type f -name 'AgentHub*' \( -name '*.AppImage' -o -name '*.deb' \
             -o -name '*.rpm' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
             -o -name '*.app.tar.gz' \) -print0 | sort -z | xargs -0 sha256sum \
+            | sed 's|\./bundle/[^/]*/||' \
             > "${GITHUB_WORKSPACE}/SHA256SUMS-${{ matrix.target }}"
           cat "${GITHUB_WORKSPACE}/SHA256SUMS-${{ matrix.target }}"
 

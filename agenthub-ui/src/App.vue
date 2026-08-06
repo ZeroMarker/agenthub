@@ -32,7 +32,7 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
             { id: 'sessions', icon: '💬', label: 'Sessions' },
             { id: 'memory', icon: '🧠', label: 'Memory' },
             { id: 'diagnostic', icon: '🩺', label: 'Diagnostic' },
-            { id: 'management', icon: '📊', label: 'Manage' },
+            { id: 'management', icon: '📊', label: 'Overview' },
           ]"
           :key="item.id"
           :class="['nav-rail-btn', { active: activeView === item.id }]"

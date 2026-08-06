@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-08-06
 
 ### Added
-- **Management module**: append-only audit log (`audit/events.jsonl`), whole-workspace backup/restore (configs, prompts + versions, sessions + templates, memories, audit), and workspace status overview (`ManagementReport`)
+- **横切能力（非模块）**: append-only audit log (`audit/events.jsonl`), whole-workspace backup/restore (configs, prompts + versions, sessions + templates, memories, audit), and workspace status overview (`OverviewReport` in `overview.rs`)
 - **CLI**: `agenthub status`, `agenthub audit [--action --target --last-days --limit]`, `agenthub backup [--output]`, `agenthub restore <file>`
-- **GUI**: Management view with dashboard stat cards, filterable audit log table, and backup/restore controls
+- **GUI**: Overview view with dashboard stat cards, filterable audit log table, and backup/restore controls
 - **Session cost tracking**: built-in model pricing table (17 common models) with fallback, `record_usage` accumulation, `replay_session` markdown export, and reusable session templates
 - **Prompt version control**: automatic snapshot on every update, `list_versions` / `get_version` / `rollback`, plus usage counters (`usage_count` / `last_used_at`) and required-variable validation with defaults
 - **Memory semantic search**: pure-Rust BM25 scoring (title 3x / tags 2x / content 1x weighting), plus importance, touch, revive and age-based decay (low-importance stale entries auto-archived and excluded from search)

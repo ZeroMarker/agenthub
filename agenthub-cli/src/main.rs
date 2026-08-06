@@ -1,6 +1,6 @@
 use agenthub_core::{
     Agent, AuditManager, AuditQuery, BackupManager, Catalog, DiagnosticManager, Installer,
-    ManagementReport, Platform, RealCommandRunner,
+    OverviewReport, Platform, RealCommandRunner,
 };
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
@@ -335,7 +335,7 @@ pub fn cmd_doctor() -> String {
 }
 
 pub fn cmd_status(base_dir: &Path, catalog: &Catalog) -> String {
-    let report = ManagementReport::new(base_dir.to_path_buf(), get_platform());
+    let report = OverviewReport::new(base_dir.to_path_buf(), get_platform());
     let overview = match report.overview(catalog) {
         Ok(o) => o,
         Err(e) => return format!("Error: {}", e),

@@ -1,9 +1,10 @@
-# AgentHub Goal — 七大模块架构
+# AgentHub Goal — 六大模块 + 横切能力架构
 
-> 版本：v0.3
+> 版本：v0.4
 > 创建日期：2026-06-24
-> 更新日期：2026-07-07
-> 状态：规划草案（Package 已实现，Config / Prompt / Session / Skill / Memory 已具备基础实现）
+> 更新日期：2026-08-06
+> 状态：规划草案（Package 已实现，Config / Prompt / Session / Skill / Memory 已具备基础实现；审计/备份/状态概览等横切能力首波完成）
+> 变更：v0.4 移除独立 management 模块，其能力归并到所属模块，审计/备份/状态概览作为横切能力（非模块）
 
 ## 愿景
 
@@ -14,16 +15,16 @@ AgentHub 从"AI 编程助手的安装管理器"演进为**全生命周期的 Age
 ## 模块总览
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   management                     │
-│          (统一入口、生命周期、权限、监控)          │
-├─────────┬──────────┬──────────┬─────────────────┤
+┌─────────┬──────────┬──────────┬─────────────────┐
 │ package │  config  │  prompt  │    session       │
 │ 安装管理 │ 配置管理  │ 提示词管理│    会话管理      │
 ├─────────┴──────────┴──────────┴─────────────────┤
 │           skill          │        memory         │
 │         技能管理          │       记忆管理         │
 └──────────────────────────┴──────────────────────┘
+
+横切能力（不构成独立模块，供所有模块复用）：
+审计日志 · 备份/恢复 · 状态概览/仪表盘 · 监控与告警
 ```
 
 ---
@@ -211,28 +212,31 @@ sessions/   → 检查点、任务进度、临时笔记
 
 ---
 
-## 7. Management（管理中心）
+## 7. 横切能力（不属于单一模块）
 
-**职责**：统一入口，协调其他六大模块，提供生命周期管理和运维能力。
+> 早期规划中的 "management" 模块已移除：统一入口/生命周期/批量操作本就属于 package，权限与密钥轮换属于 config，成本监控属于 session，插件属于 skill；其余能力是跨模块复用的基础能力，不构成独立模块。
 
-**当前状态**：❌ 未实现
+**已归并到所属模块的能力**：
+- 生命周期管理（安装 → 配置 → 使用 → 更新 → 卸载）→ **package**
+- 批量操作（多 Agent 同时配置/更新/卸载）→ **package**（已有）
+- 健康检查 → **package**（`agenthub doctor`）
+- 用户与权限、API Key 轮换 → **config**（与密钥链存储同属密钥管理）
+- 成本阈值告警 → **session**（成本追踪的延伸）
+- 插件系统（第三方扩展入口）→ **skill**（技能市场/插件生态）
 
-**目标能力**：
-- 仪表盘（Agent 状态总览、健康检查、资源用量）
-- 生命周期管理（安装 → 配置 → 使用 → 更新 → 卸载）
-- 批量操作（多 Agent 同时配置/更新/卸载）
-- 监控与告警（Agent 可用性、API 状态、成本阈值）
-- 用户与权限（单用户/多用户、角色、API Key 轮换）
-- 审计日志（谁在什么时间对哪个 Agent 做了什么操作）
-- 插件系统（第三方扩展入口）
+**跨模块基础能力（工具而非模块，不承载业务逻辑）**：
+- 审计日志：谁在什么时间对哪个 Agent 做了什么操作
+- 备份/恢复：导出/导入所有配置、记忆、技能、会话与审计
+- 状态概览/仪表盘：聚合各模块数据的只读视图
+- 监控与告警：Agent 可用性、API 状态、成本阈值（只读监控）
 
-**CLI 扩展**：
+**CLI 入口**（命令挂靠在相应模块，此处仅为汇总）：
 ```bash
-agenthub dashboard        # 打开 Web 仪表盘
-agenthub status           # 全局状态概览
-agenthub audit --last 7d  # 最近 7 天操作审计
-agenthub backup           # 导出所有配置、记忆、技能
-agenthub restore          # 从备份恢复
+agenthub dashboard        # 打开 Web 仪表盘（状态概览的呈现层）
+agenthub status           # 全局状态概览（横切）
+agenthub audit --last 7d  # 最近 7 天操作审计（横切）
+agenthub backup           # 导出所有配置、记忆、技能（横切）
+agenthub restore          # 从备份恢复（横切）
 ```
 
 ---
@@ -243,7 +247,7 @@ agenthub restore          # 从备份恢复
 package ──→ config ──→ session
    │           │          │
    ↓           ↓          ↓
-  skill ──→ memory ──→ management
+  skill ──→ memory
 ```
 
 - **package** 是基础：先安装才能配置和使用
@@ -251,7 +255,7 @@ package ──→ config ──→ session
 - **session** 依赖 config：会话使用配置来连接 Agent
 - **skill** 独立于 package：技能不依赖特定 Agent
 - **memory** 被所有模块使用：每个模块都产生可检索的知识
-- **management** 是顶层：聚合所有模块提供统一视图
+- **横切能力**（审计、备份/恢复、状态概览）不构成独立模块，只读聚合各模块数据，不承载业务逻辑
 
 ---
 
@@ -265,7 +269,7 @@ package ──→ config ──→ session
 | Phase 4 | session | P1 | ✅ 基础实现 | 持续增强 |
 | Phase 5 | prompt | P2 | ✅ 基础实现 | 持续增强 |
 | Phase 6 | skill | P2 | ✅ 基础实现 | 持续增强 |
-| Phase 7 | management | P3 | 📋 设计中 | 4-6 周 |
+| Phase 7 | 横切能力（审计、备份/恢复、状态概览，非模块） | P3 | ✅ 首波完成（2026-08-06） | 持续增强 |
 
 ---
 
@@ -274,4 +278,4 @@ package ──→ config ──→ session
 - `PROJECT_PLAN.md` 定义 v1.0 的交付范围（以 package 为核心）
 - `goal.md` 定义更长远的模块化架构愿景
 - v1.0 聚焦 package 模块的完善
-- v2.0+ 重点增强 config、memory、session、prompt、skill，并补齐 management、备份恢复、审计和跨 Agent 协作能力
+- v2.0+ 重点增强 config、memory、session、prompt、skill，并补齐备份恢复、审计与跨 Agent 协作能力（横切能力，非独立模块）

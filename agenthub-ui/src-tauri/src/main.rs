@@ -1,7 +1,7 @@
 use agenthub_core::{
     Agent, AgentKind, AuditManager, AuditQuery, BackupManager, Catalog, ConfigManager, ConfigValue,
-    DiagnosticManager, Installer, ManagementReport, MemoryManager, MemoryScope, MemoryType,
-    Platform, PricingTable, PromptManager, RealCommandRunner, Result, SessionManager, SkillManager,
+    DiagnosticManager, Installer, MemoryManager, MemoryScope, MemoryType, OverviewReport, Platform,
+    PricingTable, PromptManager, RealCommandRunner, Result, SessionManager, SkillManager,
     StatusOverview,
 };
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,7 @@ pub struct AppState {
     memory_manager: Arc<MemoryManager>,
     audit_manager: Arc<AuditManager>,
     backup_manager: Arc<BackupManager>,
-    management_report: Arc<ManagementReport>,
+    overview_report: Arc<OverviewReport>,
     pricing_table: Arc<PricingTable>,
     /// Per-agent cancellation flags for in-flight install/uninstall operations.
     cancellations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
@@ -1459,7 +1459,7 @@ async fn get_status_overview(
 ) -> std::result::Result<StatusOverview, String> {
     let catalog = state.catalog.read().await;
     state
-        .management_report
+        .overview_report
         .overview(&catalog)
         .map_err(|e| e.to_string())
 }
@@ -1882,7 +1882,7 @@ fn main() {
     let memory_manager = MemoryManager::new(config_dir.join("memory"));
     let audit_manager = AuditManager::new(config_dir.join("audit"));
     let backup_manager = BackupManager::new(config_dir.clone());
-    let management_report = ManagementReport::new(config_dir.clone(), platform);
+    let overview_report = OverviewReport::new(config_dir.clone(), platform);
     let pricing_table = PricingTable::builtin();
 
     let state = AppState {
@@ -1895,7 +1895,7 @@ fn main() {
         memory_manager: Arc::new(memory_manager),
         audit_manager: Arc::new(audit_manager),
         backup_manager: Arc::new(backup_manager),
-        management_report: Arc::new(management_report),
+        overview_report: Arc::new(overview_report),
         pricing_table: Arc::new(pricing_table),
         cancellations: Arc::new(Mutex::new(HashMap::new())),
     };

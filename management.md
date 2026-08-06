@@ -1,13 +1,14 @@
 # AgentHub Management Specification
 
-> 版本：v0.3
+> 版本：v0.4
 > 创建日期：2026-06-24
-> 更新日期：2026-07-07
-> 状态：设计文档（核心管理模块已有基础实现，部分高级能力仍在规划中）
+> 更新日期：2026-08-06
+> 状态：设计文档（六大模块均有基础实现；审计/备份/状态概览等横切能力首波已完成）
+> 变更：v0.4 移除独立 management 模块——统一入口/生命周期/批量操作归 package，权限与密钥归 config，成本监控归 session，插件归 skill；审计、备份/恢复、状态概览作为横切能力（非模块），见文末「跨模块操作」
 
 ## 概述
 
-本文档定义 AgentHub 六大核心模块（package, config, prompt, session, skill, memory）的完整生命周期管理规范，包括数据模型、CRUD 操作、状态监控、审计日志、导入导出和备份恢复。
+本文档定义 AgentHub 六大核心模块（package, config, prompt, session, skill, memory）的完整生命周期管理规范，包括数据模型、CRUD 操作、状态监控、审计日志、导入导出和备份恢复。审计、备份/恢复、状态概览、监控是**横切能力**，不构成独立模块。
 
 ### 实施状态
 
@@ -16,11 +17,12 @@
 | Package | ✅ 已实现 | `agenthub-core` crate + CLI + GUI，支持 25 个代理 |
 | Config | ✅ 基础实现 | AgentHub YAML 配置 + 部分 Agent 原生配置读写 |
 | Prompt | ✅ 基础实现 | YAML 模板 CRUD + 变量插值 |
-| Session | ✅ 基础实现 | YAML 会话记录、搜索、标签、评分和用量字段 |
+| Session | ✅ 基础实现 | YAML 会话记录、搜索、标签、评分、用量字段、成本追踪、回放、模板 |
 | Skill | ✅ 基础实现 | `SKILL.md` 解析、安装、启停、依赖检查，兼容 Codex skills |
-| Memory | ✅ 基础实现 | Markdown 记忆、scope/type 分类、标签和搜索 |
+| Memory | ✅ 基础实现 | Markdown 记忆、scope/type 分类、标签、BM25 语义检索、记忆衰减 |
+| 横切能力 | ✅ 首波完成 | 审计日志（JSONL）、备份/恢复、状态概览（`agenthub status`） |
 
-高级能力如密钥链、审计日志、备份恢复、技能市场、语义检索和跨 Agent 工作流仍属于后续规划。
+仍属后续规划：密钥链存储、技能市场、向量检索/知识图谱、插件系统、监控告警、跨 Agent 工作流。
 
 ---
 
@@ -87,13 +89,11 @@ agenthub <module> <action> [target] [options]
 │           ├── checkpoint.md
 │           └── notes.md
 ├── audit/
-│   └── audit.log
-└── backups/
-    ├── 2026-06-24-full.tar.gz
-    └── 2026-06-24-config-only.tar.gz
+│   └── events.jsonl         # 已落地：append-only JSONL 审计日志
+└── backups/                 # 备份输出目标（单 JSON 文件，路径由用户指定）
 ```
 
-`audit/`、`backups/`、prompt 版本目录和 skill registry 是规划结构，当前代码尚未完整落地。更贴近当前实现的 harness 文件说明见 `docs/agent-harness.md`。
+`audit/` 已落地；prompt 版本快照位于 `prompts/templates/versions/<id>/v<N>.yaml`（已落地）；`backups/` 为备份输出目标而非固定目录；skill registry 仍为规划结构。更贴近当前实现的 harness 文件说明见 `docs/agent-harness.md`。
 
 ### 3. 审计日志格式
 

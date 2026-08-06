@@ -45,12 +45,12 @@ pub struct StatusOverview {
 
 /// Aggregates data across every manager to produce a unified overview
 /// (dashboard / `agenthub status`).
-pub struct ManagementReport {
+pub struct OverviewReport {
     base_dir: PathBuf,
     platform: Platform,
 }
 
-impl ManagementReport {
+impl OverviewReport {
     pub fn new(base_dir: PathBuf, platform: Platform) -> Self {
         Self { base_dir, platform }
     }
@@ -194,7 +194,7 @@ mod tests {
             .unwrap();
 
         let catalog = Catalog::from_json(TEST_AGENTS_JSON).unwrap();
-        let report = ManagementReport::new(base, Platform::Windows);
+        let report = OverviewReport::new(base, Platform::Windows);
 
         let statuses = vec![
             AgentStatus {
@@ -230,7 +230,7 @@ mod tests {
     fn test_overview_empty_workspace() {
         let temp = TempDir::new().unwrap();
         let catalog = Catalog::from_json(TEST_AGENTS_JSON).unwrap();
-        let report = ManagementReport::new(temp.path().to_path_buf(), Platform::Linux);
+        let report = OverviewReport::new(temp.path().to_path_buf(), Platform::Linux);
 
         let overview = report.overview_with_status(&catalog, &[]).unwrap();
         assert_eq!(overview.installed_agents, 0);

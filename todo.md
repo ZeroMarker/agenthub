@@ -37,7 +37,7 @@
 ### 📊 验证结果
 - Rust：207 测试全过（159 core + 9 集成 + 34 cli + 5 tauri），clippy 0 警告，fmt 干净
 - 前端：11 测试全过，vue-tsc + vite build 通过
-- 提交 `ddc2bae` + 文档提交 `a9467f2` 已推送 origin/main
+- 提交 `ddc2bae` + 文档提交 `a9467f2` + todo/CHANGELOG 提交 `ca5ef5f` 已推送 origin/main
 
 ### 本波未覆盖（留待后续）
 - Config：OS keyring 后端（已评估，留接口）、API Key 轮换通知/审计接入
@@ -202,6 +202,7 @@ All UI components have been migrated to the Material 3 design token system:
 - [x] GitHub Actions: Windows/macOS/Linux 构建矩阵（`release.yml` ✅）
 - [x] GitHub Actions: cargo test + clippy + fmt 检查（`ci.yml` ✅）
 - [x] GitHub Actions: 前端 npm run build 检查（`ci.yml` ✅）
+- [x] 低配置（RAM<2G / 存储<40G）Linux 构建测试：`ci-low-resource.yml` + `docs/low-resource-ci.md` ✅（2026-08-06）
 
 ### 发布产物
 - [x] CLI 二进制 + SHA-256 校验和（`scripts/generate-checksums.ps1/.sh`，release.yml 已集成并附加到 Release）
@@ -230,8 +231,9 @@ All UI components have been migrated to the Material 3 design token system:
 ### Config 配置管理
 - [x] 多环境配置（development / staging / production）✅（基础实现）
 - [x] 配置模板（模型、温度、token 限制）✅（2026-08-06 第二波）
-- [ ] API Key 密钥链存储（需评估 keyring/系统依赖）
-- [ ] API Key 轮换、用户与权限（归并自原 management）
+- [x] API Key 密钥链存储（文件密钥链 SecretStore，0600 权限；OS keyring 已评估暂缓）✅（2026-08-06 第三波）
+- [x] API Key 轮换（rotate 归档旧值可回滚）✅（2026-08-06 第三波）
+- [ ] 用户与权限（归并自原 management）
 
 ### Session 会话管理
 - [x] 成本追踪（模型价格表 + record_usage）✅（2026-08-06 首波）
@@ -242,27 +244,30 @@ All UI components have been migrated to the Material 3 design token system:
 ### Prompt 提示词管理
 - [x] 版本控制、变量校验、使用统计 ✅（2026-08-06 首波）
 - [x] 导入/导出（含版本历史）✅（2026-08-06 第二波）
-- [ ] 社区共享、从 Agent 会话中提取提示词
+- [x] 从 Agent 会话中提取提示词（URL/路径/版本等 → {{占位符}} 模板）✅（2026-08-06 第三波）
+- [ ] 社区共享
 
 ### Skill 技能管理
 - [x] 版本管理与兼容性检查 ✅（2026-08-06 第二波）
+- [x] 工作流编排（多技能组合，含可选步骤/依赖/兼容性校验）✅（2026-08-06 第三波）
 - [ ] 技能市场（发现、评分、安装统计）
-- [ ] 工作流编排（多技能组合）
 - [ ] 插件系统（第三方扩展入口，归并自原 management）
 
 ### Memory 记忆管理
 - [x] BM25 语义检索 ✅（2026-08-06 首波）
 - [x] 记忆衰减（importance + 归档）✅（2026-08-06 首波）
 - [x] 记忆导入/导出/同步 ✅（2026-08-06 第二波）
-- [ ] 向量检索、知识图谱
+- [x] 向量检索（本地特征哈希嵌入，无网络）+ 混合检索（BM25×向量）✅（2026-08-06 第三波）
+- [x] 知识图谱（实体抽取 + 共现关系，persist graph.json）✅（2026-08-06 第三波）
 
 ### Overview 概览模块（只读聚合，不承载业务逻辑）
 - [x] 状态概览 `agenthub status` / GUI 仪表盘 ✅（2026-08-06 首波）
 - [x] 时间维度趋势（成本 / 会话数 / 审计量）✅（2026-08-06 第二波）
-- [ ] Web 仪表盘（浏览器独立视图）
+- [x] Web 仪表盘（浏览器独立视图，`status --html` 静态导出）✅（2026-08-06 第三波）
 
 ### 横切能力（非模块，工具而非业务模块）
 - [x] 审计日志 ✅（2026-08-06 首波，install/uninstall 已接入）
-- [x] 备份/恢复 ✅（2026-08-06 首波）
+- [x] 备份/恢复 ✅（2026-08-06 首波；第三波扩展纳入 workflows + memory_graph）
 - [x] 监控与告警（第一版：诊断/未安装/预算/兼容性）✅（2026-08-06 第二波）
-- [ ] 监控定时化/告警推送
+- [x] 监控定时化入口（`monitor --json` / `--watch` 供 cron/systemd）✅（2026-08-06 第三波）
+- [ ] 告警推送渠道（邮件/webhook）

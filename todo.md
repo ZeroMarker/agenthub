@@ -2,9 +2,11 @@
 
 > 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill）；**保留 overview（概览）为独立只读模块**；审计日志、备份/恢复作为横切能力（非模块），详见 goal.md v0.5。
 
-## 发布记录（2026-08-06）— ✅ v1.1.0 已发布
+## 发布记录（2026-08-06）— ✅ v1.1.0 / v1.2.0 已发布
 
 - [x] v1.1.0（wave 3）：9 平台产物 + 4 SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.1.0
+- [x] v1.2.0（M3 Expressive + tauri-action v1）：9 平台产物 + 4 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.2.0
+- [x] v1.2.0 实测 tauri-action@v1 正常（预建 draft 流程）；发现并修复 macOS `.app.tar.gz` 校验和与上传资产名不一致的老 bug（v1.1.0 已受影响，已一并修正线上资产）
 - [x] 发版中 tauri-action 创建 release 403 排查：probe 证实 GITHUB_TOKEN 有写权限（POST 201）；workflow_dispatch 下 tauri-action 正常；最终以「预创建 draft release → push tag」绕过，4/4 平台上传成功
 - [x] tauri-action 升级 `@v0` → `@v1`（v1.0.0，2026-06-29），inputs 全兼容
 - [x] UI：Material 3 Expressive 增强（spring 动效、expressive 形状、导航激活指示条）

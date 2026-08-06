@@ -458,7 +458,8 @@ cargo test -- --nocapture
 
 ### 低资源 CI（`.github/workflows/ci-low-resource.yml`）
 
-触发条件：push / PR 到 `main`（也可 `workflow_dispatch` 手动触发）
+触发条件：默认 `workflow_dispatch` 手动触发；注册好自托管 runner 后，可自行将 `on`
+改为 push / PR 自动触发（未注册 runner 时自动触发会导致 job 一直排队）。
 
 面向 **RAM < 2 GB、存储 < 40 GB** 的低配 Linux 自托管 runner：
 

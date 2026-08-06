@@ -10,10 +10,8 @@ name: CI (low-resource)
 #   - rust-cache 仅在 main 分支写缓存，避免磁盘被缓存占满
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # 仅在仓库注册了低配自托管 runner 后启用 push/PR 自动触发；
+  # 默认手动触发，避免未注册 runner 时 job 一直排队。
   workflow_dispatch:
 
 jobs:

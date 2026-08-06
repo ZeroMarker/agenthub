@@ -141,12 +141,13 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
 }
 
 .nav-rail-btn {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem;
   border: none;
-  border-radius: var(--md-sys-shape-xl);
+  border-radius: var(--md-sys-shape-expressive-md);
   background: transparent;
   color: var(--md-sys-color-on-surface-variant);
   font: var(--md-sys-typescale-label-medium);
@@ -155,17 +156,47 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
   overflow: hidden;
   white-space: nowrap;
   transition: background var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized),
-              color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized);
+              color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized),
+              transform var(--md-sys-motion-duration-spring) var(--md-sys-motion-easing-spring);
+}
+
+/* Expressive active indicator: tertiary pill on the leading edge. */
+.nav-rail-btn.active::before {
+  content: '';
+  position: absolute;
+  left: -0.25rem;
+  top: 50%;
+  width: 5px;
+  height: 55%;
+  border-radius: var(--md-sys-shape-full);
+  background: var(--md-sys-color-tertiary);
+  transform: translateY(-50%) scaleY(0.9);
+  transition: transform var(--md-sys-motion-duration-spring) var(--md-sys-motion-easing-spring);
 }
 
 .nav-rail-btn:hover {
   background: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-secondary-container);
+  transform: translateX(2px);
+}
+
+.nav-rail-btn:active {
+  transform: translateX(0) scale(0.98);
+  transition-duration: var(--md-sys-motion-duration-short);
 }
 
 .nav-rail-btn.active {
   background: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-secondary-container);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-sys-color-secondary) 30%, transparent);
+}
+
+.nav-rail-btn.active:hover {
+  transform: none;
+}
+
+.nav-rail-btn.active:active {
+  transform: scale(0.98);
 }
 
 .nav-rail-icon {

@@ -121,20 +121,25 @@ stdout:
 <style scoped>
 .m3-card {
   background: var(--md-sys-color-surface);
-  border-radius: var(--md-sys-shape-md);
+  border-radius: var(--md-sys-shape-expressive-md);
   padding: 1.25rem;
   box-shadow: var(--md-sys-elevation-1);
   cursor: pointer;
-  transition: box-shadow var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized),
-              transform var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized);
+  transition: box-shadow var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized),
+              transform var(--md-sys-motion-duration-spring) var(--md-sys-motion-easing-spring);
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
   outline: 1px solid var(--md-sys-color-outline-variant);
+  will-change: transform;
 }
 .m3-card:hover {
   box-shadow: var(--md-sys-elevation-3);
-  transform: translateY(-2px);
+  transform: translateY(-3px) scale(1.005);
+}
+.m3-card:active {
+  transform: translateY(0) scale(0.99);
+  transition-duration: var(--md-sys-motion-duration-short);
 }
 .m3-card.selected {
   outline: 2px solid var(--md-sys-color-primary);

@@ -117,7 +117,7 @@ $ {{ results[agent.id]!.command }}</template><template v-if="results[agent.id]!.
 <style scoped>
 .table-wrap {
   background: var(--md-sys-color-surface);
-  border-radius: var(--md-sys-shape-md);
+  border-radius: var(--md-sys-shape-expressive-md);
   box-shadow: var(--md-sys-elevation-1);
   overflow-x: auto;
 }

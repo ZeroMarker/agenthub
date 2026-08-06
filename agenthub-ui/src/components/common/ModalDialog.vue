@@ -75,14 +75,14 @@ onUnmounted(() => {
 }
 .modal-content {
   background: var(--md-sys-color-surface);
-  border-radius: var(--md-sys-shape-xl);
+  border-radius: var(--md-sys-shape-expressive-xl);
   width: 90%; max-width: 640px;
   max-height: 85vh; overflow-y: auto;
   box-shadow: var(--md-sys-elevation-3);
-  animation: modalIn var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
+  animation: modalIn var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-spring);
 }
 @keyframes modalIn {
-  from { transform: translateY(20px); opacity: 0; }
+  from { transform: translateY(24px) scale(0.97); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 .modal-header {

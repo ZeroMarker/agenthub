@@ -190,33 +190,33 @@ onMounted(loadPrompts)
 <style scoped>
 .prompt-manager { padding: 2rem; }
 .actions { margin-bottom: 1.5rem; }
-.create-btn { padding: 0.6rem 1.5rem; background: #3498db; color: white; border: none; border-radius: 8px; cursor: pointer; }
-.create-form { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
-.create-form h3 { margin-bottom: 1rem; color: #2c3e50; }
+.create-btn { padding: 0.6rem 1.5rem; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-sm); cursor: pointer; }
+.create-form { background: var(--md-sys-color-surface); padding: 1.5rem; border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); margin-bottom: 1.5rem; }
+.create-form h3 { margin-bottom: 1rem; color: var(--md-sys-color-on-surface); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem; }
-.create-form input, .create-form textarea { padding: 0.6rem 1rem; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; width: 100%; }
+.create-form input, .create-form textarea { padding: 0.6rem 1rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-sm); font-size: 0.95rem; width: 100%; }
 .create-form textarea { font-family: monospace; resize: vertical; margin-bottom: 0.75rem; }
-.create-form button { padding: 0.6rem 1.5rem; background: #27ae60; color: white; border: none; border-radius: 8px; cursor: pointer; }
+.create-form button { padding: 0.6rem 1.5rem; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-sm); cursor: pointer; }
 .content-layout { display: flex; gap: 2rem; }
-.prompt-list { width: 300px; flex-shrink: 0; background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.prompt-list h3 { margin-bottom: 1rem; color: #2c3e50; }
-.prompt-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-radius: 8px; cursor: pointer; margin-bottom: 0.25rem; }
-.prompt-item:hover { background: #f8f9fa; }
-.prompt-item.active { background: #e3f2fd; }
+.prompt-list { width: 300px; flex-shrink: 0; background: var(--md-sys-color-surface); padding: 1.5rem; border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); }
+.prompt-list h3 { margin-bottom: 1rem; color: var(--md-sys-color-on-surface); }
+.prompt-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-radius: var(--md-sys-shape-sm); cursor: pointer; margin-bottom: 0.25rem; }
+.prompt-item:hover { background: var(--md-sys-color-surface-variant); }
+.prompt-item.active { background: var(--md-sys-color-primary-container); }
 .prompt-info { display: flex; flex-direction: column; }
-.prompt-name { font-weight: 600; color: #2c3e50; }
-.prompt-id { font-size: 0.8rem; color: #999; }
-.version { font-size: 0.8rem; color: #666; }
-.prompt-detail { flex: 1; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.prompt-detail h2 { color: #2c3e50; margin-bottom: 0.5rem; }
-.description { color: #666; margin-bottom: 1rem; }
+.prompt-name { font-weight: 600; color: var(--md-sys-color-on-surface); }
+.prompt-id { font-size: 0.8rem; color: var(--md-sys-color-on-surface-variant); }
+.version { font-size: 0.8rem; color: var(--md-sys-color-on-surface-variant); }
+.prompt-detail { flex: 1; background: var(--md-sys-color-surface); padding: 2rem; border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); }
+.prompt-detail h2 { color: var(--md-sys-color-on-surface); margin-bottom: 0.5rem; }
+.description { color: var(--md-sys-color-on-surface-variant); margin-bottom: 1rem; }
 .tags { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
-.tag { padding: 0.2rem 0.5rem; background: #f0f0f0; color: #666; border-radius: 4px; font-size: 0.8rem; }
+.tag { padding: 0.2rem 0.5rem; background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); border-radius: var(--md-sys-shape-xs); font-size: 0.8rem; }
 .template-preview, .render-section { margin-bottom: 1.5rem; }
-.template-preview h3, .render-section h3 { margin-bottom: 0.75rem; color: #2c3e50; }
-.template-preview pre, .render-result { background: #f8f9fa; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.9rem; line-height: 1.5; }
-.render-section button { padding: 0.5rem 1rem; background: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 1rem; }
-.delete-btn { padding: 0.5rem 1rem; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; }
+.template-preview h3, .render-section h3 { margin-bottom: 0.75rem; color: var(--md-sys-color-on-surface); }
+.template-preview pre, .render-result { background: var(--md-sys-color-surface-variant); padding: 1rem; border-radius: var(--md-sys-shape-sm); overflow-x: auto; font-size: 0.9rem; line-height: 1.5; }
+.render-section button { padding: 0.5rem 1rem; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; margin-bottom: 1rem; }
+.delete-btn { padding: 0.5rem 1rem; background: var(--md-sys-color-error); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; }
 .list-items { max-height: calc(100vh - 350px); overflow-y: auto; }
 
 /* Responsive */

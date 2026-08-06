@@ -162,16 +162,16 @@ onMounted(loadSkills)
 }
 
 .create-section {
-  background: white;
+  background: var(--md-sys-color-surface);
   padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: var(--md-sys-shape-md);
+  box-shadow: var(--md-sys-elevation-1);
   margin-bottom: 2rem;
 }
 
 .create-section h3 {
   margin-bottom: 1rem;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
 }
 
 .create-form {
@@ -182,17 +182,17 @@ onMounted(loadSkills)
 .create-form input {
   flex: 1;
   padding: 0.6rem 1rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-sm);
   font-size: 0.95rem;
 }
 
 .create-form button {
   padding: 0.6rem 1.5rem;
-  background: linear-gradient(135deg, #27ae60, #2ecc71);
-  color: white;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-sm);
   cursor: pointer;
   font-weight: 600;
 }
@@ -209,16 +209,16 @@ onMounted(loadSkills)
 }
 
 .skill-card {
-  background: white;
+  background: var(--md-sys-color-surface);
   padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: var(--md-sys-shape-md);
+  box-shadow: var(--md-sys-elevation-1);
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .skill-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--md-sys-elevation-2);
 }
 
 .skill-card.disabled {
@@ -233,7 +233,7 @@ onMounted(loadSkills)
 }
 
 .skill-header h3 {
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
   font-size: 1.1rem;
 }
 
@@ -244,40 +244,40 @@ onMounted(loadSkills)
 
 .source-badge {
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--md-sys-shape-xs);
   font-size: 0.7rem;
   font-weight: 600;
 }
 
 .source-badge.codex {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-primary);
 }
 
 .source-badge.local {
-  background: #f3e5f5;
-  color: #7b1fa2;
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
 }
 
 .status-badge {
   padding: 0.25rem 0.75rem;
-  border-radius: 20px;
+  border-radius: var(--md-sys-shape-xl);
   font-size: 0.75rem;
   font-weight: 600;
 }
 
 .status-badge.enabled {
-  background: #d4edda;
-  color: #155724;
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
 }
 
 .status-badge.disabled {
-  background: #f8d7da;
-  color: #721c24;
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
 }
 
 .skill-description {
-  color: #666;
+  color: var(--md-sys-color-on-surface-variant);
   margin-bottom: 1rem;
   line-height: 1.5;
 }
@@ -290,17 +290,17 @@ onMounted(loadSkills)
 
 .version {
   padding: 0.2rem 0.5rem;
-  background: #e3f2fd;
-  color: #1976d2;
-  border-radius: 4px;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-primary);
+  border-radius: var(--md-sys-shape-xs);
   font-size: 0.8rem;
 }
 
 .category {
   padding: 0.2rem 0.5rem;
-  background: #f3e5f5;
-  color: #7b1fa2;
-  border-radius: 4px;
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+  border-radius: var(--md-sys-shape-xs);
   font-size: 0.8rem;
 }
 
@@ -313,9 +313,9 @@ onMounted(loadSkills)
 
 .tag {
   padding: 0.2rem 0.5rem;
-  background: #f5f5f5;
-  color: #666;
-  border-radius: 4px;
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface-variant);
+  border-radius: var(--md-sys-shape-xs);
   font-size: 0.8rem;
 }
 
@@ -328,25 +328,25 @@ onMounted(loadSkills)
   flex: 1;
   padding: 0.5rem;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--md-sys-shape-xs);
   cursor: pointer;
   font-size: 0.9rem;
   font-weight: 500;
 }
 
 .toggle-btn.enable {
-  background: #27ae60;
-  color: white;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
 }
 
 .toggle-btn.disable {
-  background: #f39c12;
-  color: white;
+  background: var(--md-sys-color-tertiary);
+  color: var(--md-sys-color-on-primary);
 }
 
 .delete-btn {
-  background: #e74c3c;
-  color: white;
+  background: var(--md-sys-color-error);
+  color: var(--md-sys-color-on-primary);
 }
 
 .toggle-btn:disabled, .delete-btn:disabled {

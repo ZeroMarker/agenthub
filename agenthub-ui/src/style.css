@@ -338,6 +338,56 @@ code {
   cursor: not-allowed;
 }
 
+/* --- M3 Primary Tabs (bottom indicator style) --- */
+.m3-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  margin-bottom: 1.5rem;
+}
+.m3-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-large);
+  cursor: pointer;
+  transition: color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized),
+              border-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized);
+}
+.m3-tab:hover {
+  color: var(--md-sys-color-on-surface);
+}
+.m3-tab.active {
+  color: var(--md-sys-color-primary);
+  border-bottom-color: var(--md-sys-color-primary);
+}
+
+/* --- Stat chips (tonal pills) --- */
+.agent-stats {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.875rem;
+  border-radius: var(--md-sys-shape-full);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font: var(--md-sys-typescale-label-large);
+}
+.stat-chip strong {
+  font-weight: 700;
+}
+
 /* --- Expressive hoverable card (use on any elevated surface) --- */
 .m3-card-hoverable {
   border-radius: var(--md-sys-shape-expressive-md);

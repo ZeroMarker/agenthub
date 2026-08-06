@@ -285,6 +285,7 @@ async function cancelAgent(name: string) {
 function setTab(tab: 'all' | 'cli' | 'desktop') {
   activeTab.value = tab
   searchQuery.value = ''
+  debouncedSearchQuery.value = ''
   selectedAgents.value.clear()
   loadAgents()
 }
@@ -578,7 +579,7 @@ onErrorCaptured((err, _instance, info) => {
   margin: 0;
   padding: 2rem;
   min-height: 100vh;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  background: var(--md-sys-color-background);
   box-sizing: border-box;
 }
 

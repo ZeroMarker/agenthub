@@ -323,10 +323,10 @@ onMounted(loadAgents)
 }
 
 .filter-controls {
-  background: white;
+  background: var(--md-sys-color-surface);
   padding: 1rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: var(--md-sys-shape-md);
+  box-shadow: var(--md-sys-elevation-1);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -335,14 +335,14 @@ onMounted(loadAgents)
 .search-input {
   width: 100%;
   padding: 0.6rem 1rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-sm);
   font-size: 0.95rem;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #3498db;
+  border-color: var(--md-sys-color-primary);
 }
 
 .filter-toggle {
@@ -351,7 +351,7 @@ onMounted(loadAgents)
   gap: 0.5rem;
   cursor: pointer;
   font-size: 0.9rem;
-  color: #666;
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 .filter-toggle input {
@@ -360,17 +360,17 @@ onMounted(loadAgents)
 }
 
 .agent-list {
-  background: white;
+  background: var(--md-sys-color-surface);
   padding: 1rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: var(--md-sys-shape-md);
+  box-shadow: var(--md-sys-elevation-1);
   flex: 1;
   overflow-y: auto;
 }
 
 .agent-list h3 {
   margin-bottom: 0.75rem;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
   font-size: 1rem;
 }
 
@@ -383,22 +383,22 @@ onMounted(loadAgents)
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem;
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-sm);
   cursor: pointer;
   transition: background 0.2s;
   margin-bottom: 0.25rem;
 }
 
 .agent-list li:hover {
-  background: #f8f9fa;
+  background: var(--md-sys-color-surface-variant);
 }
 
 .agent-list li.active {
-  background: #e3f2fd;
+  background: var(--md-sys-color-primary-container);
 }
 
 .agent-list li.installed {
-  border-left: 3px solid #27ae60;
+  border-left: 3px solid var(--md-sys-color-primary);
 }
 
 .agent-info {
@@ -409,14 +409,14 @@ onMounted(loadAgents)
 
 .agent-name {
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
 .installed-badge {
-  color: #27ae60;
+  color: var(--md-sys-color-primary);
   font-size: 0.9rem;
 }
 
@@ -428,52 +428,52 @@ onMounted(loadAgents)
 
 .agent-provider {
   font-size: 0.8rem;
-  color: #999;
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 .version {
   font-size: 0.75rem;
-  color: #27ae60;
-  background: #e8f5e9;
+  color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-secondary-container);
   padding: 0.1rem 0.4rem;
-  border-radius: 4px;
+  border-radius: var(--md-sys-shape-xs);
 }
 
 .agent-type {
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--md-sys-shape-xs);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
 }
 
 .agent-type.cli {
-  background: #d4edda;
-  color: #155724;
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
 }
 
 .agent-type.desktop {
-  background: #e8daef;
-  color: #6c3483;
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
 }
 
 .config-detail {
   flex: 1;
-  background: white;
+  background: var(--md-sys-color-surface);
   padding: 2rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: var(--md-sys-shape-md);
+  box-shadow: var(--md-sys-elevation-1);
   overflow-y: auto;
 }
 
 .detail-header {
   margin-bottom: 2rem;
   padding-bottom: 1.5rem;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .detail-header h2 {
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
   margin-bottom: 0.75rem;
 }
 
@@ -486,20 +486,20 @@ onMounted(loadAgents)
 
 .badge {
   padding: 0.3rem 0.75rem;
-  background: #f0f0f0;
-  color: #666;
-  border-radius: 20px;
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface-variant);
+  border-radius: var(--md-sys-shape-xl);
   font-size: 0.8rem;
 }
 
 .badge.format {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-primary);
 }
 
 .badge.installed {
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-primary);
 }
 
 .config-path {
@@ -507,22 +507,22 @@ onMounted(loadAgents)
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: #f8f9fa;
-  border-radius: 6px;
+  background: var(--md-sys-color-surface-variant);
+  border-radius: var(--md-sys-shape-xs);
 }
 
 .path-label {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--md-sys-color-on-surface-variant);
   font-weight: 500;
 }
 
 .path-value {
   font-size: 0.8rem;
-  color: #1976d2;
-  background: #e3f2fd;
+  color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-primary-container);
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--md-sys-shape-xs);
 }
 
 .section-header {
@@ -533,30 +533,30 @@ onMounted(loadAgents)
 }
 
 .section-header h3 {
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
 }
 
 .edit-btn, .save-btn, .cancel-btn {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--md-sys-shape-xs);
   cursor: pointer;
   font-size: 0.9rem;
 }
 
 .edit-btn {
-  background: #3498db;
-  color: white;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
 }
 
 .save-btn {
-  background: #27ae60;
-  color: white;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
 }
 
 .cancel-btn {
-  background: #95a5a6;
-  color: white;
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface);
 }
 
 .editor-actions {
@@ -577,14 +577,14 @@ onMounted(loadAgents)
 .config-item {
   display: flex;
   padding: 0.75rem;
-  background: #f8f9fa;
-  border-radius: 8px;
+  background: var(--md-sys-color-surface-variant);
+  border-radius: var(--md-sys-shape-sm);
   gap: 1rem;
 }
 
 .config-key {
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
   min-width: 200px;
   font-family: monospace;
 }
@@ -597,43 +597,43 @@ onMounted(loadAgents)
 
 .value-badge {
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--md-sys-shape-xs);
   font-size: 0.85rem;
   font-weight: 500;
 }
 
 .value-badge.true {
-  background: #d4edda;
-  color: #155724;
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
 }
 
 .value-badge.false {
-  background: #f8d7da;
-  color: #721c24;
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
 }
 
 .value-number {
   font-family: monospace;
-  color: #1976d2;
-  background: #e3f2fd;
+  color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-primary-container);
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--md-sys-shape-xs);
 }
 
 .value-string {
-  color: #666;
+  color: var(--md-sys-color-on-surface-variant);
   word-break: break-all;
 }
 
 .value-null {
-  color: #999;
+  color: var(--md-sys-color-on-surface-variant);
   font-style: italic;
 }
 
 .value-complex {
-  background: #f8f9fa;
+  background: var(--md-sys-color-surface-variant);
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--md-sys-shape-xs);
   font-family: monospace;
   font-size: 0.85rem;
   overflow-x: auto;
@@ -646,9 +646,9 @@ onMounted(loadAgents)
 }
 
 .raw-content {
-  background: #f8f9fa;
+  background: var(--md-sys-color-surface-variant);
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-sm);
   font-family: monospace;
   font-size: 0.85rem;
   line-height: 1.5;
@@ -660,8 +660,8 @@ onMounted(loadAgents)
 .raw-textarea {
   width: 100%;
   padding: 1rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-sm);
   font-family: monospace;
   font-size: 0.85rem;
   line-height: 1.5;
@@ -670,7 +670,7 @@ onMounted(loadAgents)
 
 .raw-textarea:focus {
   outline: none;
-  border-color: #3498db;
+  border-color: var(--md-sys-color-primary);
 }
 
 .no-selection, .loading-state {
@@ -682,7 +682,7 @@ onMounted(loadAgents)
 
 .placeholder {
   text-align: center;
-  color: #999;
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 .placeholder-icon {

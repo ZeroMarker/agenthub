@@ -160,10 +160,10 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
 
 .run-btn {
   padding: 0.75rem 2rem;
-  background: linear-gradient(135deg, #3498db, #2980b9);
-  color: white;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-sm);
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
@@ -172,7 +172,7 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
 
 .run-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+  box-shadow: var(--md-sys-elevation-2);
 }
 
 .run-btn:disabled {
@@ -182,9 +182,9 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
 
 .error-message {
   padding: 1rem;
-  background: #f8d7da;
-  color: #721c24;
-  border-radius: 8px;
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+  border-radius: var(--md-sys-shape-sm);
   margin-bottom: 2rem;
 }
 
@@ -195,15 +195,15 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
 }
 
 .summary-card {
-  background: white;
+  background: var(--md-sys-color-surface);
   padding: 2rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: var(--md-sys-shape-md);
+  box-shadow: var(--md-sys-elevation-1);
 }
 
 .summary-card h2 {
   margin-bottom: 1.5rem;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
 }
 
 .summary-stats {
@@ -214,41 +214,41 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
 .stat {
   text-align: center;
   padding: 1rem 2rem;
-  border-radius: 12px;
+  border-radius: var(--md-sys-shape-md);
   min-width: 100px;
 }
 
 .stat.passed {
-  background: #d4edda;
+  background: var(--md-sys-color-secondary-container);
 }
 
 .stat.warnings {
-  background: #fff3cd;
+  background: var(--md-sys-color-tertiary-container);
 }
 
 .stat.failed {
-  background: #f8d7da;
+  background: var(--md-sys-color-error-container);
 }
 
 .stat-value {
   display: block;
   font-size: 2rem;
   font-weight: 700;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
 }
 
 .stat-label {
   display: block;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--md-sys-color-on-surface-variant);
   margin-top: 0.25rem;
 }
 
 .category-section {
-  background: white;
+  background: var(--md-sys-color-surface);
   padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: var(--md-sys-shape-md);
+  box-shadow: var(--md-sys-elevation-1);
 }
 
 .category-title {
@@ -256,7 +256,7 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 1rem;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
   font-size: 1.1rem;
 }
 
@@ -275,20 +275,20 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
   align-items: center;
   gap: 1rem;
   padding: 0.75rem;
-  border-radius: 8px;
-  background: #f8f9fa;
+  border-radius: var(--md-sys-shape-sm);
+  background: var(--md-sys-color-surface-variant);
 }
 
 .check-item.passed {
-  background: #f8fff8;
+  background: var(--md-sys-color-secondary-container);
 }
 
 .check-item.warning {
-  background: #fffdf5;
+  background: var(--md-sys-color-tertiary-container);
 }
 
 .check-item.failed {
-  background: #fff8f8;
+  background: var(--md-sys-color-error-container);
 }
 
 .check-status {
@@ -305,30 +305,30 @@ function groupedChecks(checks: CheckResult[]): Record<string, CheckResult[]> {
 
 .check-name {
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
 }
 
 .check-message {
   font-size: 0.9rem;
-  color: #666;
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 .raw-output {
-  background: white;
+  background: var(--md-sys-color-surface);
   padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: var(--md-sys-shape-md);
+  box-shadow: var(--md-sys-elevation-1);
 }
 
 .raw-output h3 {
   margin-bottom: 1rem;
-  color: #2c3e50;
+  color: var(--md-sys-color-on-surface);
 }
 
 .raw-output pre {
-  background: #f8f9fa;
+  background: var(--md-sys-color-surface-variant);
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: var(--md-sys-shape-sm);
   overflow-x: auto;
   font-size: 0.85rem;
   line-height: 1.5;

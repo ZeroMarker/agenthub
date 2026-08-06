@@ -173,39 +173,39 @@ onMounted(loadSessions)
 
 <style scoped>
 .session-manager { padding: 2rem; }
-.create-section { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
-.create-section h3 { margin-bottom: 1rem; color: #2c3e50; }
+.create-section { background: var(--md-sys-color-surface); padding: 1.5rem; border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); margin-bottom: 1.5rem; }
+.create-section h3 { margin-bottom: 1rem; color: var(--md-sys-color-on-surface); }
 .create-form { display: flex; gap: 0.75rem; }
-.create-form input { flex: 1; padding: 0.6rem 1rem; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; }
-.create-form button { padding: 0.6rem 1.5rem; background: #27ae60; color: white; border: none; border-radius: 8px; cursor: pointer; }
+.create-form input { flex: 1; padding: 0.6rem 1rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-sm); font-size: 0.95rem; }
+.create-form button { padding: 0.6rem 1.5rem; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-sm); cursor: pointer; }
 .content-layout { display: flex; gap: 2rem; }
-.session-list { width: 350px; flex-shrink: 0; background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.session-list h3 { margin-bottom: 1rem; color: #2c3e50; }
-.session-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-radius: 8px; cursor: pointer; margin-bottom: 0.25rem; }
-.session-item:hover { background: #f8f9fa; }
-.session-item.active { background: #e3f2fd; }
+.session-list { width: 350px; flex-shrink: 0; background: var(--md-sys-color-surface); padding: 1.5rem; border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); }
+.session-list h3 { margin-bottom: 1rem; color: var(--md-sys-color-on-surface); }
+.session-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-radius: var(--md-sys-shape-sm); cursor: pointer; margin-bottom: 0.25rem; }
+.session-item:hover { background: var(--md-sys-color-surface-variant); }
+.session-item.active { background: var(--md-sys-color-primary-container); }
 .session-info { display: flex; flex-direction: column; }
-.session-title { font-weight: 600; color: #2c3e50; }
-.session-agent { font-size: 0.8rem; color: #999; }
-.status-badge { padding: 0.2rem 0.5rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
-.status-badge.active { background: #d4edda; color: #155724; }
-.status-badge.completed { background: #e3f2fd; color: #1565c0; }
-.status-badge.failed { background: #f8d7da; color: #721c24; }
-.status-badge.paused { background: #fff3cd; color: #856404; }
-.session-detail { flex: 1; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.session-detail h2 { color: #2c3e50; margin-bottom: 1rem; }
+.session-title { font-weight: 600; color: var(--md-sys-color-on-surface); }
+.session-agent { font-size: 0.8rem; color: var(--md-sys-color-on-surface-variant); }
+.status-badge { padding: 0.2rem 0.5rem; border-radius: var(--md-sys-shape-xl); font-size: 0.75rem; font-weight: 600; }
+.status-badge.active { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+.status-badge.completed { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+.status-badge.failed { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+.status-badge.paused { background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); }
+.session-detail { flex: 1; background: var(--md-sys-color-surface); padding: 2rem; border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); }
+.session-detail h2 { color: var(--md-sys-color-on-surface); margin-bottom: 1rem; }
 .detail-meta { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
-.badge { padding: 0.3rem 0.75rem; background: #f0f0f0; color: #666; border-radius: 20px; font-size: 0.8rem; }
-.status-active { background: #d4edda; color: #155724; }
-.status-completed { background: #e3f2fd; color: #1565c0; }
-.status-failed { background: #f8d7da; color: #721c24; }
+.badge { padding: 0.3rem 0.75rem; background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); border-radius: var(--md-sys-shape-xl); font-size: 0.8rem; }
+.status-active { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+.status-completed { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+.status-failed { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
 .timeline { margin-bottom: 1.5rem; }
-.timeline-item { display: flex; padding: 0.5rem 0; border-bottom: 1px solid #f0f0f0; }
-.timeline-item .label { font-weight: 600; color: #2c3e50; min-width: 100px; }
-.timeline-item .value { color: #666; }
+.timeline-item { display: flex; padding: 0.5rem 0; border-bottom: 1px solid var(--md-sys-color-surface-variant); }
+.timeline-item .label { font-weight: 600; color: var(--md-sys-color-on-surface); min-width: 100px; }
+.timeline-item .value { color: var(--md-sys-color-on-surface-variant); }
 .tags { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
-.tag { padding: 0.2rem 0.5rem; background: #f0f0f0; color: #666; border-radius: 4px; font-size: 0.8rem; }
-.delete-btn { padding: 0.5rem 1rem; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; }
+.tag { padding: 0.2rem 0.5rem; background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); border-radius: var(--md-sys-shape-xs); font-size: 0.8rem; }
+.delete-btn { padding: 0.5rem 1rem; background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; }
 /* Responsive */
 @media (max-width: 900px) {
   .session-manager { padding: 1.25rem; }

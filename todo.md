@@ -12,6 +12,17 @@
 - [x] UI：Material 3 Expressive 增强（spring 动效、expressive 形状、导航激活指示条）
 - [x] 遗留：v1.1.0 发版时 push-tag 场景的 tauri-action 403 根因未定（GitHub 端行为）；后续发版可复用「预建 draft」流程
 
+## UI 全面优化（2026-08-06）— ✅ 完成（M3 token 全量迁移 + 缺陷修复）
+
+- [x] 审查发现：6 个 Manager 视图（Config/Skill/Prompt/Session/Memory/Diagnostic）从未迁移到 M3 设计系统——约 150 处硬编码旧色（蓝/绿/红/白底卡片），暗色模式完全破坏、视图间视觉割裂
+- [x] 全部硬编码色/阴影/圆角 → M3 token（`color: white` 上下文感知映射为 on-*，按钮暗色下保持对比度）
+- [x] 修复 SessionManager：completed 徽标 `#1565c0` → on-primary-container、paused → tertiary-container 系、删除按钮 on-primary → on-error
+- [x] 修复 ConfigManager 取消按钮（灰底 on-primary → on-surface）、DiagnosticView 警告/通过/失败状态色 → container 语义色
+- [x] 修复 AgentList：页面渐变背景 → background token；切 Tab 后 `debouncedSearchQuery` 搜索过滤残留 bug
+- [x] 补全引用但缺失的 `.m3-tabs`/`.m3-tab`（M3 primary tab 底部指示条）与 `.agent-stats`/`.stat-chip`（tonal pill）样式
+- [x] 验证：vue-tsc 0 错误、vite build 通过、vitest 11/11 全过
+- [x] 提交 `f7df6d9` 已推送 origin/main；未发版（v1.3.0 候选）
+
 ## 长期规划第三波（2026-08-06）— ✅ 完成（安全存储 + 智能检索 + 工作流编排）
 
 ### ✅ Config 密钥链存储 + API Key 轮换

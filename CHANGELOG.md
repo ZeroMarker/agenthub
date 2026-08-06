@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **UI: full M3 token migration** — ConfigManager, SkillManager, PromptManager, SessionManager,
+  MemoryManager and DiagnosticView were still on legacy hardcoded colors (~150 occurrences)
+  that broke dark mode; all migrated to M3 tokens (context-aware `color: white` → `on-*`)
+- Fixed SessionManager badge/delete colors, ConfigManager cancel button, DiagnosticView status
+  colors; AgentList gradient background → token; tab switch no longer leaves a stale search filter
+- Added missing `.m3-tabs`/`.m3-tab` and `.agent-stats`/`.stat-chip` styles
+
 ## [1.2.0] - 2026-08-06
 
 ### Added

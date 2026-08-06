@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -172,6 +172,45 @@ pub struct SessionTemplate {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Workspace cost budget limits (USD). `None` means no limit.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct BudgetConfig {
+    #[serde(default)]
+    pub daily_usd: Option<f64>,
+    #[serde(default)]
+    pub monthly_usd: Option<f64>,
+}
+
+/// Current spending against the budget, plus any threshold alerts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetReport {
+    pub daily_spent_usd: f64,
+    pub daily_limit_usd: Option<f64>,
+    pub monthly_spent_usd: f64,
+    pub monthly_limit_usd: Option<f64>,
+    pub total_tokens_today: u64,
+    #[serde(default)]
+    pub alerts: Vec<String>,
+}
+
+/// Portable context extracted from a session, used to hand off to another
+/// session / agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionContext {
+    pub source_session: String,
+    pub agent: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub messages: Vec<ContextMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextMessage {
     pub role: String,
     pub content: String,
 }
@@ -635,6 +674,176 @@ impl SessionManager {
         Ok(session)
     }
 
+    // -----------------------------------------------------------------------
+    // Cost budget & alerts
+    // -----------------------------------------------------------------------
+
+    fn budget_path(&self) -> PathBuf {
+        self.sessions_dir.join("budget.yaml")
+    }
+
+    /// Load the workspace cost budget (defaults to no limits when unset).
+    pub fn get_budget(&self) -> Result<BudgetConfig> {
+        let path = self.budget_path();
+        if !path.exists() {
+            return Ok(BudgetConfig::default());
+        }
+
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| AgentHubError::SessionError(format!("Failed to read budget: {}", e)))?;
+
+        serde_yaml::from_str(&content)
+            .map_err(|e| AgentHubError::SessionError(format!("Failed to parse budget: {}", e)))
+    }
+
+    pub fn set_budget(&self, budget: &BudgetConfig) -> Result<()> {
+        std::fs::create_dir_all(&self.sessions_dir).map_err(|e| {
+            AgentHubError::SessionError(format!("Failed to create sessions dir: {}", e))
+        })?;
+
+        let content = serde_yaml::to_string(budget).map_err(|e| {
+            AgentHubError::SessionError(format!("Failed to serialize budget: {}", e))
+        })?;
+
+        std::fs::write(self.budget_path(), content)
+            .map_err(|e| AgentHubError::SessionError(format!("Failed to write budget: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Compute how much was spent today / this month (UTC, by session start)
+    /// against the configured budget and produce alerts when limits are hit.
+    pub fn check_budget(&self, now: DateTime<Utc>) -> Result<BudgetReport> {
+        let budget = self.get_budget()?;
+        let sessions = self.list_sessions()?;
+
+        let today = now.date_naive();
+        let month_start = today - chrono::Duration::days(today.day() as i64 - 1);
+
+        let mut daily_spent = 0.0f64;
+        let mut monthly_spent = 0.0f64;
+        let mut total_tokens_today = 0u64;
+        for session in &sessions {
+            let started = session.started_at.date_naive();
+            let cost = session
+                .usage
+                .as_ref()
+                .map(|u| u.estimated_cost_usd)
+                .unwrap_or(0.0);
+            if started == today {
+                daily_spent += cost;
+                total_tokens_today += session
+                    .usage
+                    .as_ref()
+                    .map(|u| u.total_tokens as u64)
+                    .unwrap_or(0);
+            }
+            if started >= month_start {
+                monthly_spent += cost;
+            }
+        }
+
+        let mut alerts = Vec::new();
+        if let Some(limit) = budget.daily_usd {
+            if daily_spent > limit {
+                alerts.push(format!(
+                    "Daily budget exceeded: ${:.2} spent > ${:.2} limit",
+                    daily_spent, limit
+                ));
+            }
+        }
+        if let Some(limit) = budget.monthly_usd {
+            if monthly_spent > limit {
+                alerts.push(format!(
+                    "Monthly budget exceeded: ${:.2} spent > ${:.2} limit",
+                    monthly_spent, limit
+                ));
+            }
+        }
+
+        Ok(BudgetReport {
+            daily_spent_usd: daily_spent,
+            daily_limit_usd: budget.daily_usd,
+            monthly_spent_usd: monthly_spent,
+            monthly_limit_usd: budget.monthly_usd,
+            total_tokens_today,
+            alerts,
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Cross-session context transfer
+    // -----------------------------------------------------------------------
+
+    /// Extract the trailing messages of a session as portable context.
+    pub fn export_context(&self, id: &str, last_n: Option<usize>) -> Result<SessionContext> {
+        let session = self.get_session(id)?;
+        let mut messages: Vec<ContextMessage> = session
+            .messages
+            .iter()
+            .map(|m| ContextMessage {
+                role: m.role.clone(),
+                content: m.content.clone(),
+            })
+            .collect();
+        if let Some(n) = last_n {
+            let skip = messages.len().saturating_sub(n);
+            messages.drain(..skip);
+        }
+
+        Ok(SessionContext {
+            source_session: id.to_string(),
+            agent: session.agent,
+            model: session.model,
+            messages,
+        })
+    }
+
+    pub fn export_context_json(&self, id: &str, last_n: Option<usize>) -> Result<String> {
+        let context = self.export_context(id, last_n)?;
+        serde_json::to_string_pretty(&context)
+            .map_err(|e| AgentHubError::SessionError(format!("Failed to serialize context: {}", e)))
+    }
+
+    /// Start a new session carrying the messages (and optionally another
+    /// agent/model) of a source session — the basis for cross-agent context
+    /// handoff.
+    pub fn fork_session(
+        &self,
+        source_id: &str,
+        agent: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<Session> {
+        let source = self.get_session(source_id)?;
+        let agent = agent.unwrap_or(&source.agent);
+        let title = title
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| format!("Fork of {}", source.title));
+
+        let mut session = self.create_session(&title, agent)?;
+        session.model = source.model.clone();
+        let now = Utc::now();
+        for message in &source.messages {
+            session.messages.push(SessionMessage {
+                role: message.role.clone(),
+                content: message.content.clone(),
+                timestamp: now,
+                tokens: message.tokens,
+            });
+        }
+        for tag in &source.tags {
+            if !session.tags.contains(tag) {
+                session.tags.push(tag.clone());
+            }
+        }
+        if source.project.is_some() {
+            session.project = source.project.clone();
+        }
+
+        self.save_session(&session)?;
+        Ok(session)
+    }
+
     pub fn get_stats(&self) -> Result<SessionStats> {
         let sessions = self.list_sessions()?;
         let total = sessions.len();
@@ -947,5 +1156,144 @@ mod tests {
         assert_eq!(session.messages.len(), 1);
         assert_eq!(session.messages[0].content, "Start");
         assert!(session.tags.contains(&"tag1".to_string()));
+    }
+
+    // ---- Budget ----
+
+    #[test]
+    fn test_budget_default_and_set() {
+        let (manager, _temp) = create_test_manager();
+
+        let budget = manager.get_budget().unwrap();
+        assert_eq!(budget, BudgetConfig::default());
+
+        manager
+            .set_budget(&BudgetConfig {
+                daily_usd: Some(5.0),
+                monthly_usd: Some(50.0),
+            })
+            .unwrap();
+        let budget = manager.get_budget().unwrap();
+        assert_eq!(budget.daily_usd, Some(5.0));
+        assert_eq!(budget.monthly_usd, Some(50.0));
+    }
+
+    #[test]
+    fn test_check_budget_alerts() {
+        let (manager, _temp) = create_test_manager();
+        let table = PricingTable::builtin();
+        let now = Utc::now();
+
+        // Session started today with gpt-4o-mini cost
+        let session = manager.create_session("Today", "codex").unwrap();
+        manager.set_model(&session.id, "gpt-4o-mini").unwrap();
+        manager
+            .record_usage(&session.id, 40_000_000, 0, &table)
+            .unwrap(); // $6.00
+
+        manager
+            .set_budget(&BudgetConfig {
+                daily_usd: Some(5.0),
+                monthly_usd: None,
+            })
+            .unwrap();
+
+        let report = manager.check_budget(now).unwrap();
+        assert!((report.daily_spent_usd - 6.0).abs() < 1e-6);
+        assert_eq!(report.alerts.len(), 1);
+        assert!(report.alerts[0].contains("Daily budget exceeded"));
+        assert_eq!(report.total_tokens_today, 40_000_000);
+
+        // Below limit -> no alert
+        manager
+            .set_budget(&BudgetConfig {
+                daily_usd: Some(10.0),
+                monthly_usd: None,
+            })
+            .unwrap();
+        let report = manager.check_budget(now).unwrap();
+        assert!(report.alerts.is_empty());
+    }
+
+    #[test]
+    fn test_check_budget_counts_only_today() {
+        let (manager, temp) = create_test_manager();
+
+        let old = Utc::now() - chrono::Duration::days(2);
+        let stale_path = temp.path().join("data").join("ses_stale.yaml");
+        std::fs::create_dir_all(stale_path.parent().unwrap()).unwrap();
+        let mut stale = manager.create_session("Stale", "codex").unwrap();
+        stale.started_at = old;
+        stale.model = Some("gpt-4o-mini".to_string());
+        stale.usage = Some(SessionUsage {
+            total_tokens: 10_000_000,
+            input_tokens: 10_000_000,
+            output_tokens: 0,
+            estimated_cost_usd: 1.5,
+        });
+        manager.save_session(&stale).unwrap();
+
+        manager
+            .set_budget(&BudgetConfig {
+                daily_usd: Some(0.10),
+                monthly_usd: None,
+            })
+            .unwrap();
+
+        let report = manager.check_budget(Utc::now()).unwrap();
+        // Old session not counted today, but counts this month
+        assert!(report.daily_spent_usd.abs() < 1e-9);
+        assert!((report.monthly_spent_usd - 1.5).abs() < 1e-9);
+        assert!(report.alerts.is_empty());
+    }
+
+    // ---- Context transfer ----
+
+    #[test]
+    fn test_export_context() {
+        let (manager, _temp) = create_test_manager();
+
+        let session = manager.create_session("Src", "codex").unwrap();
+        manager.add_message(&session.id, "user", "m1").unwrap();
+        manager.add_message(&session.id, "assistant", "m2").unwrap();
+        manager.add_message(&session.id, "user", "m3").unwrap();
+
+        let context = manager.export_context(&session.id, None).unwrap();
+        assert_eq!(context.source_session, session.id);
+        assert_eq!(context.messages.len(), 3);
+        assert_eq!(context.messages[2].content, "m3");
+
+        // last_n keeps only the trailing messages
+        let context = manager.export_context(&session.id, Some(2)).unwrap();
+        assert_eq!(context.messages.len(), 2);
+        assert_eq!(context.messages[0].content, "m2");
+
+        // JSON round-trips
+        let json = manager.export_context_json(&session.id, None).unwrap();
+        assert!(json.contains("\"source_session\""));
+    }
+
+    #[test]
+    fn test_fork_session_carries_context() {
+        let (manager, _temp) = create_test_manager();
+
+        let source = manager.create_session("Original", "codex").unwrap();
+        manager.set_model(&source.id, "gpt-4o").unwrap();
+        manager.add_message(&source.id, "user", "ctx msg").unwrap();
+        manager.add_tag(&source.id, "refactor").unwrap();
+
+        let fork = manager
+            .fork_session(&source.id, Some("claude-code"), None)
+            .unwrap();
+        assert_eq!(fork.agent, "claude-code");
+        assert_eq!(fork.model.as_deref(), Some("gpt-4o"));
+        assert_eq!(fork.messages.len(), 1);
+        assert_eq!(fork.messages[0].content, "ctx msg");
+        assert!(fork.tags.contains(&"refactor".to_string()));
+        assert!(fork.title.starts_with("Fork of"));
+
+        // Default title + same agent
+        let fork2 = manager.fork_session(&source.id, None, None).unwrap();
+        assert_eq!(fork2.agent, "codex");
     }
 }

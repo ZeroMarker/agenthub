@@ -75,6 +75,43 @@ pub struct SkillManager {
     extra_dirs: Vec<PathBuf>,
 }
 
+/// Result of a skill/AgentHub version compatibility check.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillCompatibility {
+    pub skill: String,
+    pub skill_version: String,
+    pub requires_agenthub: Option<String>,
+    pub current_agenthub: String,
+    pub compatible: bool,
+    pub message: String,
+}
+
+/// Parse the first three numeric components of a semver-ish string.
+fn parse_version(v: &str) -> (u64, u64, u64) {
+    let mut parts = v
+        .trim_start_matches('v')
+        .split(['.', '-', '+'])
+        .filter_map(|p| p.parse::<u64>().ok());
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
+}
+
+/// Compare two version strings; returns >0 if `a` is newer than `b`.
+fn compare_versions(a: &str, b: &str) -> i32 {
+    let (ma, pa, ra) = parse_version(a);
+    let (mb, pb, rb) = parse_version(b);
+    if ma != mb {
+        return (ma as i64 - mb as i64).signum() as i32;
+    }
+    if pa != pb {
+        return (pa as i64 - pb as i64).signum() as i32;
+    }
+    (ra as i64 - rb as i64).signum() as i32
+}
+
 impl SkillManager {
     pub fn new(skills_dir: PathBuf) -> Self {
         Self {
@@ -298,6 +335,50 @@ impl SkillManager {
         Ok(results)
     }
 
+    /// Check whether a skill's `min_agenthub_version` is satisfied by the
+    /// running AgentHub version.
+    pub fn check_compatibility(&self, skill_name: &str) -> Result<SkillCompatibility> {
+        let skill = self.get_skill(skill_name)?;
+        let current = env!("CARGO_PKG_VERSION").to_string();
+        let required = skill.manifest.min_agenthub_version.clone();
+
+        let compatible = match &required {
+            None => true,
+            Some(min) => compare_versions(&current, min) >= 0,
+        };
+        let message = match &required {
+            None => "No version constraint".to_string(),
+            Some(min) if compatible => format!("Requires agenthub >= {}, running {}", min, current),
+            Some(min) => format!(
+                "Requires agenthub >= {} but running {} — please upgrade",
+                min, current
+            ),
+        };
+
+        Ok(SkillCompatibility {
+            skill: skill.manifest.name.clone(),
+            skill_version: skill.manifest.version.clone(),
+            requires_agenthub: required,
+            current_agenthub: current,
+            compatible,
+            message,
+        })
+    }
+
+    /// Check compatibility for every installed skill.
+    pub fn check_all_compatibility(&self) -> Result<Vec<SkillCompatibility>> {
+        let skills = self.list_skills()?;
+        let mut results = Vec::new();
+        for skill in &skills {
+            let compat = self.check_compatibility(&skill.manifest.name)?;
+            if compat.requires_agenthub.is_some() {
+                results.push(compat);
+            }
+        }
+        results.sort_by(|a, b| a.skill.cmp(&b.skill));
+        Ok(results)
+    }
+
     fn check_command(&self, command: &str) -> bool {
         std::process::Command::new(if cfg!(target_os = "windows") {
             "cmd"
@@ -502,5 +583,75 @@ This is a test skill.
 
         let config = manager.get_skill_config("test-skill").unwrap();
         assert!(config.contains_key("key"));
+    }
+
+    // ---- Version compatibility ----
+
+    #[test]
+    fn test_parse_and_compare_versions() {
+        assert_eq!(parse_version("1.2.3"), (1, 2, 3));
+        assert_eq!(parse_version("v2.0.0"), (2, 0, 0));
+        assert_eq!(parse_version("1.0.0-beta.1"), (1, 0, 0));
+        assert_eq!(parse_version("garbage"), (0, 0, 0));
+
+        assert!(compare_versions("1.2.3", "1.2.2") > 0);
+        assert!(compare_versions("1.2.3", "1.2.3") == 0);
+        assert!(compare_versions("1.0.0", "2.0.0") < 0);
+        assert!(compare_versions("2.0.0", "1.9.9") > 0);
+    }
+
+    #[test]
+    fn test_check_compatibility() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SkillManager::new(temp_dir.path().to_path_buf());
+
+        // No constraint -> compatible
+        create_test_skill(&manager, "unconstrained");
+        let compat = manager.check_compatibility("unconstrained").unwrap();
+        assert!(compat.compatible);
+        assert!(compat.requires_agenthub.is_none());
+
+        // Low constraint -> compatible
+        let dir = manager.installed_dir().join("constrained-ok");
+        std::fs::create_dir_all(&dir).unwrap();
+        let manifest = r#"---
+name: constrained-ok
+description: "x"
+version: 1.0.0
+min_agenthub_version: 0.1.0
+triggers: []
+---
+
+# x
+"#;
+        std::fs::write(dir.join("SKILL.md"), manifest).unwrap();
+        let compat = manager.check_compatibility("constrained-ok").unwrap();
+        assert!(compat.compatible);
+        assert_eq!(compat.requires_agenthub.as_deref(), Some("0.1.0"));
+
+        // Unreachable constraint -> incompatible
+        let dir = manager.installed_dir().join("constrained-no");
+        std::fs::create_dir_all(&dir).unwrap();
+        let manifest = r#"---
+name: constrained-no
+description: "x"
+version: 1.0.0
+min_agenthub_version: 99.0.0
+triggers: []
+---
+
+# x
+"#;
+        std::fs::write(dir.join("SKILL.md"), manifest).unwrap();
+        let compat = manager.check_compatibility("constrained-no").unwrap();
+        assert!(!compat.compatible);
+        assert!(compat.message.contains("upgrade"));
+
+        // Bulk check includes only constrained skills
+        let all = manager.check_all_compatibility().unwrap();
+        let names: Vec<&str> = all.iter().map(|c| c.skill.as_str()).collect();
+        assert!(names.contains(&"constrained-ok"));
+        assert!(names.contains(&"constrained-no"));
+        assert!(!names.contains(&"unconstrained"));
     }
 }

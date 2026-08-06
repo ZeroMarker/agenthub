@@ -228,3 +228,61 @@ export interface PromptUsageInfo {
   usage_count: number
   last_used_at: string | null
 }
+
+// === Wave 2: templates / budget / trend / monitor ===
+export interface ConfigTemplateInfo {
+  id: string
+  name: string
+  description: string
+  setting_count: number
+  env_var_count: number
+  secret_keys: string[]
+}
+
+export interface ImportSummary {
+  imported: number
+  skipped: number
+}
+
+export interface BudgetReport {
+  daily_spent_usd: number
+  daily_limit_usd: number | null
+  monthly_spent_usd: number
+  monthly_limit_usd: number | null
+  total_tokens_today: number
+  alerts: string[]
+}
+
+export interface TrendPoint {
+  date: string
+  sessions_started: number
+  sessions_completed: number
+  tokens: number
+  cost_usd: number
+  memories_created: number
+  audit_events: number
+}
+
+export interface SkillCompatibilityInfo {
+  skill: string
+  skill_version: string
+  requires_agenthub: string | null
+  current_agenthub: string
+  compatible: boolean
+  message: string
+}
+
+export interface MonitorReport {
+  generated_at: string
+  agenthub_version: string
+  platform: string
+  healthy: boolean
+  warnings: string[]
+  installed_agents: number
+  missing_agents: string[]
+  budget: BudgetReport
+  incompatible_skills: string[]
+  diagnostics_passed: number
+  diagnostics_warnings: number
+  diagnostics_failed: number
+}

@@ -8,6 +8,7 @@ pub mod diagnostic;
 pub mod error;
 pub mod installer;
 pub mod memory;
+pub mod monitor;
 pub mod overview;
 pub mod prompt;
 pub mod session;
@@ -22,16 +23,20 @@ pub use command_builder::{
     CommandBuilder, CommandOutput, CommandRunner, MockCommandRunner, MockResponse,
     RealCommandRunner,
 };
-pub use config::{AgentConfig, ConfigManager, ConfigValue, Environment};
+pub use config::{AgentConfig, ConfigManager, ConfigTemplate, ConfigValue, Environment};
 pub use diagnostic::{CheckStatus, DiagnosticCheck, DiagnosticManager, DiagnosticReport};
 pub use error::{AgentHubError, Result};
 pub use installer::Installer;
 pub use memory::{MemoryEntry, MemoryManager, MemoryScope, MemoryStats, MemoryType};
-pub use overview::{CatalogOverview, OverviewReport, StatusOverview};
-pub use prompt::{PromptManager, PromptTemplate, PromptUsage, PromptVariable, PromptVersion};
-pub use session::{
-    ModelPricing, PricingTable, Session, SessionManager, SessionStats, SessionStatus,
-    SessionTemplate, TemplateMessage,
+pub use monitor::{Monitor, MonitorReport};
+pub use overview::{CatalogOverview, OverviewReport, StatusOverview, TrendPoint};
+pub use prompt::{
+    ImportSummary, PromptExportBundle, PromptManager, PromptTemplate, PromptUsage, PromptVariable,
+    PromptVersion,
 };
-pub use skill::{Skill, SkillManager, SkillManifest};
+pub use session::{
+    BudgetConfig, BudgetReport, ContextMessage, ModelPricing, PricingTable, Session,
+    SessionContext, SessionManager, SessionStats, SessionStatus, SessionTemplate, TemplateMessage,
+};
+pub use skill::{Skill, SkillCompatibility, SkillManager, SkillManifest};
 pub use status::{AgentStatus, StatusDetector};

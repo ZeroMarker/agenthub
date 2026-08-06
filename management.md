@@ -1087,7 +1087,8 @@ agenthub audit --export --format json --output audit.json
 ### 全局健康检查
 
 ```bash
-agenthub doctor
+agenthub doctor        # 环境诊断
+agenthub monitor       # 聚合监控：诊断 + 未安装 Agent + 预算告警 + 技能兼容性
 ```
 
 检查项：
@@ -1096,6 +1097,8 @@ agenthub doctor
 - 依赖项可用性
 - 配置一致性
 - 存储空间使用情况
+- 成本预算（今日/本月花费 vs 上限）
+- 技能版本兼容性
 
 ---
 

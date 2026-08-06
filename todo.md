@@ -2,6 +2,49 @@
 
 > 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill）；**保留 overview（概览）为独立只读模块**；审计日志、备份/恢复作为横切能力（非模块），详见 goal.md v0.5。
 
+## 长期规划第二波（2026-08-06）— ✅ 完成（数据可移植性 + 可观测性）
+
+### ✅ Config 配置模板
+- [x] `ConfigTemplate`：settings/env 变量/secret key 保留名/custom 四类字段，模板 CRUD（list/get/create/delete/save）
+- [x] `save_config_as_template`（secret 值永不落盘，仅保留 key 名）+ `apply_template`（合并到 agent 配置、版本号递增）
+- [x] CLI `agenthub config-template list|show|create|delete|apply`；Tauri `list/create/apply/delete_config_template`
+
+### ✅ Session 成本阈值告警 + 上下文传递
+- [x] `BudgetConfig`（daily/monthly USD 上限，`sessions/budget.yaml`）+ `check_budget`（按会话开始日期聚合今日/本月花费，超限产生告警）
+- [x] `SessionContext` 导出（`export_context` / JSON）+ `fork_session`（携带消息/模型/标签/项目到新会话，可换 agent）
+- [x] CLI `session budget show|set` / `session fork`；Tauri `get/set_session_budget` / `fork_session`
+
+### ✅ Prompt 导入/导出（含版本历史）
+- [x] `PromptExportBundle`（当前模板 + 版本快照）JSON 导出；`import_prompts`（force 覆盖 / 默认跳过已有）
+- [x] CLI `prompt export|export-all|import`；Tauri `export/import_prompts_json`
+
+### ✅ Memory 导入/导出
+- [x] `export_memories_json`（可按 scope 过滤）；`import_memories`（merge 跳过已有路径 / 覆盖）
+- [x] CLI `memory export|import`；Tauri `export/import_memories_json`
+
+### ✅ Skill 版本兼容性检查
+- [x] `check_compatibility`（`min_agenthub_version` vs 运行版本，semver 三元组比较）+ `check_all_compatibility`
+- [x] CLI `skill check-compat [name|*]`；Tauri `check_skill_compatibility`
+
+### ✅ Overview 时间维度趋势
+- [x] `TrendPoint`（按 UTC 日期分桶：会话开始/完成、tokens、成本、记忆创建、审计事件）+ `trend(days)`/`trend_with_now`
+- [x] CLI `status --trend <days>`；Tauri `get_trend`；GUI 概览视图趋势柱状图（成本/会话）
+
+### ✅ 横切能力：监控与告警（第一版）
+- [x] `monitor.rs`：`MonitorReport` 聚合诊断结果、verified 未安装 Agent、预算告警、不兼容技能 → 健康状态
+- [x] CLI `agenthub monitor`；Tauri `run_monitor`；GUI 概览视图监控面板
+
+### 📊 验证结果
+- Rust：173 测试全过（131 core + 9 集成 + 28 cli + 5 tauri），clippy 0 警告，fmt 干净
+- 前端：11 测试全过，vue-tsc + vite build 通过
+
+### 本波未覆盖（留待后续）
+- Config：API Key 密钥链存储（需 keyring/系统依赖，待评估）、API Key 轮换
+- Memory：向量检索、知识图谱
+- Skill：技能市场（需网络）、工作流编排、插件系统
+- Overview：Web 仪表盘（浏览器独立视图）
+- 横切：监控定时化/告警推送（当前为手动 CLI/UI 触发）
+
 ## 长期规划第一波（2026-08-06）— ✅ 完成
 
 ### ✅ Overview 概览模块（此前完全未实现）
@@ -141,39 +184,40 @@ All UI components have been migrated to the Material 3 design token system:
 
 ### Config 配置管理
 - [x] 多环境配置（development / staging / production）✅（基础实现）
+- [x] 配置模板（模型、温度、token 限制）✅（2026-08-06 第二波）
 - [ ] API Key 密钥链存储（需评估 keyring/系统依赖）
 - [ ] API Key 轮换、用户与权限（归并自原 management）
-- [ ] 配置模板（模型、温度、token 限制）
 
 ### Session 会话管理
 - [x] 成本追踪（模型价格表 + record_usage）✅（2026-08-06 首波）
 - [x] 会话回放、会话模板 ✅（2026-08-06 首波）
-- [ ] 成本阈值告警（成本监控延伸，归并自原 management）
-- [ ] 跨 Agent 会话上下文传递
+- [x] 成本阈值告警（daily/monthly 预算）✅（2026-08-06 第二波）
+- [x] 跨 Agent 会话上下文传递（fork）✅（2026-08-06 第二波）
 
 ### Prompt 提示词管理
 - [x] 版本控制、变量校验、使用统计 ✅（2026-08-06 首波）
-- [ ] 导入/导出、社区共享
-- [ ] 从 Agent 会话中提取提示词
+- [x] 导入/导出（含版本历史）✅（2026-08-06 第二波）
+- [ ] 社区共享、从 Agent 会话中提取提示词
 
 ### Skill 技能管理
+- [x] 版本管理与兼容性检查 ✅（2026-08-06 第二波）
 - [ ] 技能市场（发现、评分、安装统计）
 - [ ] 工作流编排（多技能组合）
-- [ ] 版本管理与兼容性检查
 - [ ] 插件系统（第三方扩展入口，归并自原 management）
 
 ### Memory 记忆管理
 - [x] BM25 语义检索 ✅（2026-08-06 首波）
 - [x] 记忆衰减（importance + 归档）✅（2026-08-06 首波）
+- [x] 记忆导入/导出/同步 ✅（2026-08-06 第二波）
 - [ ] 向量检索、知识图谱
-- [ ] 记忆导入/导出/同步
 
 ### Overview 概览模块（只读聚合，不承载业务逻辑）
 - [x] 状态概览 `agenthub status` / GUI 仪表盘 ✅（2026-08-06 首波）
+- [x] 时间维度趋势（成本 / 会话数 / 审计量）✅（2026-08-06 第二波）
 - [ ] Web 仪表盘（浏览器独立视图）
-- [ ] 时间维度趋势（成本 / 会话数 / 审计量）
 
 ### 横切能力（非模块，工具而非业务模块）
 - [x] 审计日志 ✅（2026-08-06 首波，install/uninstall 已接入）
 - [x] 备份/恢复 ✅（2026-08-06 首波）
-- [ ] 监控与告警（Agent 可用性、API 状态、成本阈值）
+- [x] 监控与告警（第一版：诊断/未安装/预算/兼容性）✅（2026-08-06 第二波）
+- [ ] 监控定时化/告警推送

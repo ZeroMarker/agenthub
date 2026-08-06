@@ -1,7 +1,7 @@
 use agenthub_core::{
     Agent, AgentKind, AuditManager, AuditQuery, BackupManager, Catalog, ConfigManager, ConfigValue,
-    DiagnosticManager, Installer, MemoryManager, MemoryScope, MemoryType, OverviewReport, Platform,
-    PricingTable, PromptManager, RealCommandRunner, Result, SessionManager, SkillManager,
+    DiagnosticManager, Installer, MemoryManager, MemoryScope, MemoryType, Monitor, OverviewReport,
+    Platform, PricingTable, PromptManager, RealCommandRunner, Result, SessionManager, SkillManager,
     StatusOverview,
 };
 use serde::{Deserialize, Serialize};
@@ -66,6 +66,7 @@ pub struct AppState {
     audit_manager: Arc<AuditManager>,
     backup_manager: Arc<BackupManager>,
     overview_report: Arc<OverviewReport>,
+    monitor: Arc<Monitor>,
     pricing_table: Arc<PricingTable>,
     /// Per-agent cancellation flags for in-flight install/uninstall operations.
     cancellations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
@@ -1858,6 +1859,245 @@ async fn revive_memory(
         .map_err(|e| e.to_string())
 }
 
+// ============ Wave 2: templates / import-export / budget / trend / monitor ============
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ConfigTemplateInfo {
+    id: String,
+    name: String,
+    description: String,
+    setting_count: usize,
+    env_var_count: usize,
+    secret_keys: Vec<String>,
+}
+
+fn config_template_to_info(t: &agenthub_core::ConfigTemplate) -> ConfigTemplateInfo {
+    ConfigTemplateInfo {
+        id: t.id.clone(),
+        name: t.name.clone(),
+        description: t.description.clone(),
+        setting_count: t.settings.len(),
+        env_var_count: t.environment_variables.len(),
+        secret_keys: t.secret_keys.clone(),
+    }
+}
+
+#[tauri::command]
+async fn list_config_templates(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<ConfigTemplateInfo>, String> {
+    let manager = &state.config_manager;
+    let ids = manager.list_templates().map_err(|e| e.to_string())?;
+    let mut templates = Vec::new();
+    for id in ids {
+        if let Ok(t) = manager.get_template(&id) {
+            templates.push(config_template_to_info(&t));
+        }
+    }
+    Ok(templates)
+}
+
+#[tauri::command]
+async fn create_config_template(
+    id: String,
+    name: String,
+    description: String,
+    sets: Vec<(String, String)>,
+    envs: Vec<String>,
+    secrets: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ConfigTemplateInfo, String> {
+    let settings = sets
+        .into_iter()
+        .map(|(k, v)| (k, ConfigValue::from(v)))
+        .collect();
+    let env_vars = envs
+        .into_iter()
+        .map(|k| (k.clone(), String::new()))
+        .collect();
+    let template = state
+        .config_manager
+        .create_template(
+            &id,
+            &name,
+            &description,
+            settings,
+            env_vars,
+            secrets,
+            HashMap::new(),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(config_template_to_info(&template))
+}
+
+#[tauri::command]
+async fn apply_config_template(
+    agent: String,
+    template: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::AgentConfig, String> {
+    state
+        .config_manager
+        .apply_template(&agent, &template)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_config_template(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .config_manager
+        .delete_template(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn export_prompts_json(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    state
+        .prompt_manager
+        .export_prompts_json(None)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn import_prompts_json(
+    json: String,
+    force: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::ImportSummary, String> {
+    state
+        .prompt_manager
+        .import_prompts(&json, force)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn export_memories_json(
+    scope: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    let scope_enum = scope.and_then(|s| match s.as_str() {
+        "global" => Some(MemoryScope::Global),
+        "project" => Some(MemoryScope::Project),
+        "session" => Some(MemoryScope::Session),
+        _ => None,
+    });
+    state
+        .memory_manager
+        .export_memories_json(scope_enum)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn import_memories_json(
+    json: String,
+    merge: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::ImportSummary, String> {
+    state
+        .memory_manager
+        .import_memories(&json, merge)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_session_budget(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::BudgetReport, String> {
+    state
+        .session_manager
+        .check_budget(chrono::Utc::now())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_session_budget(
+    daily: Option<f64>,
+    monthly: Option<f64>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::BudgetReport, String> {
+    let manager = &state.session_manager;
+    let mut budget = manager.get_budget().map_err(|e| e.to_string())?;
+    budget.daily_usd = daily;
+    budget.monthly_usd = monthly;
+    manager.set_budget(&budget).map_err(|e| e.to_string())?;
+    manager
+        .check_budget(chrono::Utc::now())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn fork_session(
+    id: String,
+    agent: Option<String>,
+    title: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<SessionDetail, String> {
+    let session = state
+        .session_manager
+        .fork_session(&id, agent.as_deref(), title.as_deref())
+        .map_err(|e| e.to_string())?;
+    Ok(session_to_detail(&session))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct SkillCompatibilityInfo {
+    skill: String,
+    skill_version: String,
+    requires_agenthub: Option<String>,
+    current_agenthub: String,
+    compatible: bool,
+    message: String,
+}
+
+#[tauri::command]
+async fn check_skill_compatibility(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<SkillCompatibilityInfo>, String> {
+    let manager = &state.skill_manager;
+    let results = if name == "*" {
+        manager
+            .check_all_compatibility()
+            .map_err(|e| e.to_string())?
+    } else {
+        vec![manager
+            .check_compatibility(&name)
+            .map_err(|e| e.to_string())?]
+    };
+    Ok(results
+        .into_iter()
+        .map(|c| SkillCompatibilityInfo {
+            skill: c.skill,
+            skill_version: c.skill_version,
+            requires_agenthub: c.requires_agenthub,
+            current_agenthub: c.current_agenthub,
+            compatible: c.compatible,
+            message: c.message,
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn get_trend(
+    days: usize,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::TrendPoint>, String> {
+    state.overview_report.trend(days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn run_monitor(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::MonitorReport, String> {
+    let catalog = state.catalog.read().await;
+    state.monitor.run(&catalog).map_err(|e| e.to_string())
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -1883,6 +2123,7 @@ fn main() {
     let audit_manager = AuditManager::new(config_dir.join("audit"));
     let backup_manager = BackupManager::new(config_dir.clone());
     let overview_report = OverviewReport::new(config_dir.clone(), platform);
+    let monitor = Monitor::new(config_dir.clone(), platform);
     let pricing_table = PricingTable::builtin();
 
     let state = AppState {
@@ -1896,6 +2137,7 @@ fn main() {
         audit_manager: Arc::new(audit_manager),
         backup_manager: Arc::new(backup_manager),
         overview_report: Arc::new(overview_report),
+        monitor: Arc::new(monitor),
         pricing_table: Arc::new(pricing_table),
         cancellations: Arc::new(Mutex::new(HashMap::new())),
     };
@@ -1956,7 +2198,21 @@ fn main() {
             list_prompt_versions,
             rollback_prompt,
             get_prompt_usage,
-            render_prompt_checked
+            render_prompt_checked,
+            list_config_templates,
+            create_config_template,
+            apply_config_template,
+            delete_config_template,
+            export_prompts_json,
+            import_prompts_json,
+            export_memories_json,
+            import_memories_json,
+            get_session_budget,
+            set_session_budget,
+            fork_session,
+            check_skill_compatibility,
+            get_trend,
+            run_monitor
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

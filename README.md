@@ -243,10 +243,17 @@ agenthub <command> [options]
 | `install` | 安装 Agent | `agenthub install codex --dry-run` |
 | `uninstall` | 卸载 Agent | `agenthub uninstall codex --yes` |
 | `doctor` | 环境诊断 | `agenthub doctor` |
-| `status` | 工作区状态概览 | `agenthub status` |
+| `status` | 工作区状态概览 | `agenthub status --trend 7` |
 | `audit` | 查询审计日志 | `agenthub audit --action install --last-days 7` |
 | `backup` | 备份全部数据 | `agenthub backup --output ./backup.json` |
 | `restore` | 从备份恢复 | `agenthub restore ./backup.json` |
+| `monitor` | 健康/预算/兼容性监控 | `agenthub monitor` |
+| `config-template` | 配置模板管理 | `agenthub config-template apply codex llm-default` |
+| `prompt export/import` | 提示词导入导出（含版本） | `agenthub prompt export-all --output p.json` |
+| `memory export/import` | 记忆导入导出 | `agenthub memory import memories.json --merge` |
+| `session budget` | 成本预算/告警 | `agenthub session budget set --daily 5 --monthly 50` |
+| `session fork` | 携带上下文创建新会话 | `agenthub session fork <id> --agent claude-code` |
+| `skill check-compat` | 技能版本兼容检查 | `agenthub skill check-compat *` |
 
 ### 通用选项
 
@@ -272,7 +279,7 @@ agenthub <command> [options]
 | **会话管理** | 会话记录、搜索、成本追踪、回放、模板 |
 | **记忆管理** | 跨会话知识持久化、BM25 语义检索、记忆衰减 |
 | **提示词管理** | 模板版本控制、使用统计、变量校验 |
-| **概览视图** | 仪表盘、审计日志、备份/恢复（横切能力） |
+| **概览视图** | 仪表盘、审计日志、备份/恢复、预算/监控、趋势图（横切能力） |
 | **提示词管理** | 模板 CRUD、变量插值、版本控制 |
 | **技能管理** | 技能安装/卸载、依赖检查、工作流编排 |
 

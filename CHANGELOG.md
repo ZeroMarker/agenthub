@@ -2,7 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-08-06
+## [Unreleased] - 2026-08-06 (Wave 2: portability + observability)
+
+### Added
+- **Config templates**: reusable `ConfigTemplate` (settings / env vars / secret key reservations / custom), CRUD, save-from-config (secret values never persisted) and apply-to-agent
+- **Session budget & alerts**: daily/monthly USD limits (`sessions/budget.yaml`), `check_budget` aggregates today/this-month spend and emits threshold alerts
+- **Session context handoff**: `export_context` (last-N messages as portable JSON) and `fork_session` (carry messages/model/tags/project into a new session, optionally for another agent)
+- **Prompt import/export**: JSON bundle with version history, `import_prompts` with force-overwrite/skip semantics
+- **Memory import/export**: JSON export (optionally scope-filtered), import with merge/skip semantics
+- **Skill compatibility check**: `min_agenthub_version` vs running version (semver triples), per-skill and bulk
+- **Overview trend**: per-day buckets (sessions started/completed, tokens, cost, memories created, audit events) for the last N days
+- **Monitor (cross-cutting, v1)**: `MonitorReport` aggregates diagnostics, missing verified agents, budget alerts and incompatible skills into a healthy/unhealthy status
+- **CLI**: `config-template`, `prompt export|export-all|import`, `memory export|import`, `session budget|fork`, `skill check-compat`, `monitor`, `status --trend`
+- **GUI**: Overview view gains a budget card (with editable limits), a monitor panel and a CSS-bar trend chart
+
+### Changed
+- `SessionManager::set_budget` now creates the sessions directory automatically
+
+## [Unreleased] - 2026-08-06 (Wave 1)
 
 ### Added
 - **Overview 模块（概览，只读聚合）**: workspace status overview (`OverviewReport` in `overview.rs`), `agenthub status`, GUI dashboard view

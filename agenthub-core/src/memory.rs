@@ -514,6 +514,39 @@ impl MemoryManager {
             decayed: entries.iter().filter(|e| e.decayed).count(),
         })
     }
+
+    // -----------------------------------------------------------------------
+    // Export / import
+    // -----------------------------------------------------------------------
+
+    /// Export entries as JSON (optionally restricted to a scope).
+    pub fn export_memories_json(&self, scope: Option<MemoryScope>) -> Result<String> {
+        let entries = self.list_entries(scope)?;
+        serde_json::to_string_pretty(&entries)
+            .map_err(|e| AgentHubError::MemoryError(format!("Failed to serialize memories: {}", e)))
+    }
+
+    /// Import entries from JSON. With `merge` set, entries whose path already
+    /// exists are skipped; otherwise they are overwritten. Returns the number
+    /// imported / skipped.
+    pub fn import_memories(&self, json: &str, merge: bool) -> Result<crate::prompt::ImportSummary> {
+        let entries: Vec<MemoryEntry> = serde_json::from_str(json).map_err(|e| {
+            AgentHubError::MemoryError(format!("Failed to parse memory export: {}", e))
+        })?;
+
+        let mut summary = crate::prompt::ImportSummary::default();
+        for entry in &entries {
+            let target = self.memory_dir.join(&entry.path);
+            if merge && target.exists() {
+                summary.skipped += 1;
+                continue;
+            }
+            self.save_entry(entry)?;
+            summary.imported += 1;
+        }
+
+        Ok(summary)
+    }
 }
 
 /// Split text into lowercase alphanumeric tokens of length >= 2.
@@ -896,5 +929,81 @@ mod tests {
         manager.revive("global/stale.md").unwrap();
         let results = manager.search_entries("rust").unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    // ---- Export / import ----
+
+    #[test]
+    fn test_export_import_memories_roundtrip() {
+        let (manager, _temp) = create_test_manager();
+
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Note A",
+                "content A",
+                MemoryType::Learning,
+            )
+            .unwrap();
+        manager
+            .create_entry(
+                MemoryScope::Project,
+                Some("proj"),
+                "Note B",
+                "content B",
+                MemoryType::Decision,
+            )
+            .unwrap();
+
+        let json = manager.export_memories_json(None).unwrap();
+
+        let (target, _temp2) = create_test_manager();
+        let summary = target.import_memories(&json, false).unwrap();
+        assert_eq!(summary.imported, 2);
+        assert_eq!(summary.skipped, 0);
+        assert_eq!(target.list_entries(None).unwrap().len(), 2);
+
+        // Scope-restricted export
+        let global_json = manager
+            .export_memories_json(Some(MemoryScope::Global))
+            .unwrap();
+        let entries: Vec<MemoryEntry> = serde_json::from_str(&global_json).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].scope, MemoryScope::Global);
+    }
+
+    #[test]
+    fn test_import_memories_merge_skips_existing() {
+        let (manager, _temp) = create_test_manager();
+
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Note",
+                "original",
+                MemoryType::Free,
+            )
+            .unwrap();
+
+        // Export, then modify the file directly
+        let json = manager.export_memories_json(None).unwrap();
+        let mut entries: Vec<MemoryEntry> = serde_json::from_str(&json).unwrap();
+        entries[0].content = "changed".to_string();
+        let changed = serde_json::to_string(&entries).unwrap();
+
+        // Merge: existing path skipped, original content kept
+        let summary = manager.import_memories(&changed, true).unwrap();
+        assert_eq!(summary.imported, 0);
+        assert_eq!(summary.skipped, 1);
+        let entries = manager.list_entries(None).unwrap();
+        assert_eq!(entries[0].content, "original");
+
+        // No merge: overwritten
+        let summary = manager.import_memories(&changed, false).unwrap();
+        assert_eq!(summary.imported, 1);
+        let entries = manager.list_entries(None).unwrap();
+        assert_eq!(entries[0].content, "changed");
     }
 }

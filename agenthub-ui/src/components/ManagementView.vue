@@ -2,12 +2,25 @@
 import { onMounted, ref } from 'vue'
 import PageHeader from './common/PageHeader.vue'
 import { useTauriApi } from '../composables/useTauriApi'
-import type { StatusOverview, AuditInfo } from '../types'
+import type { StatusOverview, AuditInfo, TrendPoint, BudgetReport, MonitorReport } from '../types'
 
 const api = useTauriApi()
 
 const overview = ref<StatusOverview | null>(null)
 const loadingOverview = ref(false)
+
+const trend = ref<TrendPoint[]>([])
+const trendDays = ref(7)
+const maxTrendCost = ref(0)
+const maxTrendSessions = ref(0)
+const loadingTrend = ref(false)
+
+const budget = ref<BudgetReport | null>(null)
+const budgetDaily = ref<number | null>(null)
+const budgetMonthly = ref<number | null>(null)
+
+const monitor = ref<MonitorReport | null>(null)
+const loadingMonitor = ref(false)
 
 const auditEvents = ref<AuditInfo[]>([])
 const auditAction = ref('')
@@ -28,7 +41,7 @@ const notice = ref('')
 onMounted(loadAll)
 
 async function loadAll() {
-  await Promise.all([loadOverview(), loadAudit()])
+  await Promise.all([loadOverview(), loadAudit(), loadBudget(), loadTrend()])
 }
 
 async function loadOverview() {
@@ -55,6 +68,49 @@ async function loadAudit() {
     error.value = `Failed to load audit log: ${err}`
   } finally {
     loadingAudit.value = false
+  }
+}
+
+async function loadBudget() {
+  try {
+    budget.value = await api.getSessionBudget()
+    budgetDaily.value = budget.value.daily_limit_usd
+    budgetMonthly.value = budget.value.monthly_limit_usd
+  } catch (err) {
+    error.value = `Failed to load budget: ${err}`
+  }
+}
+
+async function saveBudget() {
+  try {
+    budget.value = await api.setSessionBudget(budgetDaily.value, budgetMonthly.value)
+    notice.value = 'Budget updated'
+  } catch (err) {
+    error.value = `Failed to save budget: ${err}`
+  }
+}
+
+async function loadTrend() {
+  loadingTrend.value = true
+  try {
+    trend.value = await api.getTrend(trendDays.value)
+    maxTrendCost.value = Math.max(...trend.value.map((p) => p.cost_usd), 0.01)
+    maxTrendSessions.value = Math.max(...trend.value.map((p) => p.sessions_started), 1)
+  } catch (err) {
+    error.value = `Failed to load trend: ${err}`
+  } finally {
+    loadingTrend.value = false
+  }
+}
+
+async function runMonitor() {
+  loadingMonitor.value = true
+  try {
+    monitor.value = await api.runMonitor()
+  } catch (err) {
+    error.value = `Monitor failed: ${err}`
+  } finally {
+    loadingMonitor.value = false
   }
 }
 
@@ -219,6 +275,78 @@ function fmtTime(ts: string): string {
       <p v-if="restoreResult" class="result-line success">{{ restoreResult }}</p>
     </section>
 
+    <!-- Budget + monitor -->
+    <section class="budget-section" aria-label="Cost budget and monitoring">
+      <div class="section-head">
+        <h2 class="section-title">预算与监控 Budget &amp; Monitor</h2>
+        <button class="m3-btn-tonal" :disabled="loadingMonitor" @click="runMonitor">
+          {{ loadingMonitor ? 'Checking…' : '🩺 Run Monitor' }}
+        </button>
+      </div>
+
+      <div v-if="budget" class="budget-grid">
+        <div class="budget-item">
+          <span class="budget-label">今日花费</span>
+          <span class="budget-value">${{ budget.daily_spent_usd.toFixed(4) }}</span>
+          <span class="budget-hint">{{ budget.total_tokens_today.toLocaleString() }} tokens</span>
+        </div>
+        <div class="budget-item">
+          <span class="budget-label">本月花费</span>
+          <span class="budget-value">${{ budget.monthly_spent_usd.toFixed(4) }}</span>
+        </div>
+        <div class="budget-item budget-limits">
+          <label class="budget-label" for="budget-daily">每日上限 $</label>
+          <input id="budget-daily" v-model.number="budgetDaily" class="budget-input" type="number" min="0" step="0.1" placeholder="unlimited" />
+          <label class="budget-label" for="budget-monthly">每月上限 $</label>
+          <input id="budget-monthly" v-model.number="budgetMonthly" class="budget-input" type="number" min="0" step="0.1" placeholder="unlimited" />
+          <button class="m3-btn-outlined small" @click="saveBudget">💾 Save</button>
+        </div>
+      </div>
+      <div v-if="budget && budget.alerts.length > 0" class="alert-list">
+        <div v-for="(alert, i) in budget.alerts" :key="i" class="alert-item">⚠️ {{ alert }}</div>
+      </div>
+
+      <div v-if="monitor" class="monitor-panel">
+        <div :class="['monitor-status', monitor.healthy ? 'ok' : 'warn']">
+          {{ monitor.healthy ? '✅ HEALTHY' : '⚠️ ISSUES FOUND' }}
+        </div>
+        <div class="monitor-stats">
+          已安装 <strong>{{ monitor.installed_agents }}</strong> · 诊断 <strong>{{ monitor.diagnostics_passed }}</strong> passed / <strong>{{ monitor.diagnostics_failed }}</strong> failed ·
+          <span v-if="monitor.missing_agents.length">未安装 {{ monitor.missing_agents.length }} 个 verified agent</span>
+          <span v-if="monitor.incompatible_skills.length">· 不兼容技能 {{ monitor.incompatible_skills.length }}</span>
+        </div>
+        <ul v-if="monitor.warnings.length" class="monitor-warnings">
+          <li v-for="(w, i) in monitor.warnings" :key="i">{{ w }}</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Trend -->
+    <section class="trend-section" aria-label="Daily trend">
+      <div class="section-head">
+        <h2 class="section-title">趋势 Trend</h2>
+        <select v-model.number="trendDays" class="filter-select" aria-label="Trend range" @change="loadTrend">
+          <option :value="7">Last 7 days</option>
+          <option :value="14">Last 14 days</option>
+          <option :value="30">Last 30 days</option>
+        </select>
+      </div>
+
+      <div v-if="loadingTrend" class="loading-hint">Loading trend…</div>
+      <div v-else-if="trend.length" class="trend-bars">
+        <div v-for="point in trend" :key="point.date" class="trend-col" :title="`${point.date}: ${point.sessions_started} sessions, $${point.cost_usd.toFixed(4)}`">
+          <div class="trend-bar-cost" :style="{ height: (point.cost_usd / maxTrendCost * 100) + '%' }"></div>
+          <div class="trend-bar-sessions" :style="{ height: (point.sessions_started / maxTrendSessions * 100) + '%' }"></div>
+          <span class="trend-date">{{ point.date.slice(5) }}</span>
+        </div>
+      </div>
+      <div v-else class="empty-hint">No activity in the selected range.</div>
+      <div class="trend-legend">
+        <span><i class="legend-dot cost"></i>成本 (USD)</span>
+        <span><i class="legend-dot sessions"></i>会话数</span>
+      </div>
+    </section>
+
     <!-- Audit log -->
     <section class="audit-section" aria-label="Audit log">
       <div class="section-head">
@@ -366,12 +494,156 @@ function fmtTime(ts: string): string {
 
 .backup-section,
 .audit-section,
-.overview-section {
+.overview-section,
+.budget-section,
+.trend-section {
   background: var(--md-sys-color-surface);
   padding: 1.5rem;
   border-radius: var(--md-sys-shape-lg);
   border: 1px solid var(--md-sys-color-outline-variant);
 }
+
+/* --- Budget & monitor --- */
+.budget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.budget-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1rem;
+  border-radius: var(--md-sys-shape-md);
+  background: var(--md-sys-color-surface-container-highest);
+}
+.budget-label {
+  font: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.budget-value {
+  font: var(--md-sys-typescale-title-large);
+  color: var(--md-sys-color-on-surface);
+}
+.budget-hint {
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.budget-limits {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.budget-input {
+  width: 7rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-full);
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+}
+.m3-btn-outlined.small {
+  padding: 0.375rem 0.875rem;
+  font-size: 0.875rem;
+}
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-bottom: 0.75rem;
+}
+.alert-item {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--md-sys-shape-sm);
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+  font: var(--md-sys-typescale-body-medium);
+}
+.monitor-panel {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border-radius: var(--md-sys-shape-md);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.monitor-status {
+  font: var(--md-sys-typescale-title-medium);
+}
+.monitor-status.ok { color: var(--md-sys-color-primary); }
+.monitor-status.warn { color: var(--md-sys-color-error); }
+.monitor-stats {
+  font: var(--md-sys-typescale-body-medium);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.monitor-warnings {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.monitor-warnings li {
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-error);
+}
+
+/* --- Trend --- */
+.trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 160px;
+  padding: 0.5rem 0.25rem 0;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+.trend-col {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  height: 100%;
+  position: relative;
+}
+.trend-bar-cost,
+.trend-bar-sessions {
+  width: 40%;
+  min-height: 2px;
+  border-radius: var(--md-sys-shape-xs) var(--md-sys-shape-xs) 0 0;
+  transition: height var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
+}
+.trend-bar-cost {
+  background: var(--md-sys-color-primary);
+}
+.trend-bar-sessions {
+  background: var(--md-sys-color-tertiary-container);
+}
+.trend-date {
+  position: absolute;
+  bottom: -1.35rem;
+  font: var(--md-sys-typescale-label-small);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.trend-legend {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.75rem;
+  font: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-on-surface-variant);
+}
+.legend-dot {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: var(--md-sys-shape-full);
+  margin-right: 0.25rem;
+  vertical-align: middle;
+}
+.legend-dot.cost { background: var(--md-sys-color-primary); }
+.legend-dot.sessions { background: var(--md-sys-color-tertiary-container); }
 
 .backup-row {
   display: flex;

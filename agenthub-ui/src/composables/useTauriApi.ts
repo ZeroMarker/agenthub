@@ -2,7 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
   Agent, InstallResult, BatchResult, SkillInfo, NativeConfig, SessionInfo, PromptInfo,
   MemoryInfo, DiagnosticResult, InstalledAgent, StatusOverview, AuditInfo, BackupManifest,
-  SessionDetail, SessionTemplateInfo, PromptVersionInfo, PromptUsageInfo,
+  SessionDetail, SessionTemplateInfo, PromptVersionInfo, PromptUsageInfo, ConfigTemplateInfo,
+  ImportSummary, BudgetReport, TrendPoint, SkillCompatibilityInfo, MonitorReport,
 } from '../types'
 
 export function useTauriApi() {
@@ -205,6 +206,66 @@ export function useTauriApi() {
     return invoke<void>('revive_memory', { path })
   }
 
+  // Config templates
+  function listConfigTemplates() {
+    return invoke<ConfigTemplateInfo[]>('list_config_templates')
+  }
+
+  function createConfigTemplate(id: string, name: string, description: string, sets: [string, string][], envs: string[], secrets: string[]) {
+    return invoke<ConfigTemplateInfo>('create_config_template', { id, name, description, sets, envs, secrets })
+  }
+
+  function applyConfigTemplate(agent: string, template: string) {
+    return invoke<object>('apply_config_template', { agent, template })
+  }
+
+  function deleteConfigTemplate(id: string) {
+    return invoke<boolean>('delete_config_template', { id })
+  }
+
+  // Prompt / memory import-export
+  function exportPromptsJson() {
+    return invoke<string>('export_prompts_json')
+  }
+
+  function importPromptsJson(json: string, force: boolean) {
+    return invoke<ImportSummary>('import_prompts_json', { json, force })
+  }
+
+  function exportMemoriesJson(scope: string | null = null) {
+    return invoke<string>('export_memories_json', { scope })
+  }
+
+  function importMemoriesJson(json: string, merge: boolean) {
+    return invoke<ImportSummary>('import_memories_json', { json, merge })
+  }
+
+  // Session budget / fork
+  function getSessionBudget() {
+    return invoke<BudgetReport>('get_session_budget')
+  }
+
+  function setSessionBudget(daily: number | null, monthly: number | null) {
+    return invoke<BudgetReport>('set_session_budget', { daily, monthly })
+  }
+
+  function forkSession(id: string, agent: string | null, title: string | null) {
+    return invoke<SessionDetail>('fork_session', { id, agent, title })
+  }
+
+  // Skill compatibility / trend / monitor
+  function checkSkillCompatibility(name: string) {
+    return invoke<SkillCompatibilityInfo[]>('check_skill_compatibility', { name })
+  }
+
+  function getTrend(days: number) {
+    return invoke<TrendPoint[]>('get_trend', { days })
+  }
+
+  function runMonitor() {
+    return invoke<MonitorReport>('run_monitor')
+  }
+
   return {
     listAgents, searchAgents, installAgent, uninstallAgent,
     batchInstallAgents, batchUninstallAgents, listInstalledAgents,
@@ -219,5 +280,9 @@ export function useTauriApi() {
     listSessionTemplates, createSessionTemplate, createSessionFromTemplate, deleteSessionTemplate,
     listPromptVersions, rollbackPrompt, getPromptUsage, renderPromptChecked,
     searchMemoriesSemantic, applyMemoryDecay, setMemoryImportance, reviveMemory,
+    listConfigTemplates, createConfigTemplate, applyConfigTemplate, deleteConfigTemplate,
+    exportPromptsJson, importPromptsJson, exportMemoriesJson, importMemoriesJson,
+    getSessionBudget, setSessionBudget, forkSession,
+    checkSkillCompatibility, getTrend, runMonitor,
   }
 }

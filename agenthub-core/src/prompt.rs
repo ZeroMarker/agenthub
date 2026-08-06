@@ -53,6 +53,21 @@ pub struct PromptUsage {
     pub last_used_at: Option<DateTime<Utc>>,
 }
 
+/// Bundle for prompt export/import (current templates + version history).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptExportBundle {
+    pub prompts: Vec<PromptTemplate>,
+    #[serde(default)]
+    pub versions: HashMap<String, Vec<PromptTemplate>>,
+}
+
+/// Result of an import operation.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ImportSummary {
+    pub imported: usize,
+    pub skipped: usize,
+}
+
 /// A single historical snapshot of a prompt template.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptVersion {
@@ -198,6 +213,64 @@ impl PromptManager {
             .collect();
         usage.sort_by_key(|b| std::cmp::Reverse(b.usage_count));
         Ok(usage)
+    }
+
+    // -----------------------------------------------------------------------
+    // Export / import
+    // -----------------------------------------------------------------------
+
+    /// Build an export bundle for the given prompt ids (or all prompts),
+    /// including each prompt's version history.
+    pub fn export_prompts(&self, ids: Option<&[String]>) -> Result<PromptExportBundle> {
+        let all = self.list_prompts()?;
+        let selected: Vec<PromptTemplate> = match ids {
+            Some(ids) => all.into_iter().filter(|p| ids.contains(&p.id)).collect(),
+            None => all,
+        };
+
+        let mut versions: HashMap<String, Vec<PromptTemplate>> = HashMap::new();
+        for prompt in &selected {
+            let history = self.list_versions(&prompt.id)?;
+            if !history.is_empty() {
+                versions.insert(prompt.id.clone(), history);
+            }
+        }
+
+        Ok(PromptExportBundle {
+            prompts: selected,
+            versions,
+        })
+    }
+
+    /// Serialize an export bundle as pretty JSON.
+    pub fn export_prompts_json(&self, ids: Option<&[String]>) -> Result<String> {
+        let bundle = self.export_prompts(ids)?;
+        serde_json::to_string_pretty(&bundle)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to serialize prompts: {}", e)))
+    }
+
+    /// Import prompts from a JSON bundle. Existing prompts are skipped unless
+    /// `force` is set (then they are overwritten along with their version
+    /// history). Returns the number imported / skipped.
+    pub fn import_prompts(&self, json: &str, force: bool) -> Result<ImportSummary> {
+        let bundle: PromptExportBundle = serde_json::from_str(json).map_err(|e| {
+            AgentHubError::PromptError(format!("Failed to parse prompt export: {}", e))
+        })?;
+
+        let mut summary = ImportSummary::default();
+        for prompt in &bundle.prompts {
+            if self.get_prompt(&prompt.id).is_ok() && !force {
+                summary.skipped += 1;
+                continue;
+            }
+            self.save_prompt(prompt)?;
+            if let Some(versions) = bundle.versions.get(&prompt.id) {
+                self.import_versions(&prompt.id, versions)?;
+            }
+            summary.imported += 1;
+        }
+
+        Ok(summary)
     }
 
     fn prompt_path(&self, id: &str) -> PathBuf {
@@ -686,5 +759,68 @@ mod tests {
         vars.insert("city".to_string(), "Beijing".to_string());
         let rendered = manager.render_prompt_checked("checked", &vars).unwrap();
         assert_eq!(rendered, "Hi Alice in Beijing");
+    }
+
+    // ---- Export / import ----
+
+    #[test]
+    fn test_export_import_prompts_roundtrip() {
+        let (manager, _temp) = create_test_manager();
+
+        manager.create_prompt("a", "A", "d", "tpl a").unwrap();
+        manager
+            .update_prompt("a", None, None, Some("tpl a v2"))
+            .unwrap();
+        manager.create_prompt("b", "B", "d", "tpl b").unwrap();
+
+        let json = manager.export_prompts_json(None).unwrap();
+        assert!(json.contains("tpl a v2"));
+
+        // Restore into a fresh manager
+        let (target, _temp2) = create_test_manager();
+        let summary = target.import_prompts(&json, false).unwrap();
+        assert_eq!(summary.imported, 2);
+        assert_eq!(summary.skipped, 0);
+
+        let a = target.get_prompt("a").unwrap();
+        assert_eq!(a.template, "tpl a v2");
+        assert_eq!(target.list_versions("a").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_import_prompts_skips_and_forces() {
+        let (manager, _temp) = create_test_manager();
+        manager.create_prompt("a", "A", "d", "original").unwrap();
+
+        // Export, then modify locally
+        let json = manager
+            .export_prompts_json(Some(&["a".to_string()]))
+            .unwrap();
+        manager
+            .update_prompt("a", None, None, Some("local change"))
+            .unwrap();
+
+        // Without force: skipped
+        let summary = manager.import_prompts(&json, false).unwrap();
+        assert_eq!(summary.imported, 0);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(manager.get_prompt("a").unwrap().template, "local change");
+
+        // With force: overwritten, history kept
+        let summary = manager.import_prompts(&json, true).unwrap();
+        assert_eq!(summary.imported, 1);
+        assert_eq!(manager.get_prompt("a").unwrap().template, "original");
+        assert!(!manager.list_versions("a").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_export_selected_ids() {
+        let (manager, _temp) = create_test_manager();
+        manager.create_prompt("a", "A", "d", "t").unwrap();
+        manager.create_prompt("b", "B", "d", "t").unwrap();
+
+        let bundle = manager.export_prompts(Some(&["a".to_string()])).unwrap();
+        assert_eq!(bundle.prompts.len(), 1);
+        assert_eq!(bundle.prompts[0].id, "a");
     }
 }

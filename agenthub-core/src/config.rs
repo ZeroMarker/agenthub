@@ -140,6 +140,25 @@ pub struct ConfigManager {
     current_environment: Environment,
 }
 
+/// A reusable configuration template. Secrets are never stored in templates;
+/// only their key names are reserved via [`ConfigTemplate::secret_keys`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub settings: HashMap<String, ConfigValue>,
+    #[serde(default)]
+    pub environment_variables: HashMap<String, String>,
+    /// Names of secret keys to reserve when applying the template.
+    #[serde(default)]
+    pub secret_keys: Vec<String>,
+    #[serde(default)]
+    pub custom: HashMap<String, ConfigValue>,
+    pub metadata: ConfigMetadata,
+}
+
 impl ConfigManager {
     pub fn new(config_dir: PathBuf) -> Self {
         Self {
@@ -369,6 +388,190 @@ impl ConfigManager {
 
         Ok(())
     }
+
+    // -----------------------------------------------------------------------
+    // Config templates
+    // -----------------------------------------------------------------------
+
+    fn templates_dir(&self) -> PathBuf {
+        self.config_dir.join("templates")
+    }
+
+    fn template_path(&self, id: &str) -> PathBuf {
+        self.templates_dir().join(format!("{}.yaml", id))
+    }
+
+    /// List config template ids, sorted.
+    pub fn list_templates(&self) -> Result<Vec<String>> {
+        let dir = self.templates_dir();
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut templates = Vec::new();
+        for entry in std::fs::read_dir(&dir).map_err(|e| {
+            AgentHubError::ConfigError(format!("Failed to read templates dir: {}", e))
+        })? {
+            let entry = entry
+                .map_err(|e| AgentHubError::ConfigError(format!("Failed to read entry: {}", e)))?;
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|ext| ext == "yaml" || ext == "yml")
+            {
+                if let Some(stem) = path.file_stem() {
+                    templates.push(stem.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        templates.sort();
+        Ok(templates)
+    }
+
+    pub fn get_template(&self, id: &str) -> Result<ConfigTemplate> {
+        let path = self.template_path(id);
+        if !path.exists() {
+            return Err(AgentHubError::ConfigError(format!(
+                "Template not found: {}",
+                id
+            )));
+        }
+
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to read template: {}", e)))?;
+
+        serde_yaml::from_str(&content)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to parse template: {}", e)))
+    }
+
+    pub fn save_template(&self, template: &ConfigTemplate) -> Result<()> {
+        std::fs::create_dir_all(self.templates_dir()).map_err(|e| {
+            AgentHubError::ConfigError(format!("Failed to create templates dir: {}", e))
+        })?;
+
+        let path = self.template_path(&template.id);
+        let content = serde_yaml::to_string(template).map_err(|e| {
+            AgentHubError::ConfigError(format!("Failed to serialize template: {}", e))
+        })?;
+
+        std::fs::write(&path, content)
+            .map_err(|e| AgentHubError::ConfigError(format!("Failed to write template: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Create a template from scratch.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_template(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        settings: HashMap<String, ConfigValue>,
+        environment_variables: HashMap<String, String>,
+        secret_keys: Vec<String>,
+        custom: HashMap<String, ConfigValue>,
+    ) -> Result<ConfigTemplate> {
+        let path = self.template_path(id);
+        if path.exists() {
+            return Err(AgentHubError::ConfigError(format!(
+                "Template already exists: {}",
+                id
+            )));
+        }
+
+        let now = Utc::now();
+        let template = ConfigTemplate {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+            settings,
+            environment_variables,
+            secret_keys,
+            custom,
+            metadata: ConfigMetadata {
+                created_at: now,
+                updated_at: now,
+                created_by: None,
+            },
+        };
+
+        self.save_template(&template)?;
+        Ok(template)
+    }
+
+    pub fn delete_template(&self, id: &str) -> Result<bool> {
+        let path = self.template_path(id);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| {
+                AgentHubError::ConfigError(format!("Failed to delete template: {}", e))
+            })?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Create a template from an existing agent config. Secret values are never
+    /// copied — only their key names are reserved.
+    pub fn save_config_as_template(
+        &self,
+        agent_id: &str,
+        template_id: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<ConfigTemplate> {
+        let config = self.load_config(agent_id)?;
+        let now = Utc::now();
+        let template = ConfigTemplate {
+            id: template_id.to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+            settings: config.settings,
+            environment_variables: config.environment_variables,
+            secret_keys: config.secrets.keys().cloned().collect(),
+            custom: config.custom,
+            metadata: ConfigMetadata {
+                created_at: now,
+                updated_at: now,
+                created_by: None,
+            },
+        };
+
+        self.save_template(&template)?;
+        Ok(template)
+    }
+
+    /// Apply a template to an agent config (creating it if needed). Template
+    /// values win over existing ones; secret keys keep existing values or are
+    /// reserved as empty placeholders.
+    pub fn apply_template(&self, agent_id: &str, template_id: &str) -> Result<AgentConfig> {
+        let template = self.get_template(template_id)?;
+        let mut config = self
+            .load_config(agent_id)
+            .or_else(|_| self.create_config(agent_id))?;
+
+        for (key, value) in &template.settings {
+            config.settings.insert(key.clone(), value.clone());
+        }
+        for (key, value) in &template.environment_variables {
+            config
+                .environment_variables
+                .insert(key.clone(), value.clone());
+        }
+        for key in &template.secret_keys {
+            config.secrets.entry(key.clone()).or_default();
+        }
+        for (key, value) in &template.custom {
+            config.custom.insert(key.clone(), value.clone());
+        }
+
+        config.version += 1;
+        config.metadata.updated_at = Utc::now();
+        self.save_config(&config)?;
+        Ok(config)
+    }
 }
 
 #[cfg(test)]
@@ -490,5 +693,131 @@ mod tests {
             imported.settings.get("model").unwrap().as_str(),
             Some("gpt-4")
         );
+    }
+
+    // ---- Config templates ----
+
+    fn sample_template(manager: &ConfigManager) -> ConfigTemplate {
+        let mut settings = HashMap::new();
+        settings.insert("model".to_string(), ConfigValue::from("gpt-4o"));
+        settings.insert("temperature".to_string(), ConfigValue::from(0.7f64));
+        let mut env = HashMap::new();
+        env.insert("OPENAI_API_KEY".to_string(), "".to_string());
+        let mut custom = HashMap::new();
+        custom.insert("lang".to_string(), ConfigValue::from("rust"));
+
+        manager
+            .create_template(
+                "llm-default",
+                "LLM Default",
+                "Standard model settings",
+                settings,
+                env,
+                vec!["api_key".to_string()],
+                custom,
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn test_template_crud() {
+        let (manager, _temp) = create_test_manager();
+
+        sample_template(&manager);
+
+        let ids = manager.list_templates().unwrap();
+        assert_eq!(ids, vec!["llm-default".to_string()]);
+
+        let template = manager.get_template("llm-default").unwrap();
+        assert_eq!(template.name, "LLM Default");
+        assert_eq!(template.secret_keys, vec!["api_key".to_string()]);
+        assert!(template.settings.contains_key("model"));
+
+        // Duplicate id rejected
+        assert!(manager
+            .create_template(
+                "llm-default",
+                "X",
+                "",
+                HashMap::new(),
+                HashMap::new(),
+                Vec::new(),
+                HashMap::new()
+            )
+            .is_err());
+
+        assert!(manager.delete_template("llm-default").unwrap());
+        assert!(manager.get_template("llm-default").is_err());
+    }
+
+    #[test]
+    fn test_apply_template() {
+        let (manager, _temp) = create_test_manager();
+        sample_template(&manager);
+
+        manager.create_config("agent-a").unwrap();
+        manager
+            .set_setting("agent-a", "model", ConfigValue::from("old-model"))
+            .unwrap();
+        manager
+            .set_setting("agent-a", "keep", ConfigValue::from("value"))
+            .unwrap();
+
+        let config = manager.apply_template("agent-a", "llm-default").unwrap();
+        // Template wins for model
+        assert_eq!(
+            config.settings.get("model").unwrap().as_str(),
+            Some("gpt-4o")
+        );
+        // Unrelated settings preserved
+        assert_eq!(config.settings.get("keep").unwrap().as_str(), Some("value"));
+        // Secret key reserved
+        assert!(config.secrets.contains_key("api_key"));
+        // Version bumped
+        assert!(config.version >= 2);
+
+        // Applying to a nonexistent agent creates it
+        let created = manager.apply_template("new-agent", "llm-default").unwrap();
+        assert_eq!(created.agent_id, "new-agent");
+        assert_eq!(
+            created.settings.get("model").unwrap().as_str(),
+            Some("gpt-4o")
+        );
+    }
+
+    #[test]
+    fn test_save_config_as_template_omits_secrets() {
+        let (manager, _temp) = create_test_manager();
+
+        manager.create_config("agent-a").unwrap();
+        manager
+            .set_setting("agent-a", "model", ConfigValue::from("gpt-4o"))
+            .unwrap();
+        manager
+            .set_env_var("agent-a", "OPENAI_API_KEY", "sk-real")
+            .unwrap();
+        // Inject a secret directly (reload first to pick up the setting above)
+        let mut with_secret = manager.load_config("agent-a").unwrap();
+        with_secret
+            .secrets
+            .insert("api_key".to_string(), "super-secret".to_string());
+        manager.save_config(&with_secret).unwrap();
+
+        let template = manager
+            .save_config_as_template("agent-a", "from-agent", "From Agent", "desc")
+            .unwrap();
+
+        // Secret VALUES never stored; only key names reserved
+        assert_eq!(template.secret_keys, vec!["api_key".to_string()]);
+        assert!(!serde_yaml::to_string(&template)
+            .unwrap()
+            .contains("super-secret"));
+        assert_eq!(
+            template.settings.get("model").unwrap().as_str(),
+            Some("gpt-4o")
+        );
+        assert!(template
+            .environment_variables
+            .contains_key("OPENAI_API_KEY"));
     }
 }

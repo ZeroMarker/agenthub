@@ -43,6 +43,19 @@ pub struct StatusOverview {
     pub audit_events: usize,
 }
 
+/// One day bucket in a [`TrendReport`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrendPoint {
+    /// UTC date `YYYY-MM-DD`.
+    pub date: String,
+    pub sessions_started: usize,
+    pub sessions_completed: usize,
+    pub tokens: u64,
+    pub cost_usd: f64,
+    pub memories_created: usize,
+    pub audit_events: usize,
+}
+
 /// Aggregates data across every manager to produce a unified overview
 /// (dashboard / `agenthub status`).
 pub struct OverviewReport {
@@ -121,6 +134,66 @@ impl OverviewReport {
             skills_enabled: skills.iter().filter(|s| s.enabled).count(),
             audit_events: audit_manager.count()?,
         })
+    }
+
+    /// Daily trend for the last `days` days (oldest first, includes today),
+    /// bucketed by UTC date.
+    pub fn trend(&self, days: usize) -> Result<Vec<TrendPoint>> {
+        self.trend_with_now(days, Utc::now())
+    }
+
+    pub fn trend_with_now(&self, days: usize, now: DateTime<Utc>) -> Result<Vec<TrendPoint>> {
+        let session_manager = SessionManager::new(self.base_dir.join("sessions"));
+        let memory_manager = MemoryManager::new(self.base_dir.join("memory"));
+        let audit_manager = AuditManager::new(self.base_dir.join("audit"));
+
+        let today = now.date_naive();
+        let mut points: Vec<TrendPoint> = (0..days)
+            .map(|i| {
+                let date = today - chrono::Duration::days((days - 1 - i) as i64);
+                TrendPoint {
+                    date: date.to_string(),
+                    sessions_started: 0,
+                    sessions_completed: 0,
+                    tokens: 0,
+                    cost_usd: 0.0,
+                    memories_created: 0,
+                    audit_events: 0,
+                }
+            })
+            .collect();
+        let index: std::collections::HashMap<String, usize> = points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.date.clone(), i))
+            .collect();
+
+        for session in session_manager.list_sessions()? {
+            if let Some(&i) = index.get(&session.started_at.date_naive().to_string()) {
+                points[i].sessions_started += 1;
+                if session.status == crate::session::SessionStatus::Completed {
+                    points[i].sessions_completed += 1;
+                }
+                if let Some(usage) = &session.usage {
+                    points[i].tokens += usage.total_tokens as u64;
+                    points[i].cost_usd += usage.estimated_cost_usd;
+                }
+            }
+        }
+
+        for memory in memory_manager.list_entries(None)? {
+            if let Some(&i) = index.get(&memory.created_at.date_naive().to_string()) {
+                points[i].memories_created += 1;
+            }
+        }
+
+        for event in audit_manager.load_all()? {
+            if let Some(&i) = index.get(&event.timestamp.date_naive().to_string()) {
+                points[i].audit_events += 1;
+            }
+        }
+
+        Ok(points)
     }
 }
 
@@ -237,5 +310,74 @@ mod tests {
         assert_eq!(overview.configs, 0);
         assert_eq!(overview.sessions.total, 0);
         assert_eq!(overview.audit_events, 0);
+    }
+
+    // ---- Trend ----
+
+    #[test]
+    fn test_trend_buckets_by_day() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().to_path_buf();
+        let report = OverviewReport::new(base.clone(), Platform::Linux);
+        let now = Utc::now();
+
+        // Sessions started today and 2 days ago
+        let sm = SessionManager::new(base.join("sessions"));
+        let today_session = sm.create_session("Today", "codex").unwrap();
+        sm.record_usage(
+            &today_session.id,
+            1_000_000,
+            0,
+            &crate::session::PricingTable::builtin(),
+        )
+        .unwrap();
+        sm.update_status(&today_session.id, crate::session::SessionStatus::Completed)
+            .unwrap();
+
+        let old = now - chrono::Duration::days(2);
+        let mut old_session = sm.create_session("Old", "codex").unwrap();
+        old_session.started_at = old;
+        old_session.usage = Some(crate::session::SessionUsage {
+            total_tokens: 500_000,
+            input_tokens: 500_000,
+            output_tokens: 0,
+            estimated_cost_usd: 1.0,
+        });
+        sm.save_session(&old_session).unwrap();
+
+        // Memory created today
+        MemoryManager::new(base.join("memory"))
+            .create_entry(
+                crate::memory::MemoryScope::Global,
+                None,
+                "Note",
+                "c",
+                crate::memory::MemoryType::Free,
+            )
+            .unwrap();
+
+        // Audit event today
+        AuditManager::new(base.join("audit"))
+            .record("cli", "install", "x", None, true)
+            .unwrap();
+
+        let points = report.trend_with_now(7, now).unwrap();
+        assert_eq!(points.len(), 7);
+
+        let today_idx = 6; // last bucket = today
+        assert_eq!(points[today_idx].sessions_started, 1);
+        assert_eq!(points[today_idx].sessions_completed, 1);
+        assert!((points[today_idx].cost_usd - 3.0).abs() < 1e-9); // fallback pricing $3/1M
+        assert_eq!(points[today_idx].memories_created, 1);
+        assert_eq!(points[today_idx].audit_events, 1);
+
+        // 2 days ago: old session
+        let old_idx = 4; // 7 buckets: idx 0..6, old is 2 days before today -> idx 4
+        assert_eq!(points[old_idx].sessions_started, 1);
+        assert!((points[old_idx].cost_usd - 1.0).abs() < 1e-9);
+        assert_eq!(points[old_idx].tokens, 500_000);
+
+        // Other days empty
+        assert_eq!(points[0].sessions_started, 0);
     }
 }

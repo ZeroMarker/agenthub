@@ -1,6 +1,10 @@
-use agenthub_core::{Agent, Catalog, DiagnosticManager, Installer, Platform, RealCommandRunner};
+use agenthub_core::{
+    Agent, AuditManager, AuditQuery, BackupManager, Catalog, DiagnosticManager, Installer,
+    ManagementReport, Platform, RealCommandRunner,
+};
+use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Clap CLI definition
@@ -58,6 +62,34 @@ enum Commands {
     },
     /// Run environment diagnostics
     Doctor,
+    /// Show a global overview of the workspace (agents, configs, sessions, ...)
+    Status,
+    /// Query the audit log
+    Audit {
+        /// Filter by action substring, e.g. install, config.set
+        #[arg(long)]
+        action: Option<String>,
+        /// Filter by target substring, e.g. an agent id
+        #[arg(long)]
+        target: Option<String>,
+        /// Only show events from the last N days
+        #[arg(long)]
+        last_days: Option<i64>,
+        /// Maximum number of events to show (most recent first)
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Back up all configs, prompts, sessions, memories and audit events
+    Backup {
+        /// Output file path; defaults to agenthub-backup-<timestamp>.json
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Restore from a backup file
+    Restore {
+        /// Path to the backup file
+        file: PathBuf,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +119,18 @@ pub fn load_catalog() -> Result<Catalog, String> {
     }
 
     Err("Could not find agents.json".to_string())
+}
+
+/// Default data directory, matching the Tauri app layout.
+pub fn data_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("agenthub")
+}
+
+pub fn default_backup_path() -> PathBuf {
+    let stamp = Utc::now().format("%Y%m%d-%H%M%S");
+    PathBuf::from(format!("agenthub-backup-{}.json", stamp))
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +334,144 @@ pub fn cmd_doctor() -> String {
     )
 }
 
+pub fn cmd_status(base_dir: &Path, catalog: &Catalog) -> String {
+    let report = ManagementReport::new(base_dir.to_path_buf(), get_platform());
+    let overview = match report.overview(catalog) {
+        Ok(o) => o,
+        Err(e) => return format!("Error: {}", e),
+    };
+
+    let c = &overview.catalog;
+    let mut out = String::new();
+    out.push_str("AgentHub 状态概览\n");
+    out.push_str("==================\n");
+    out.push_str(&format!("平台:       {}\n", overview.platform));
+    out.push_str(&format!("版本:       {}\n", overview.agenthub_version));
+    out.push_str(&format!(
+        "生成时间:   {}\n",
+        overview.generated_at.to_rfc3339()
+    ));
+    out.push_str(&format!(
+        "目录:       {} agents ({} CLI, {} Desktop) — verified {}, community {}, manual {}, deprecated {}\n",
+        c.total, c.cli, c.desktop, c.verified, c.community, c.manual, c.deprecated
+    ));
+    out.push_str(&format!("已安装:     {}\n", overview.installed_agents));
+    out.push_str(&format!("配置:       {}\n", overview.configs));
+    out.push_str(&format!("提示词:     {}\n", overview.prompts));
+    let s = &overview.sessions;
+    out.push_str(&format!(
+        "会话:       {} (active {}, completed {}, failed {}) — tokens {}, ${:.4}\n",
+        s.total, s.active, s.completed, s.failed, s.total_tokens, s.total_cost
+    ));
+    let m = &overview.memories;
+    out.push_str(&format!(
+        "记忆:       {} (global {}, project {}, session {}, decayed {})\n",
+        m.total, m.global, m.project, m.session, m.decayed
+    ));
+    out.push_str(&format!(
+        "技能:       {} (enabled {})\n",
+        overview.skills_total, overview.skills_enabled
+    ));
+    out.push_str(&format!("审计事件:   {}\n", overview.audit_events));
+    out
+}
+
+pub fn cmd_audit(
+    base_dir: &Path,
+    action: Option<&str>,
+    target: Option<&str>,
+    last_days: Option<i64>,
+    limit: usize,
+) -> String {
+    let manager = AuditManager::new(base_dir.join("audit"));
+    let since = last_days.map(|d| Utc::now() - Duration::days(d));
+    let query = AuditQuery {
+        action: action.map(|s| s.to_string()),
+        target: target.map(|s| s.to_string()),
+        since,
+        limit: Some(limit),
+        ..Default::default()
+    };
+
+    let events = match manager.query(&query) {
+        Ok(events) => events,
+        Err(e) => return format!("Error: {}", e),
+    };
+
+    if events.is_empty() {
+        return "No audit events found.".to_string();
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{:<24} {:<8} {:<18} {:<32} {}\n",
+        "Timestamp", "Success", "Action", "Target", "Details"
+    ));
+    out.push_str(&format!("{}\n", "-".repeat(120)));
+    for event in &events {
+        let success = if event.success { "ok" } else { "FAIL" };
+        let details = event.details.as_deref().unwrap_or("");
+        out.push_str(&format!(
+            "{:<24} {:<8} {:<18} {:<32} {}\n",
+            event.timestamp.format("%Y-%m-%d %H:%M:%S"),
+            success,
+            event.action,
+            event.target,
+            details
+        ));
+    }
+    out.push_str(&format!("\n{} event(s)", events.len()));
+    out
+}
+
+pub fn cmd_backup(base_dir: &Path, output: Option<&Path>) -> String {
+    let path = output
+        .map(PathBuf::from)
+        .unwrap_or_else(default_backup_path);
+    let manager = BackupManager::new(base_dir.to_path_buf());
+
+    match manager.create_backup(&path) {
+        Ok(manifest) => {
+            let c = &manifest.counts;
+            format!(
+                "✅ Backup written to {}\n\n  configs {} · prompts {} (+{} versions) · sessions {} · templates {} · memories {} · audit {}\n\nCreated {}",
+                path.display(),
+                c.configs,
+                c.prompts,
+                c.prompt_versions,
+                c.sessions,
+                c.session_templates,
+                c.memories,
+                c.audit_events,
+                manifest.created_at.to_rfc3339()
+            )
+        }
+        Err(e) => format!("❌ Backup failed: {}", e),
+    }
+}
+
+pub fn cmd_restore(base_dir: &Path, file: &Path) -> String {
+    let manager = BackupManager::new(base_dir.to_path_buf());
+
+    match manager.restore_backup(file) {
+        Ok(manifest) => {
+            let c = &manifest.counts;
+            format!(
+                "✅ Restored from {}\n\n  configs {} · prompts {} · sessions {} · templates {} · memories {} · audit {}\n\nBackup created {}",
+                file.display(),
+                c.configs,
+                c.prompts,
+                c.sessions,
+                c.session_templates,
+                c.memories,
+                c.audit_events,
+                manifest.created_at.to_rfc3339()
+            )
+        }
+        Err(e) => format!("❌ Restore failed: {}", e),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -368,6 +550,24 @@ fn main() {
             cmd_uninstall(&name, dry_run, &agent, platform)
         }
         Commands::Doctor => cmd_doctor(),
+        Commands::Status => match load_catalog() {
+            Ok(catalog) => cmd_status(&data_dir(), &catalog),
+            Err(e) => format!("Error: {}", e),
+        },
+        Commands::Audit {
+            action,
+            target,
+            last_days,
+            limit,
+        } => cmd_audit(
+            &data_dir(),
+            action.as_deref(),
+            target.as_deref(),
+            last_days,
+            limit,
+        ),
+        Commands::Backup { output } => cmd_backup(&data_dir(), output.as_deref()),
+        Commands::Restore { file } => cmd_restore(&data_dir(), &file),
     };
 
     println!("{}", result);
@@ -381,6 +581,7 @@ fn main() {
 mod tests {
     use super::*;
     use agenthub_core::Catalog;
+    use tempfile::TempDir;
 
     fn test_catalog() -> Catalog {
         Catalog::from_json(TEST_AGENTS_JSON).unwrap()
@@ -505,6 +706,150 @@ mod tests {
             "expected catalog to load: {:?}",
             result.err()
         );
+    }
+
+    // ---- Management commands (status / audit / backup / restore) ----
+
+    const MANUAL_AGENTS_JSON: &str = r#"{
+        "version": "1.0.0",
+        "last_updated": "2026-06-27",
+        "agents": [
+            {
+                "id": "test-cli",
+                "name": "Test CLI",
+                "kind": "cli",
+                "provider": "Test Provider",
+                "description": "A test CLI agent",
+                "homepage": "https://test-cli.com",
+                "installers": {
+                    "windows": { "manager": "manual", "package": null },
+                    "macos": { "manager": "manual", "package": null },
+                    "linux": { "manager": "manual", "package": null }
+                },
+                "status": "verified",
+                "catalog_verified_at": "2026-06-27",
+                "installer_verified_at": "2026-06-27"
+            }
+        ]
+    }"#;
+
+    #[test]
+    fn test_cmd_status() {
+        let temp = TempDir::new().unwrap();
+        let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
+
+        // Seed some workspace data
+        let base = temp.path();
+        agenthub_core::ConfigManager::new(base.to_path_buf())
+            .create_config("test-cli")
+            .unwrap();
+        agenthub_core::PromptManager::new(base.join("prompts"))
+            .create_prompt("p1", "P1", "d", "t")
+            .unwrap();
+        let sm = agenthub_core::SessionManager::new(base.join("sessions"));
+        let session = sm.create_session("S1", "codex").unwrap();
+        sm.add_message(&session.id, "user", "hi").unwrap();
+        agenthub_core::MemoryManager::new(base.join("memory"))
+            .create_entry(
+                agenthub_core::MemoryScope::Global,
+                None,
+                "Note",
+                "c",
+                agenthub_core::MemoryType::Free,
+            )
+            .unwrap();
+        agenthub_core::AuditManager::new(base.join("audit"))
+            .record("cli", "install", "test-cli", None, true)
+            .unwrap();
+
+        let output = cmd_status(base, &catalog);
+        assert!(output.contains("AgentHub 状态概览"));
+        assert!(output.contains("目录:"));
+        assert!(output.contains("1 agents (1 CLI, 0 Desktop)"));
+        assert!(output.contains("配置:"));
+        assert!(output.contains("提示词:"));
+        assert!(output.contains("会话:"));
+        assert!(output.contains("记忆:"));
+        assert!(output.contains("审计事件:"));
+    }
+
+    #[test]
+    fn test_cmd_audit_empty() {
+        let temp = TempDir::new().unwrap();
+        let output = cmd_audit(temp.path(), None, None, None, 50);
+        assert!(output.contains("No audit events found"));
+    }
+
+    #[test]
+    fn test_cmd_audit_with_events() {
+        let temp = TempDir::new().unwrap();
+        let manager = agenthub_core::AuditManager::new(temp.path().join("audit"));
+        manager
+            .record("cli", "install", "claude-code", None, true)
+            .unwrap();
+        manager
+            .record("cli", "config.set", "codex", None, false)
+            .unwrap();
+
+        let output = cmd_audit(temp.path(), None, None, None, 50);
+        assert!(output.contains("install"));
+        assert!(output.contains("config.set"));
+        assert!(output.contains("2 event(s)"));
+
+        // Filter by action
+        let output = cmd_audit(temp.path(), Some("install"), None, None, 50);
+        assert!(output.contains("1 event(s)"));
+
+        // Filter by target
+        let output = cmd_audit(temp.path(), None, Some("codex"), None, 50);
+        assert!(output.contains("1 event(s)"));
+        assert!(output.contains("config.set"));
+    }
+
+    #[test]
+    fn test_cmd_backup_and_restore() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("data");
+
+        // Seed data
+        agenthub_core::ConfigManager::new(base.clone())
+            .create_config("test-cli")
+            .unwrap();
+        agenthub_core::SessionManager::new(base.join("sessions"))
+            .create_session("S1", "codex")
+            .unwrap();
+        agenthub_core::AuditManager::new(base.join("audit"))
+            .record("cli", "install", "test-cli", None, true)
+            .unwrap();
+
+        let out = temp.path().join("backup.json");
+        let output = cmd_backup(&base, Some(&out));
+        assert!(output.contains("✅ Backup written"));
+        assert!(output.contains("configs 1"));
+        assert!(out.exists());
+
+        // Restore into a fresh directory
+        let target = temp.path().join("restored");
+        let output = cmd_restore(&target, &out);
+        assert!(output.contains("✅ Restored"));
+
+        let configs = agenthub_core::ConfigManager::new(target.clone())
+            .list_configs()
+            .unwrap();
+        assert_eq!(configs, vec!["test-cli".to_string()]);
+        let sessions = agenthub_core::SessionManager::new(target.join("sessions"))
+            .list_sessions()
+            .unwrap();
+        assert_eq!(sessions.len(), 1);
+    }
+
+    #[test]
+    fn test_cmd_backup_failure_message() {
+        let temp = TempDir::new().unwrap();
+        let output = cmd_backup(temp.path(), Some(&temp.path().join("x.json")));
+        // Empty workspace still produces a valid empty backup
+        assert!(output.contains("✅ Backup written"));
+        assert!(output.contains("configs 0"));
     }
 
     const TEST_AGENTS_JSON: &str = r#"{

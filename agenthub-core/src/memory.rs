@@ -62,6 +62,18 @@ pub struct MemoryEntry {
     pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Importance 0-10 (default 5). Entries below 5 are eligible for decay.
+    #[serde(default = "default_importance")]
+    pub importance: u8,
+    /// Set to true when the entry has been decayed/archived by age.
+    #[serde(default)]
+    pub decayed: bool,
+    #[serde(default)]
+    pub last_accessed_at: Option<DateTime<Utc>>,
+}
+
+fn default_importance() -> u8 {
+    5
 }
 
 pub struct MemoryManager {
@@ -239,6 +251,9 @@ impl MemoryManager {
             tags: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            importance: default_importance(),
+            decayed: false,
+            last_accessed_at: None,
         })
     }
 
@@ -273,6 +288,9 @@ impl MemoryManager {
             tags: Vec::new(),
             created_at: now,
             updated_at: now,
+            importance: default_importance(),
+            decayed: false,
+            last_accessed_at: None,
         };
 
         self.save_entry(&entry)?;
@@ -316,6 +334,7 @@ impl MemoryManager {
 
         Ok(entries
             .into_iter()
+            .filter(|e| !e.decayed)
             .filter(|e| {
                 e.title.to_lowercase().contains(&query_lower)
                     || e.content.to_lowercase().contains(&query_lower)
@@ -324,6 +343,134 @@ impl MemoryManager {
                         .any(|t| t.to_lowercase().contains(&query_lower))
             })
             .collect())
+    }
+
+    /// BM25 semantic search. Decayed entries are excluded. Results are scored
+    /// with title tokens weighted 3x, tags 2x and content 1x, and returned most
+    /// relevant first.
+    pub fn search_entries_bm25(&self, query: &str, top_k: usize) -> Result<Vec<MemoryEntry>> {
+        let entries: Vec<MemoryEntry> = self
+            .list_entries(None)?
+            .into_iter()
+            .filter(|e| !e.decayed)
+            .collect();
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let query_terms = tokenize(query);
+        if query_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build weighted token streams for each document.
+        let docs: Vec<Vec<String>> = entries
+            .iter()
+            .map(|e| {
+                let mut tokens = Vec::new();
+                // Title x3
+                for _ in 0..3 {
+                    tokens.extend(tokenize(&e.title));
+                }
+                // Tags x2
+                for tag in &e.tags {
+                    for _ in 0..2 {
+                        tokens.extend(tokenize(tag));
+                    }
+                }
+                // Content x1
+                tokens.extend(tokenize(&e.content));
+                tokens
+            })
+            .collect();
+
+        let n = docs.len();
+        let avgdl = docs.iter().map(|d| d.len() as f64).sum::<f64>() / n as f64;
+        let avgdl = if avgdl <= 0.0 { 1.0 } else { avgdl };
+
+        const K1: f64 = 1.5;
+        const B: f64 = 0.75;
+
+        // Term frequency per document.
+        let mut tfs: Vec<std::collections::HashMap<String, f64>> = Vec::with_capacity(n);
+        for doc in &docs {
+            let mut tf: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+            for token in doc {
+                *tf.entry(token.clone()).or_insert(0.0) += 1.0;
+            }
+            tfs.push(tf);
+        }
+
+        let mut scored: Vec<(f64, usize)> = Vec::with_capacity(n);
+        for (idx, doc) in docs.iter().enumerate() {
+            let dl = doc.len() as f64;
+            let mut score = 0.0;
+            for term in &query_terms {
+                let tf = tfs[idx].get(term).copied().unwrap_or(0.0);
+                if tf <= 0.0 {
+                    continue;
+                }
+                let df = docs.iter().filter(|d| d.contains(term)).count() as f64;
+                let idf = ((n as f64 - df + 0.5) / (df + 0.5) + 1.0).ln();
+                score += idf * (tf * (K1 + 1.0)) / (tf + K1 * (1.0 - B + B * dl / avgdl));
+            }
+            scored.push((score, idx));
+        }
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(top_k);
+
+        Ok(scored
+            .into_iter()
+            .filter(|(score, _)| *score > 0.0)
+            .map(|(_, idx)| entries[idx].clone())
+            .collect())
+    }
+
+    /// Mark an entry as recently accessed (used to keep it from decaying).
+    pub fn touch(&self, path: &str) -> Result<()> {
+        let mut entry = self.load_entry_from_file(&self.memory_dir.join(path))?;
+        entry.last_accessed_at = Some(Utc::now());
+        self.save_entry(&entry)
+    }
+
+    /// Set the importance (0-10) of an entry.
+    pub fn set_importance(&self, path: &str, importance: u8) -> Result<()> {
+        let mut entry = self.load_entry_from_file(&self.memory_dir.join(path))?;
+        entry.importance = importance.min(10);
+        entry.updated_at = Utc::now();
+        self.save_entry(&entry)
+    }
+
+    /// Revive a decayed entry and mark it as recently accessed.
+    pub fn revive(&self, path: &str) -> Result<()> {
+        let mut entry = self.load_entry_from_file(&self.memory_dir.join(path))?;
+        entry.decayed = false;
+        entry.last_accessed_at = Some(Utc::now());
+        self.save_entry(&entry)
+    }
+
+    /// Decay (archive) entries that have not been accessed for `older_than_days`
+    /// and have importance below 5. Returns the number of entries decayed.
+    pub fn apply_decay(&self, older_than_days: i64, now: Option<DateTime<Utc>>) -> Result<usize> {
+        let now = now.unwrap_or_else(Utc::now);
+        let cutoff = now - chrono::Duration::days(older_than_days);
+        let mut decayed = 0usize;
+
+        let entries = self.list_entries(None)?;
+        for mut entry in entries {
+            if entry.decayed {
+                continue;
+            }
+            let last_accessed = entry.last_accessed_at.unwrap_or(entry.updated_at);
+            if last_accessed < cutoff && entry.importance < 5 {
+                entry.decayed = true;
+                self.save_entry(&entry)?;
+                decayed += 1;
+            }
+        }
+
+        Ok(decayed)
     }
 
     pub fn add_tag(&self, path: &str, tag: &str) -> Result<()> {
@@ -364,8 +511,18 @@ impl MemoryManager {
             global,
             project,
             session,
+            decayed: entries.iter().filter(|e| e.decayed).count(),
         })
     }
+}
+
+/// Split text into lowercase alphanumeric tokens of length >= 2.
+fn tokenize(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty() && s.len() >= 2)
+        .map(|s| s.to_string())
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -374,6 +531,8 @@ pub struct MemoryStats {
     pub global: usize,
     pub project: usize,
     pub session: usize,
+    #[serde(default)]
+    pub decayed: usize,
 }
 
 #[cfg(test)]
@@ -508,5 +667,234 @@ mod tests {
         assert_eq!(stats.total, 2);
         assert_eq!(stats.global, 1);
         assert_eq!(stats.project, 1);
+    }
+
+    // ---- BM25 semantic search ----
+
+    #[test]
+    fn test_bm25_ranks_relevant_entries_first() {
+        let (manager, _temp) = create_test_manager();
+
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Rust Notes",
+                "Rust ownership and borrow checker details for systems programming.",
+                MemoryType::Learning,
+            )
+            .unwrap();
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Python Notes",
+                "Python is a dynamically typed language used for scripting.",
+                MemoryType::Learning,
+            )
+            .unwrap();
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Rust Async",
+                "Async runtime and tokio usage in Rust projects.",
+                MemoryType::Learning,
+            )
+            .unwrap();
+
+        // Searching "rust ownership" should rank the Rust Notes entry first
+        let results = manager.search_entries_bm25("rust ownership", 10).unwrap();
+        assert_eq!(results[0].title, "Rust Notes");
+
+        // Tokenize filter keeps only length >= 2 tokens
+        let tokens = tokenize("Rust, async! tokio");
+        assert!(tokens.contains(&"rust".to_string()));
+        assert!(tokens.contains(&"async".to_string()));
+        assert!(tokens.contains(&"tokio".to_string()));
+    }
+
+    #[test]
+    fn test_bm25_top_k() {
+        let (manager, _temp) = create_test_manager();
+
+        for i in 0..5 {
+            manager
+                .create_entry(
+                    MemoryScope::Global,
+                    None,
+                    &format!("Note {}", i),
+                    "rust content here",
+                    MemoryType::Free,
+                )
+                .unwrap();
+        }
+
+        let results = manager.search_entries_bm25("rust", 2).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_bm25_empty_or_unknown() {
+        let (manager, _temp) = create_test_manager();
+
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Rust Notes",
+                "Rust is great",
+                MemoryType::Learning,
+            )
+            .unwrap();
+
+        assert!(manager.search_entries_bm25("", 10).unwrap().is_empty());
+        // Non-matching terms yield no scored results
+        assert!(manager
+            .search_entries_bm25("zzzznomatch", 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    // ---- Importance & decay ----
+
+    #[test]
+    fn test_importance_and_touch() {
+        let (manager, _temp) = create_test_manager();
+
+        let entry = manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Important",
+                "Content",
+                MemoryType::Pinned,
+            )
+            .unwrap();
+
+        assert_eq!(entry.importance, 5);
+
+        manager.set_importance(&entry.path, 10).unwrap();
+        manager.touch(&entry.path).unwrap();
+
+        let updated = manager.list_entries(None).unwrap().remove(0);
+        assert_eq!(updated.importance, 10);
+        assert!(updated.last_accessed_at.is_some());
+    }
+
+    #[test]
+    fn test_apply_decay_only_old_low_importance_entries() {
+        let (manager, temp) = create_test_manager();
+
+        // Entry 1: low importance, stale (written in the past)
+        let stale_path = temp.path().join("global").join("stale.md");
+        std::fs::create_dir_all(stale_path.parent().unwrap()).unwrap();
+        let old = Utc::now() - chrono::Duration::days(90);
+        let stale = MemoryEntry {
+            path: "global/stale.md".to_string(),
+            scope: MemoryScope::Global,
+            scope_id: None,
+            title: "Stale".to_string(),
+            content: "Old content".to_string(),
+            memory_type: MemoryType::Free,
+            tags: Vec::new(),
+            created_at: old,
+            updated_at: old,
+            importance: 2,
+            decayed: false,
+            last_accessed_at: None,
+        };
+        manager.save_entry(&stale).unwrap();
+
+        // Entry 2: high importance, stale -> must NOT decay
+        let pinned = MemoryEntry {
+            path: "global/pinned.md".to_string(),
+            scope: MemoryScope::Global,
+            scope_id: None,
+            title: "Pinned".to_string(),
+            content: "Important content".to_string(),
+            memory_type: MemoryType::Pinned,
+            tags: Vec::new(),
+            created_at: old,
+            updated_at: old,
+            importance: 10,
+            decayed: false,
+            last_accessed_at: None,
+        };
+        manager.save_entry(&pinned).unwrap();
+
+        // Entry 3: fresh, low importance -> must NOT decay
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Fresh",
+                "New content",
+                MemoryType::Free,
+            )
+            .unwrap();
+
+        let decayed = manager.apply_decay(30, None).unwrap();
+        assert_eq!(decayed, 1);
+
+        let entries = manager.list_entries(None).unwrap();
+        let stale_updated = entries.iter().find(|e| e.title == "Stale").unwrap();
+        assert!(stale_updated.decayed);
+        let pinned_updated = entries.iter().find(|e| e.title == "Pinned").unwrap();
+        assert!(!pinned_updated.decayed);
+        let fresh_updated = entries.iter().find(|e| e.title == "Fresh").unwrap();
+        assert!(!fresh_updated.decayed);
+
+        // Stats report the decayed count
+        let stats = manager.get_stats().unwrap();
+        assert_eq!(stats.decayed, 1);
+    }
+
+    #[test]
+    fn test_decayed_entries_excluded_from_search() {
+        let (manager, _temp) = create_test_manager();
+
+        let old = Utc::now() - chrono::Duration::days(90);
+        let stale = MemoryEntry {
+            path: "global/stale.md".to_string(),
+            scope: MemoryScope::Global,
+            scope_id: None,
+            title: "Stale Rust".to_string(),
+            content: "rust is old".to_string(),
+            memory_type: MemoryType::Free,
+            tags: Vec::new(),
+            created_at: old,
+            updated_at: old,
+            importance: 1,
+            decayed: false,
+            last_accessed_at: None,
+        };
+        manager.save_entry(&stale).unwrap();
+
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Fresh Rust",
+                "rust is fresh",
+                MemoryType::Free,
+            )
+            .unwrap();
+
+        manager.apply_decay(30, None).unwrap();
+
+        // Substring search excludes decayed
+        let results = manager.search_entries("rust").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Fresh Rust");
+
+        // BM25 excludes decayed too
+        let results = manager.search_entries_bm25("rust", 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Revive brings it back
+        manager.revive("global/stale.md").unwrap();
+        let results = manager.search_entries("rust").unwrap();
+        assert_eq!(results.len(), 2);
     }
 }

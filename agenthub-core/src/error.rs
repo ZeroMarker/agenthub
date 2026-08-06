@@ -32,6 +32,15 @@ pub enum AgentHubError {
     #[error("Memory error: {0}")]
     MemoryError(String),
 
+    #[error("Audit error: {0}")]
+    AuditError(String),
+
+    #[error("Backup error: {0}")]
+    BackupError(String),
+
+    #[error("Management error: {0}")]
+    ManagementError(String),
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 

@@ -1,5 +1,39 @@
 # TODO
 
+## 长期规划第一波（2026-08-06）— ✅ 完成
+
+### ✅ Management 模块（此前完全未实现）
+- [x] **审计日志** `audit.rs`：append-only JSONL 日志、`AuditQuery` 过滤（action/target/actor/since/until/limit）、action_counts、clear、import_events
+- [x] **备份/恢复** `backup.rs`：全工作区快照（configs、prompts+版本历史、sessions+模板、memories、audit）为单个 JSON；restore 校验 format_version 并回写全部数据
+- [x] **状态概览** `management.rs`：`StatusOverview` 聚合目录/已安装/配置/提示词/会话/记忆/技能/审计；`overview_with_status` 便于测试
+- [x] **CLI**：`agenthub status` / `audit` / `backup` / `restore`
+- [x] **Tauri + UI**：`get_status_overview`/`list_audit`/`clear_audit`/`create_backup`/`restore_backup` 命令；新增 Management 视图（仪表盘卡片 + 可过滤审计表 + 备份/恢复）；install/uninstall 自动记录审计事件
+
+### ✅ Session 成本追踪 + 回放 + 模板
+- [x] `PricingTable` 内置 17 个常见模型价格（USD/1M tokens）+ 未知模型回退价
+- [x] `record_usage`（按 input/output tokens 累积成本）、`set_model`、`add_message_with_tokens`
+- [x] `replay_session`：Markdown 会话回放导出
+- [x] `SessionTemplate`：模板 CRUD + `create_session_from_template` 预置消息创建会话
+
+### ✅ Prompt 版本控制 + 使用统计
+- [x] `update_prompt` 每次修改前自动快照历史版本，`list_versions`/`get_version`/`rollback`（回滚前也快照，版本号单调递增）
+- [x] `render_prompt` 自动记录 `usage_count`/`last_used_at`，`list_usage` 排行
+- [x] `render_prompt_checked`：必填变量校验 + 默认值回退
+
+### ✅ Memory BM25 语义检索 + 记忆衰减
+- [x] 纯 Rust BM25 检索（title×3 / tags×2 / content×1 加权），`search_entries_bm25(query, top_k)`
+- [x] 记忆衰减：`importance`（0-10）、`last_accessed_at`、`touch`/`revive`/`set_importance`，`apply_decay(older_than_days)` 自动归档低重要性陈旧条目，已衰减条目默认排除出搜索，`MemoryStats.decayed` 计数
+
+### 📊 验证结果
+- Rust：147 测试全过（113 core + 9 集成 + 20 cli + 5 tauri），clippy 0 警告，fmt 干净
+- 前端：11 测试全过，vue-tsc + vite build 通过
+
+### 本波未覆盖（留待后续）
+- Config：API Key 系统密钥链存储（需引入 keyring/系统依赖，待评估）、配置模板
+- Skill：技能市场（需网络）、工作流编排、版本兼容性检查
+- Memory：向量检索、知识图谱
+- Management：插件系统、监控告警
+
 ## 当前优化波次（2026-08-06）— ✅ 全部完成
 
 ### ✅ 交付与推送
@@ -91,9 +125,11 @@ All UI components have been migrated to the Material 3 design token system:
 
 ## 长期规划（goal.md 七大模块）
 
-- [ ] **Config** 模块：API Key 密钥链存储、多环境配置、配置模板
-- [ ] **Memory** 模块：语义搜索（BM25 + 向量）、知识图谱、记忆衰减
-- [ ] **Session** 模块：成本追踪、会话回放、会话模板
-- [ ] **Prompt** 模块：版本控制、变量插值、使用统计
-- [ ] **Skill** 模块：技能市场、工作流编排、依赖检查
-- [ ] **Management** 模块：仪表盘、审计日志、备份恢复、插件系统
+- [x] **Management 模块**（首波）：仪表盘、审计日志、备份恢复 ✅（插件系统、监控告警留待后续）
+- [x] **Session 模块**（首波）：成本追踪、会话回放、会话模板 ✅
+- [x] **Prompt 模块**（首波）：版本控制、变量校验、使用统计 ✅
+- [x] **Memory 模块**（首波）：BM25 语义检索、记忆衰减 ✅（向量检索、知识图谱留待后续）
+- [ ] **Config 模块**：API Key 密钥链存储、多环境配置、配置模板（密钥链需评估 keyring/系统依赖）
+- [ ] **Skill 模块**：技能市场、工作流编排、依赖检查（依赖检查已有基础）
+- [ ] **Memory 模块**（二期）：向量检索、知识图谱
+- [ ] **Management 模块**（二期）：插件系统、监控告警

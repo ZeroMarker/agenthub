@@ -126,3 +126,105 @@ export interface BatchProgress {
   agent: string
   action: string
 }
+
+// === Management / Dashboard Types ===
+export interface CatalogOverview {
+  total: number
+  cli: number
+  desktop: number
+  verified: number
+  community: number
+  manual: number
+  deprecated: number
+}
+
+export interface SessionStats {
+  total: number
+  active: number
+  completed: number
+  failed: number
+  total_tokens: number
+  total_cost: number
+}
+
+export interface MemoryStats {
+  total: number
+  global: number
+  project: number
+  session: number
+  decayed: number
+}
+
+export interface StatusOverview {
+  generated_at: string
+  platform: string
+  agenthub_version: string
+  catalog: CatalogOverview
+  installed_agents: number
+  configs: number
+  prompts: number
+  sessions: SessionStats
+  memories: MemoryStats
+  skills_total: number
+  skills_enabled: number
+  audit_events: number
+}
+
+export interface AuditInfo {
+  id: string
+  timestamp: string
+  actor: string
+  action: string
+  target: string
+  details: string | null
+  success: boolean
+}
+
+export interface BackupCounts {
+  configs: number
+  prompts: number
+  prompt_versions: number
+  sessions: number
+  session_templates: number
+  memories: number
+  audit_events: number
+}
+
+export interface BackupManifest {
+  format_version: number
+  created_at: string
+  agenthub_version: string
+  counts: BackupCounts
+}
+
+// === Session Detail (usage / replay) ===
+export interface SessionDetail extends SessionInfo {
+  model: string | null
+  total_tokens: number
+  estimated_cost_usd: number
+}
+
+export interface SessionTemplateInfo {
+  id: string
+  name: string
+  description: string
+  agent: string | null
+  message_count: number
+  tags: string[]
+}
+
+// === Prompt versions / usage ===
+export interface PromptVersionInfo {
+  version: number
+  name: string
+  description: string
+  template: string
+  updated_at: string | null
+}
+
+export interface PromptUsageInfo {
+  id: string
+  name: string
+  usage_count: number
+  last_used_at: string | null
+}

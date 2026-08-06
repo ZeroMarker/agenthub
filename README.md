@@ -243,6 +243,10 @@ agenthub <command> [options]
 | `install` | 安装 Agent | `agenthub install codex --dry-run` |
 | `uninstall` | 卸载 Agent | `agenthub uninstall codex --yes` |
 | `doctor` | 环境诊断 | `agenthub doctor` |
+| `status` | 工作区状态概览 | `agenthub status` |
+| `audit` | 查询审计日志 | `agenthub audit --action install --last-days 7` |
+| `backup` | 备份全部数据 | `agenthub backup --output ./backup.json` |
+| `restore` | 从备份恢复 | `agenthub restore ./backup.json` |
 
 ### 通用选项
 
@@ -265,8 +269,10 @@ agenthub <command> [options]
 | **批量操作** | 多选安装/卸载，逐项进度与结果报告 |
 | **配置管理** | Agent 运行时配置、多环境支持 |
 | **诊断视图** | 环境检查、包管理器可用性、清单完整性 |
-| **会话管理** | 会话记录、搜索、成本追踪 |
-| **记忆管理** | 跨会话知识持久化、语义检索 |
+| **会话管理** | 会话记录、搜索、成本追踪、回放、模板 |
+| **记忆管理** | 跨会话知识持久化、BM25 语义检索、记忆衰减 |
+| **提示词管理** | 模板版本控制、使用统计、变量校验 |
+| **管理视图** | 仪表盘、审计日志、备份/恢复 |
 | **提示词管理** | 模板 CRUD、变量插值、版本控制 |
 | **技能管理** | 技能安装/卸载、依赖检查、工作流编排 |
 

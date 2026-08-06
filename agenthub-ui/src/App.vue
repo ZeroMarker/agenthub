@@ -7,8 +7,9 @@ import PromptManager from './components/PromptManager.vue'
 import SessionManager from './components/SessionManager.vue'
 import MemoryManager from './components/MemoryManager.vue'
 import DiagnosticView from './components/DiagnosticView.vue'
+import ManagementView from './components/ManagementView.vue'
 
-const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' | 'memory' | 'diagnostic'>('agents')
+const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' | 'memory' | 'diagnostic' | 'management'>('agents')
 </script>
 
 <template>
@@ -31,6 +32,7 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
             { id: 'sessions', icon: '💬', label: 'Sessions' },
             { id: 'memory', icon: '🧠', label: 'Memory' },
             { id: 'diagnostic', icon: '🩺', label: 'Diagnostic' },
+            { id: 'management', icon: '📊', label: 'Manage' },
           ]"
           :key="item.id"
           :class="['nav-rail-btn', { active: activeView === item.id }]"
@@ -52,6 +54,7 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
       <SessionManager v-else-if="activeView === 'sessions'" />
       <MemoryManager v-else-if="activeView === 'memory'" />
       <DiagnosticView v-else-if="activeView === 'diagnostic'" />
+      <ManagementView v-else-if="activeView === 'management'" />
     </main>
   </div>
 </template>

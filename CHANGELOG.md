@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-08-06
+
+### Added
+- **Management module**: append-only audit log (`audit/events.jsonl`), whole-workspace backup/restore (configs, prompts + versions, sessions + templates, memories, audit), and workspace status overview (`ManagementReport`)
+- **CLI**: `agenthub status`, `agenthub audit [--action --target --last-days --limit]`, `agenthub backup [--output]`, `agenthub restore <file>`
+- **GUI**: Management view with dashboard stat cards, filterable audit log table, and backup/restore controls
+- **Session cost tracking**: built-in model pricing table (17 common models) with fallback, `record_usage` accumulation, `replay_session` markdown export, and reusable session templates
+- **Prompt version control**: automatic snapshot on every update, `list_versions` / `get_version` / `rollback`, plus usage counters (`usage_count` / `last_used_at`) and required-variable validation with defaults
+- **Memory semantic search**: pure-Rust BM25 scoring (title 3x / tags 2x / content 1x weighting), plus importance, touch, revive and age-based decay (low-importance stale entries auto-archived and excluded from search)
+- **Audit integration**: install/uninstall operations in the Tauri backend record audit events automatically
+
+### Changed
+- `SessionManager::add_message` now delegates to `add_message_with_tokens`; usage can be recorded per message
+- `PromptManager::update_prompt` bumps `version` and snapshots history; `render_prompt` records usage
+- `MemoryManager::search_entries` excludes decayed entries; `MemoryStats` reports the decayed count
+
 ## [1.0.0] - 2026-08-06
 
 ### Added

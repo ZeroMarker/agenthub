@@ -13,6 +13,7 @@ name = "agenthub"
 version = "0.1.0"
 dependencies = [
  "agenthub-core",
+ "chrono",
  "dirs",
  "serde",
  "serde_json",
@@ -32,8 +33,10 @@ dependencies = [
  "agenthub-core",
  "chrono",
  "clap",
+ "dirs",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

@@ -1,7 +1,8 @@
 use agenthub_core::{
-    Agent, AgentKind, Catalog, ConfigManager, ConfigValue, DiagnosticManager, Installer,
-    MemoryManager, MemoryScope, MemoryType, Platform, PromptManager, RealCommandRunner, Result,
-    SessionManager, SkillManager,
+    Agent, AgentKind, AuditManager, AuditQuery, BackupManager, Catalog, ConfigManager, ConfigValue,
+    DiagnosticManager, Installer, ManagementReport, MemoryManager, MemoryScope, MemoryType,
+    Platform, PricingTable, PromptManager, RealCommandRunner, Result, SessionManager, SkillManager,
+    StatusOverview,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -62,6 +63,10 @@ pub struct AppState {
     prompt_manager: Arc<PromptManager>,
     session_manager: Arc<SessionManager>,
     memory_manager: Arc<MemoryManager>,
+    audit_manager: Arc<AuditManager>,
+    backup_manager: Arc<BackupManager>,
+    management_report: Arc<ManagementReport>,
+    pricing_table: Arc<PricingTable>,
     /// Per-agent cancellation flags for in-flight install/uninstall operations.
     cancellations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
@@ -258,6 +263,16 @@ async fn install_agent(
                             "message": "Completed"
                         }),
                     );
+                    let _ = state.audit_manager.record(
+                        "gui",
+                        "install",
+                        &agent.name,
+                        Some(&format!(
+                            "success={} cmd={}",
+                            result.success, result.command
+                        )),
+                        result.success,
+                    );
                     Ok(InstallResult {
                         success: result.success,
                         message: result.message,
@@ -279,6 +294,13 @@ async fn install_agent(
                             "total_steps": 3,
                             "message": format!("Failed: {}", e)
                         }),
+                    );
+                    let _ = state.audit_manager.record(
+                        "gui",
+                        "install",
+                        &agent.name,
+                        Some(&format!("error={}", e)),
+                        false,
                     );
                     Ok(InstallResult {
                         success: false,
@@ -388,6 +410,16 @@ async fn uninstall_agent(
                             "message": "Completed"
                         }),
                     );
+                    let _ = state.audit_manager.record(
+                        "gui",
+                        "uninstall",
+                        &agent.name,
+                        Some(&format!(
+                            "success={} cmd={}",
+                            result.success, result.command
+                        )),
+                        result.success,
+                    );
                     Ok(InstallResult {
                         success: result.success,
                         message: result.message,
@@ -409,6 +441,13 @@ async fn uninstall_agent(
                             "total_steps": 3,
                             "message": format!("Failed: {}", e)
                         }),
+                    );
+                    let _ = state.audit_manager.record(
+                        "gui",
+                        "uninstall",
+                        &agent.name,
+                        Some(&format!("error={}", e)),
+                        false,
                     );
                     Ok(InstallResult {
                         success: false,
@@ -1412,6 +1451,413 @@ async fn delete_memory(
         .map_err(|e| e.to_string())
 }
 
+// ============ Management Commands (dashboard / audit / backup) ============
+
+#[tauri::command]
+async fn get_status_overview(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<StatusOverview, String> {
+    let catalog = state.catalog.read().await;
+    state
+        .management_report
+        .overview(&catalog)
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct AuditInfo {
+    id: String,
+    timestamp: String,
+    actor: String,
+    action: String,
+    target: String,
+    details: Option<String>,
+    success: bool,
+}
+
+#[tauri::command]
+async fn list_audit(
+    action: Option<String>,
+    target: Option<String>,
+    since_days: Option<i64>,
+    limit: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<AuditInfo>, String> {
+    let since = since_days.map(|d| chrono::Utc::now() - chrono::Duration::days(d));
+    let query = AuditQuery {
+        action,
+        target,
+        since,
+        limit,
+        ..Default::default()
+    };
+
+    let events = state
+        .audit_manager
+        .query(&query)
+        .map_err(|e| e.to_string())?;
+    Ok(events
+        .into_iter()
+        .map(|e| AuditInfo {
+            id: e.id,
+            timestamp: e.timestamp.to_rfc3339(),
+            actor: e.actor,
+            action: e.action,
+            target: e.target,
+            details: e.details,
+            success: e.success,
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn clear_audit(state: tauri::State<'_, AppState>) -> std::result::Result<(), String> {
+    state.audit_manager.clear().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_backup(
+    output_path: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::BackupManifest, String> {
+    let manifest = state
+        .backup_manager
+        .create_backup(std::path::Path::new(&output_path))
+        .map_err(|e| e.to_string())?;
+    Ok(manifest)
+}
+
+#[tauri::command]
+async fn restore_backup(
+    input_path: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::BackupManifest, String> {
+    let manifest = state
+        .backup_manager
+        .restore_backup(std::path::Path::new(&input_path))
+        .map_err(|e| e.to_string())?;
+    Ok(manifest)
+}
+
+// ============ Session: usage / replay / templates ============
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct SessionDetail {
+    id: String,
+    title: String,
+    agent: String,
+    model: Option<String>,
+    status: String,
+    started_at: String,
+    ended_at: Option<String>,
+    message_count: usize,
+    total_tokens: u32,
+    estimated_cost_usd: f64,
+    tags: Vec<String>,
+}
+
+fn session_to_detail(session: &agenthub_core::Session) -> SessionDetail {
+    SessionDetail {
+        id: session.id.clone(),
+        title: session.title.clone(),
+        agent: session.agent.clone(),
+        model: session.model.clone(),
+        status: session.status.to_string(),
+        started_at: session.started_at.to_rfc3339(),
+        ended_at: session.ended_at.map(|dt| dt.to_rfc3339()),
+        message_count: session.messages.len(),
+        total_tokens: session.usage.as_ref().map(|u| u.total_tokens).unwrap_or(0),
+        estimated_cost_usd: session
+            .usage
+            .as_ref()
+            .map(|u| u.estimated_cost_usd)
+            .unwrap_or(0.0),
+        tags: session.tags.clone(),
+    }
+}
+
+#[tauri::command]
+async fn replay_session(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    state
+        .session_manager
+        .replay_session(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn record_session_usage(
+    id: String,
+    input_tokens: u32,
+    output_tokens: u32,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<SessionDetail, String> {
+    state
+        .session_manager
+        .record_usage(&id, input_tokens, output_tokens, &state.pricing_table)
+        .map_err(|e| e.to_string())?;
+    let session = state
+        .session_manager
+        .get_session(&id)
+        .map_err(|e| e.to_string())?;
+    Ok(session_to_detail(&session))
+}
+
+#[tauri::command]
+async fn set_session_model(
+    id: String,
+    model: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<SessionDetail, String> {
+    state
+        .session_manager
+        .set_model(&id, &model)
+        .map_err(|e| e.to_string())?;
+    let session = state
+        .session_manager
+        .get_session(&id)
+        .map_err(|e| e.to_string())?;
+    Ok(session_to_detail(&session))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct SessionTemplateInfo {
+    id: String,
+    name: String,
+    description: String,
+    agent: Option<String>,
+    message_count: usize,
+    tags: Vec<String>,
+}
+
+#[tauri::command]
+async fn list_session_templates(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<SessionTemplateInfo>, String> {
+    let templates = state
+        .session_manager
+        .list_templates()
+        .map_err(|e| e.to_string())?;
+    Ok(templates
+        .iter()
+        .map(|t| SessionTemplateInfo {
+            id: t.id.clone(),
+            name: t.name.clone(),
+            description: t.description.clone(),
+            agent: t.agent.clone(),
+            message_count: t.messages.len(),
+            tags: t.tags.clone(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn create_session_template(
+    id: String,
+    name: String,
+    description: String,
+    agent: Option<String>,
+    messages: Vec<(String, String)>,
+    tags: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<SessionTemplateInfo, String> {
+    let messages = messages
+        .into_iter()
+        .map(|(role, content)| agenthub_core::TemplateMessage { role, content })
+        .collect();
+    let template = state
+        .session_manager
+        .create_template(&id, &name, &description, agent.as_deref(), messages, tags)
+        .map_err(|e| e.to_string())?;
+    Ok(SessionTemplateInfo {
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        agent: template.agent,
+        message_count: template.messages.len(),
+        tags: template.tags,
+    })
+}
+
+#[tauri::command]
+async fn create_session_from_template(
+    template_id: String,
+    title: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<SessionDetail, String> {
+    let session = state
+        .session_manager
+        .create_session_from_template(&template_id, &title)
+        .map_err(|e| e.to_string())?;
+    Ok(session_to_detail(&session))
+}
+
+#[tauri::command]
+async fn delete_session_template(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .session_manager
+        .delete_template(&id)
+        .map_err(|e| e.to_string())
+}
+
+// ============ Prompt: versions / usage / checked render ============
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct PromptVersionInfo {
+    version: u32,
+    name: String,
+    description: String,
+    template: String,
+    updated_at: Option<String>,
+}
+
+fn prompt_version_to_info(p: &agenthub_core::PromptTemplate) -> PromptVersionInfo {
+    PromptVersionInfo {
+        version: p.version,
+        name: p.name.clone(),
+        description: p.description.clone(),
+        template: p.template.clone(),
+        updated_at: p.updated_at.map(|dt| dt.to_rfc3339()),
+    }
+}
+
+#[tauri::command]
+async fn list_prompt_versions(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<PromptVersionInfo>, String> {
+    let versions = state
+        .prompt_manager
+        .list_versions(&id)
+        .map_err(|e| e.to_string())?;
+    Ok(versions.iter().map(prompt_version_to_info).collect())
+}
+
+#[tauri::command]
+async fn rollback_prompt(
+    id: String,
+    version: u32,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<PromptInfo, String> {
+    let prompt = state
+        .prompt_manager
+        .rollback(&id, version)
+        .map_err(|e| e.to_string())?;
+    Ok(PromptInfo {
+        id: prompt.id,
+        name: prompt.name,
+        description: prompt.description,
+        template: prompt.template,
+        tags: prompt.tags,
+        category: prompt.category,
+        version: prompt.version,
+    })
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct PromptUsageInfo {
+    id: String,
+    name: String,
+    usage_count: u64,
+    last_used_at: Option<String>,
+}
+
+#[tauri::command]
+async fn get_prompt_usage(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<PromptUsageInfo>, String> {
+    let usage = state
+        .prompt_manager
+        .list_usage()
+        .map_err(|e| e.to_string())?;
+    Ok(usage
+        .into_iter()
+        .map(|u| PromptUsageInfo {
+            id: u.id,
+            name: u.name,
+            usage_count: u.usage_count,
+            last_used_at: u.last_used_at.map(|dt| dt.to_rfc3339()),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn render_prompt_checked(
+    id: String,
+    vars: HashMap<String, String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    state
+        .prompt_manager
+        .render_prompt_checked(&id, &vars)
+        .map_err(|e| e.to_string())
+}
+
+// ============ Memory: semantic search / decay ============
+
+#[tauri::command]
+async fn search_memories_semantic(
+    query: String,
+    top_k: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<MemoryInfo>, String> {
+    let entries = state
+        .memory_manager
+        .search_entries_bm25(&query, top_k.unwrap_or(20))
+        .map_err(|e| e.to_string())?;
+    Ok(entries
+        .iter()
+        .map(|e| MemoryInfo {
+            path: e.path.clone(),
+            title: e.title.clone(),
+            content: e.content.clone(),
+            scope: e.scope.to_string(),
+            memory_type: e.memory_type.to_string(),
+            tags: e.tags.clone(),
+            updated_at: e.updated_at.to_rfc3339(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn apply_memory_decay(
+    older_than_days: i64,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<usize, String> {
+    state
+        .memory_manager
+        .apply_decay(older_than_days, None)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_memory_importance(
+    path: String,
+    importance: u8,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    state
+        .memory_manager
+        .set_importance(&path, importance)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn revive_memory(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    state
+        .memory_manager
+        .revive(&path)
+        .map_err(|e| e.to_string())
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -1434,6 +1880,10 @@ fn main() {
     let prompt_manager = PromptManager::new(config_dir.join("prompts"));
     let session_manager = SessionManager::new(config_dir.join("sessions"));
     let memory_manager = MemoryManager::new(config_dir.join("memory"));
+    let audit_manager = AuditManager::new(config_dir.join("audit"));
+    let backup_manager = BackupManager::new(config_dir.clone());
+    let management_report = ManagementReport::new(config_dir.clone(), platform);
+    let pricing_table = PricingTable::builtin();
 
     let state = AppState {
         catalog: Arc::new(RwLock::new(catalog)),
@@ -1443,6 +1893,10 @@ fn main() {
         prompt_manager: Arc::new(prompt_manager),
         session_manager: Arc::new(session_manager),
         memory_manager: Arc::new(memory_manager),
+        audit_manager: Arc::new(audit_manager),
+        backup_manager: Arc::new(backup_manager),
+        management_report: Arc::new(management_report),
+        pricing_table: Arc::new(pricing_table),
         cancellations: Arc::new(Mutex::new(HashMap::new())),
     };
 
@@ -1482,7 +1936,27 @@ fn main() {
             list_memories,
             create_memory,
             search_memories,
-            delete_memory
+            search_memories_semantic,
+            apply_memory_decay,
+            set_memory_importance,
+            revive_memory,
+            delete_memory,
+            get_status_overview,
+            list_audit,
+            clear_audit,
+            create_backup,
+            restore_backup,
+            replay_session,
+            record_session_usage,
+            set_session_model,
+            list_session_templates,
+            create_session_template,
+            create_session_from_template,
+            delete_session_template,
+            list_prompt_versions,
+            rollback_prompt,
+            get_prompt_usage,
+            render_prompt_checked
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

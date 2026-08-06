@@ -223,7 +223,9 @@ pub fn cmd_install(_name: &str, dry_run: bool, agent: &Agent, platform: Platform
         Err(e) => return format!("Installation failed: {}", e),
     };
 
-    if result.success {
+    if dry_run {
+        format!("{}\n\nDry run — command was not executed", preview)
+    } else if result.success {
         format!(
             "{}\n\n✅ {} installed successfully ({})",
             preview, agent.name, result.duration_ms
@@ -259,7 +261,9 @@ pub fn cmd_uninstall(_name: &str, dry_run: bool, agent: &Agent, platform: Platfo
         Err(e) => return format!("Uninstallation failed: {}", e),
     };
 
-    if result.success {
+    if dry_run {
+        format!("{}\n\nDry run — command was not executed", preview)
+    } else if result.success {
         format!(
             "{}\n\n✅ {} uninstalled successfully ({})",
             preview, agent.name, result.duration_ms

@@ -2,6 +2,14 @@
 
 > 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill）；**保留 overview（概览）为独立只读模块**；审计日志、备份/恢复作为横切能力（非模块），详见 goal.md v0.5。
 
+## 发布记录（2026-08-07）— ✅ v1.3.0 已发布
+
+- [x] v1.3.0（wave 4 + wave 5 + M3 token 全量迁移）：9 平台产物 + 4 SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.3.0
+- [x] 发版前审查：修复 CHANGELOG Unreleased 结构损坏（重复 `### Changed` 标题 + wave 4 内容错分类）；版本 1.2.0→1.3.0 同步 Cargo.toml/Cargo.lock（3 包）/package.json/package-lock.json/tauri.conf.json
+- [x] 验证全走 GitHub Actions（本机构建测试不再执行）：CI（cargo test/fmt/clippy -D warnings + 前端 build）绿；release workflow 4 平台构建成功
+- [x] 流程：预建 draft release → push tag v1.3.0 → tauri-action 上传至已存在 draft（绕过 push-tag 403）→ 抽查 Linux 3 产物 sha256sum -c 全部 OK → `gh release edit --draft=false` 正式发布
+- [x] macOS `.app.tar.gz` 校验和与上传资产名对齐（v1.1.0/v1.2.0 老 bug 修复验证）：aarch64/x64 各 2 资产文件名与 SHA256SUMS 完全一致
+
 ## 发布记录（2026-08-06）— ✅ v1.1.0 / v1.2.0 已发布
 
 - [x] v1.1.0（wave 3）：9 平台产物 + 4 SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.1.0

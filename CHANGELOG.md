@@ -4,7 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added (Wave 4: governance + sharing + extensibility + alerting)
+### Added (Wave 5: effectiveness tracking + index persistence + alert grading/dedup)
+- **Prompt effectiveness tracking**: `prompt effects` / `record-outcome` link session
+  outcomes (rating, success, tokens, cost) to prompts; aggregated stats (avg rating,
+  success rate, cost) persisted under `prompts/effects/`; GUI Effects tab
+- **Memory vector index persistence**: `memory/vector_index.json` caches weighted
+  embeddings with staleness detection; incremental recompute on edit, full rebuild
+  via `memory reindex`; deleted entries drop their cache
+- **Memory knowledge graph GUI**: interactive entity + relation panel in Memory
+  Manager (build graph, browse entities, explore neighbors)
+- **Alert grading & dedup (notify)**: `AlertSeverity` (info/warning/critical) derived
+  from the monitor report; per-channel `min_severity` filter and `dedup_minutes`
+  window (state in `notify_state.json`); `--force` bypass; `send_custom` for
+  non-monitor alerts (key rotation notifications)
+- **Secret ops audit**: `config secret set|rotate|migrate|delete` now record audit
+  events; `config rotate --notify` pushes a rotation alert through the channels
+- **CLI**: `prompt effects|record-outcome|clear-effects`, `memory reindex`,
+  `notify add --min-severity/--dedup-minutes`, `notify send --force`, `notify clear-state`,
+  `monitor --notify-force`, `config rotate --notify`
+- **Tauri**: `get/list_prompt_effects`, `record_prompt_outcome`, `clear_prompt_effects`,
+  `build_vector_index`; `add_notify_channel` gains severity/dedup options,
+  `send_notification` gains force
+
+### Changed
+- **UI: full M3 token migration** — ConfigManager, SkillManager, PromptManager, SessionManager,
+  MemoryManager and DiagnosticView were still on legacy hardcoded colors (~150 occurrences)
+  that broke dark mode; all migrated to M3 tokens (context-aware `color: white` → `on-*`)
+- Fixed SessionManager badge/delete colors, ConfigManager cancel button, DiagnosticView status
+  colors; AgentList gradient background → token; tab switch no longer leaves a stale search filter
+- Added missing `.m3-tabs`/`.m3-tab` and `.agent-stats`/`.stat-chip` styles
 - **Users & permissions (Config)**: `UserManager` with `users.yaml` / `permissions.yaml`;
   built-in `admin` role bypasses all checks, `operator`/`viewer` roles, fine-grained
   grants scoped per module and per agent (`read|write|admin`, `*` wildcards, write-implies-read)

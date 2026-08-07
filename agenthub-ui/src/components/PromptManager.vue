@@ -29,12 +29,54 @@ interface CommunityPromptInfo {
   source: string | null
 }
 
-const view = ref<'templates' | 'community'>('templates')
+interface PromptEffects {
+  prompt_id: string
+  uses: number
+  avg_rating: number | null
+  success_rate: number | null
+  total_tokens: number
+  total_cost_usd: number
+  last_used: string | null
+}
+
+const view = ref<'templates' | 'community' | 'effects'>('templates')
 const communityPrompts = ref<CommunityPromptInfo[]>([])
 const selectedCommunity = ref<CommunityPromptInfo | null>(null)
 const publisherName = ref('local')
 const installNewId = ref('')
 const communityLoading = ref(false)
+const effectsList = ref<PromptEffects[]>([])
+const effectsLoading = ref(false)
+const outcomeSession = ref('')
+
+async function loadEffects() {
+  effectsLoading.value = true
+  try {
+    effectsList.value = await invoke<PromptEffects[]>('list_prompt_effects')
+  } catch (error) {
+    showMessage(`Failed to load effects: ${error}`, 'error')
+  } finally {
+    effectsLoading.value = false
+  }
+}
+
+async function recordOutcome() {
+  if (!selectedPrompt.value || !outcomeSession.value.trim()) return
+  effectsLoading.value = true
+  try {
+    await invoke('record_prompt_outcome', {
+      promptId: selectedPrompt.value.id,
+      sessionId: outcomeSession.value.trim(),
+    })
+    outcomeSession.value = ''
+    await loadEffects()
+    showMessage(`Outcome recorded for '${selectedPrompt.value.id}'`, 'success')
+  } catch (error) {
+    showMessage(`Failed to record outcome: ${error}`, 'error')
+  } finally {
+    effectsLoading.value = false
+  }
+}
 
 const prompts = ref<PromptInfo[]>([])
 const selectedPrompt = ref<PromptInfo | null>(null)
@@ -188,6 +230,7 @@ async function deleteCommunity(prompt: CommunityPromptInfo) {
 function switchView(next: typeof view.value) {
   view.value = next
   if (next === 'community') loadCommunity()
+  if (next === 'effects') loadEffects()
 }
 
 function showMessage(msg: string, type: 'success' | 'error') {
@@ -207,7 +250,11 @@ onMounted(loadPrompts)
 
     <div class="m3-tabs" role="tablist" aria-label="Prompt sections">
       <button
-        v-for="t in [{ id: 'templates', label: 'Templates' }, { id: 'community', label: 'Community' }]"
+        v-for="t in [
+          { id: 'templates', label: 'Templates' },
+          { id: 'community', label: 'Community' },
+          { id: 'effects', label: 'Effects' },
+        ]"
         :key="t.id"
         :class="['m3-tab', { active: view === t.id }]"
         role="tab"
@@ -299,7 +346,7 @@ onMounted(loadPrompts)
     </template>
 
     <!-- ============ Community ============ -->
-    <template v-else>
+    <template v-else-if="view === 'community'">
       <div class="actions">
         <span class="hint">Community prompts are local snapshots you can publish and install — share the
         <code>prompts/community</code> directory (e.g. via git) to collaborate offline.</span>
@@ -351,6 +398,55 @@ onMounted(loadPrompts)
         </div>
       </div>
     </template>
+
+    <!-- ============ Effects ============ -->
+    <template v-else>
+      <div class="actions">
+        <span class="hint">Record a session outcome against the selected prompt to track its
+        effectiveness (average rating, success rate, cost).</span>
+      </div>
+      <div class="record-box m3-card">
+        <h3>Record outcome</h3>
+        <div class="record-row">
+          <input v-model="outcomeSession" placeholder="Session id" :disabled="!selectedPrompt" />
+          <button
+            class="create-btn"
+            @click="recordOutcome"
+            :disabled="effectsLoading || !selectedPrompt || !outcomeSession.trim()"
+          >
+            Record for {{ selectedPrompt ? selectedPrompt.id : '…(select a prompt first)' }}
+          </button>
+        </div>
+      </div>
+
+      <LoadingSpinner v-if="effectsLoading && effectsList.length === 0" />
+      <EmptyState v-else-if="effectsList.length === 0" text="No effectiveness data yet — record a session outcome." />
+
+      <div v-else class="effects-table m3-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Prompt</th>
+              <th>Uses</th>
+              <th>Avg rating</th>
+              <th>Success</th>
+              <th>Cost</th>
+              <th>Last used</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="e in effectsList" :key="e.prompt_id">
+              <td class="effect-name">{{ e.prompt_id }}</td>
+              <td>{{ e.uses }}</td>
+              <td>{{ e.avg_rating !== null ? e.avg_rating.toFixed(1) : '-' }}</td>
+              <td>{{ e.success_rate !== null ? Math.round(e.success_rate * 100) + '%' : '-' }}</td>
+              <td>${{ e.total_cost_usd.toFixed(4) }}</td>
+              <td>{{ e.last_used ? new Date(e.last_used).toLocaleDateString() : '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -396,6 +492,17 @@ onMounted(loadPrompts)
 .publish-box h3 { margin: 0; font-size: 0.95rem; color: var(--md-sys-color-on-surface); }
 .publish-row { display: flex; gap: 0.6rem; align-items: center; flex: 1; }
 .publish-box input, .install-box input { flex: 1; padding: 0.5rem 0.9rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-sm); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
+
+/* Effects tab */
+.m3-card { background: var(--md-sys-color-surface); border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); padding: 1.25rem; margin-bottom: 1rem; }
+.record-box h3 { margin-bottom: 0.75rem; color: var(--md-sys-color-on-surface); font-size: 0.95rem; }
+.record-row { display: flex; gap: 0.6rem; align-items: center; }
+.record-row input { flex: 1; max-width: 320px; padding: 0.5rem 0.9rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-sm); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
+.effects-table { overflow-x: auto; }
+.effects-table table { width: 100%; border-collapse: collapse; }
+.effects-table th { text-align: left; padding: 0.6rem 0.9rem; color: var(--md-sys-color-on-surface-variant); font-size: 0.8rem; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
+.effects-table td { padding: 0.6rem 0.9rem; color: var(--md-sys-color-on-surface); border-bottom: 1px solid var(--md-sys-color-outline-variant); font-size: 0.9rem; }
+.effect-name { font-weight: 600; }
 
 /* Responsive */
 @media (max-width: 900px) {

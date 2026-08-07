@@ -10,6 +10,41 @@ use crate::session::{BudgetReport, SessionManager};
 use crate::skill::SkillManager;
 use crate::status::{AgentStatus, StatusDetector};
 
+/// Alert severity derived from a monitor report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertSeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+impl std::fmt::Display for AlertSeverity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AlertSeverity::Info => write!(f, "info"),
+            AlertSeverity::Warning => write!(f, "warning"),
+            AlertSeverity::Critical => write!(f, "critical"),
+        }
+    }
+}
+
+impl std::str::FromStr for AlertSeverity {
+    type Err = AgentHubError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "info" => Ok(AlertSeverity::Info),
+            "warning" | "warn" => Ok(AlertSeverity::Warning),
+            "critical" | "crit" => Ok(AlertSeverity::Critical),
+            _ => Err(AgentHubError::ManagementError(format!(
+                "Invalid severity: {} (expected info|warning|critical)",
+                s
+            ))),
+        }
+    }
+}
+
 /// A point-in-time health/monitoring report across all modules.
 ///
 /// This is the first slice of the cross-cutting monitoring capability: it
@@ -59,6 +94,21 @@ impl MonitorReport {
                 self.warnings.len(),
                 self.warnings.join("; ")
             )
+        }
+    }
+
+    /// Derived alert severity: critical when diagnostics fail or the budget is
+    /// exceeded; warning when anything else is flagged; otherwise info.
+    pub fn severity(&self) -> AlertSeverity {
+        if self.diagnostics_failed > 0
+            || self.budget.alerts.iter().any(|a| a.contains("exceeded"))
+            || !self.incompatible_skills.is_empty()
+        {
+            AlertSeverity::Critical
+        } else if !self.healthy {
+            AlertSeverity::Warning
+        } else {
+            AlertSeverity::Info
         }
     }
 }

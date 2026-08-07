@@ -16,6 +16,35 @@ interface MemoryInfo {
   updated_at: string
 }
 
+interface GraphSummary {
+  node_count: number
+  edge_count: number
+  built_at: string
+  top_entities: string[]
+}
+
+interface GraphNode {
+  id: string
+  label: string
+  kind: string
+  occurrences: number
+  memories: string[]
+}
+
+interface GraphEdge {
+  source: string
+  target: string
+  weight: number
+}
+
+const view = ref<'entries' | 'graph'>('entries')
+const graphSummary = ref<GraphSummary | null>(null)
+const graphNodes = ref<GraphNode[]>([])
+const graphEdges = ref<GraphEdge[]>([])
+const selectedEntity = ref('')
+const entityNeighbors = ref<GraphEdge[]>([])
+const graphLoading = ref(false)
+
 const memories = ref<MemoryInfo[]>([])
 const selectedMemory = ref<MemoryInfo | null>(null)
 const loading = ref(false)
@@ -125,6 +154,48 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleString()
 }
 
+async function loadGraph() {
+  graphLoading.value = true
+  try {
+    const [summary, graph] = await Promise.all([
+      invoke<GraphSummary>('build_memory_graph'),
+      invoke<{ nodes: GraphNode[]; edges: GraphEdge[] }>('get_memory_graph'),
+    ])
+    graphSummary.value = summary
+    graphNodes.value = graph.nodes
+    graphEdges.value = graph.edges
+    if (!selectedEntity.value && summary.top_entities.length) {
+      selectedEntity.value = summary.top_entities[0]
+      await loadNeighbors(summary.top_entities[0])
+    }
+  } catch (error) {
+    showMessage(`Failed to load graph: ${error}`, 'error')
+  } finally {
+    graphLoading.value = false
+  }
+}
+
+async function loadNeighbors(entity: string) {
+  selectedEntity.value = entity
+  try {
+    entityNeighbors.value = await invoke<GraphEdge[]>('graph_neighbors', {
+      entity,
+      limit: 15,
+    })
+  } catch (error) {
+    entityNeighbors.value = []
+  }
+}
+
+function switchView(next: typeof view.value) {
+  view.value = next
+  if (next === 'graph') loadGraph()
+}
+
+function neighborName(edge: GraphEdge, self: string): string {
+  return edge.source === self ? edge.target : edge.source
+}
+
 function showMessage(msg: string, type: 'success' | 'error') {
   message.value = msg
   messageType.value = type
@@ -140,6 +211,21 @@ onMounted(() => loadMemories('all'))
 
     <NotificationBar :message="message" :type="messageType" @close="message = ''" />
 
+    <div class="m3-tabs" role="tablist" aria-label="Memory sections">
+      <button
+        v-for="t in [{ id: 'entries', label: 'Entries' }, { id: 'graph', label: 'Knowledge Graph' }]"
+        :key="t.id"
+        :class="['m3-tab', { active: view === t.id }]"
+        role="tab"
+        :aria-selected="view === t.id"
+        @click="switchView(t.id as typeof view)"
+      >
+        {{ t.label }}
+      </button>
+    </div>
+
+    <!-- ============ Entries ============ -->
+    <template v-if="view === 'entries'">
     <div class="toolbar">
       <div class="scope-tabs">
         <button :class="['tab', { active: activeScope === 'all' }]" @click="setScope('all')">All</button>
@@ -224,6 +310,47 @@ onMounted(() => loadMemories('all'))
         </div>
       </div>
     </div>
+    </template>
+
+    <!-- ============ Knowledge Graph ============ -->
+    <template v-else>
+      <LoadingSpinner v-if="graphLoading && !graphSummary" />
+      <template v-else-if="graphSummary">
+        <div class="stat-chips">
+          <span class="stat-chip">{{ graphSummary.node_count }} entities</span>
+          <span class="stat-chip">{{ graphSummary.edge_count }} relations</span>
+          <span class="stat-chip">built {{ new Date(graphSummary.built_at).toLocaleString() }}</span>
+        </div>
+
+        <div class="graph-layout">
+          <div class="graph-entities">
+            <h3>Entities ({{ graphNodes.length }})</h3>
+            <div class="entity-list">
+              <button
+                v-for="node in graphNodes"
+                :key="node.id"
+                :class="['entity-chip', { active: selectedEntity === node.id }]"
+                @click="loadNeighbors(node.id)"
+              >
+                {{ node.label }}
+                <span class="entity-count">{{ node.occurrences }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="graph-detail">
+            <h3>Relations of "{{ selectedEntity }}"</h3>
+            <EmptyState v-if="entityNeighbors.length === 0" text="No relations found for this entity." />
+            <div v-else class="neighbor-list">
+              <div v-for="edge in entityNeighbors" :key="`${edge.source}-${edge.target}`" class="neighbor-row">
+                <span class="neighbor-name">{{ neighborName(edge, selectedEntity) }}</span>
+                <span class="neighbor-weight">×{{ edge.weight }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </template>
   </div>
 </template>
 
@@ -264,6 +391,26 @@ onMounted(() => loadMemories('all'))
 .content-preview h3 { margin-bottom: 0.75rem; color: var(--md-sys-color-on-surface); }
 .content-preview pre { background: var(--md-sys-color-surface-variant); padding: 1rem; border-radius: var(--md-sys-shape-sm); overflow-x: auto; font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; }
 .delete-btn { padding: 0.5rem 1rem; background: var(--md-sys-color-error); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; }
+
+/* Graph tab */
+.m3-tabs { display: flex; gap: 0.25rem; background: var(--md-sys-color-surface-variant); border-radius: var(--md-sys-shape-sm); padding: 0.25rem; margin-bottom: 1.5rem; width: fit-content; }
+.m3-tab { padding: 0.5rem 1.25rem; border: none; background: transparent; border-radius: var(--md-sys-shape-xs); color: var(--md-sys-color-on-surface-variant); font: var(--md-sys-typescale-label-large); cursor: pointer; }
+.m3-tab.active { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+.stat-chips { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.stat-chip { padding: 0.3rem 0.8rem; background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); border-radius: var(--md-sys-shape-full); font-size: 0.8rem; }
+.graph-layout { display: flex; gap: 2rem; }
+.graph-entities { width: 340px; flex-shrink: 0; background: var(--md-sys-color-surface); padding: 1.5rem; border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); }
+.graph-entities h3, .graph-detail h3 { margin-bottom: 1rem; color: var(--md-sys-color-on-surface); }
+.entity-list { display: flex; flex-wrap: wrap; gap: 0.5rem; max-height: calc(100vh - 380px); overflow-y: auto; }
+.entity-chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.8rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-full); background: transparent; color: var(--md-sys-color-on-surface); font-size: 0.85rem; cursor: pointer; }
+.entity-chip.active { background: var(--md-sys-color-primary-container); border-color: transparent; color: var(--md-sys-color-on-primary-container); }
+.entity-count { font-size: 0.7rem; background: var(--md-sys-color-surface-variant); border-radius: var(--md-sys-shape-full); padding: 0.05rem 0.4rem; }
+.graph-detail { flex: 1; background: var(--md-sys-color-surface); padding: 1.5rem; border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); }
+.neighbor-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.neighbor-row { display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0.9rem; background: var(--md-sys-color-surface-variant); border-radius: var(--md-sys-shape-sm); }
+.neighbor-name { font-weight: 600; color: var(--md-sys-color-on-surface); }
+.neighbor-weight { color: var(--md-sys-color-on-surface-variant); font-size: 0.85rem; }
+@media (max-width: 900px) { .graph-layout { flex-direction: column; } .graph-entities { width: 100%; } }
 /* Responsive */
 @media (max-width: 900px) {
   .memory-manager { padding: 1.25rem; }

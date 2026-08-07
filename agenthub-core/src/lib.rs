@@ -42,9 +42,9 @@ pub use installer::Installer;
 pub use marketplace::{MarketplaceManager, MarketplaceSkill, MarketplaceStats, SkillRating};
 pub use memory::{
     cosine_similarity, embed_text, MemoryEntry, MemoryManager, MemoryMatch, MemoryScope,
-    MemoryStats, MemoryType, EMBEDDING_DIM,
+    MemoryStats, MemoryType, VectorIndex, VectorIndexEntry, VectorIndexSummary, EMBEDDING_DIM,
 };
-pub use monitor::{Monitor, MonitorReport};
+pub use monitor::{AlertSeverity, Monitor, MonitorReport};
 pub use notify::{ChannelConfig, ChannelResult, NotificationPayload, Notifier, NotifyChannel};
 pub use overview::{CatalogOverview, OverviewReport, StatusOverview, TrendPoint};
 pub use plugin::{
@@ -52,8 +52,8 @@ pub use plugin::{
     HOOK_MONITOR, HOOK_SESSION_END, HOOK_UNINSTALL,
 };
 pub use prompt::{
-    ImportSummary, PromptExportBundle, PromptExtraction, PromptManager, PromptTemplate,
-    PromptUsage, PromptVariable, PromptVersion,
+    ImportSummary, PromptEffects, PromptExportBundle, PromptExtraction, PromptManager,
+    PromptOutcome, PromptTemplate, PromptUsage, PromptVariable, PromptVersion,
 };
 pub use secrets::{
     PreviousSecret, RotationResult as SecretRotationResult, SecretEntry, SecretInfo, SecretStore,

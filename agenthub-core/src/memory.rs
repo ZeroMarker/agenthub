@@ -86,6 +86,34 @@ pub struct MemoryMatch {
     pub method: String,
 }
 
+/// Cached weighted embedding for one memory entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorIndexEntry {
+    pub path: String,
+    /// Combined weighted embedding (title 3x / tags 2x / content 1x).
+    pub embedding: Vec<f32>,
+    /// When the embedding was computed; entries edited after this are stale.
+    pub indexed_at: DateTime<Utc>,
+}
+
+/// Persisted vector index (`memory/vector_index.json`). Speeds up repeated
+/// semantic searches by avoiding recomputing embeddings on every query.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VectorIndex {
+    #[serde(default)]
+    pub entries: std::collections::HashMap<String, VectorIndexEntry>,
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+/// Result of (re)building the vector index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorIndexSummary {
+    pub indexed: usize,
+    pub skipped_decayed: usize,
+    pub built_at: DateTime<Utc>,
+}
+
 pub struct MemoryManager {
     memory_dir: PathBuf,
 }
@@ -332,10 +360,96 @@ impl MemoryManager {
             std::fs::remove_file(&full_path).map_err(|e| {
                 AgentHubError::MemoryError(format!("Failed to delete memory: {}", e))
             })?;
+            // Drop the cached embedding if present.
+            if let Ok(mut index) = self.load_vector_index() {
+                if index.entries.remove(path).is_some() {
+                    let _ = self.save_vector_index(&index);
+                }
+            }
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    // ---- vector index persistence -----------------------------------------
+
+    fn vector_index_path(&self) -> PathBuf {
+        self.memory_dir.join("vector_index.json")
+    }
+
+    /// Load the persisted vector index (empty when missing or unreadable).
+    pub fn load_vector_index(&self) -> Result<VectorIndex> {
+        let path = self.vector_index_path();
+        if !path.exists() {
+            return Ok(VectorIndex::default());
+        }
+        let content = std::fs::read_to_string(&path).map_err(|e| {
+            AgentHubError::MemoryError(format!("Failed to read vector index: {}", e))
+        })?;
+        serde_json::from_str(&content)
+            .map_err(|e| AgentHubError::MemoryError(format!("Failed to parse vector index: {}", e)))
+    }
+
+    pub fn save_vector_index(&self, index: &VectorIndex) -> Result<()> {
+        std::fs::create_dir_all(&self.memory_dir).map_err(|e| {
+            AgentHubError::MemoryError(format!("Failed to create memory dir: {}", e))
+        })?;
+        let content = serde_json::to_string_pretty(index).map_err(|e| {
+            AgentHubError::MemoryError(format!("Failed to serialize vector index: {}", e))
+        })?;
+        std::fs::write(self.vector_index_path(), content).map_err(|e| {
+            AgentHubError::MemoryError(format!("Failed to write vector index: {}", e))
+        })?;
+        Ok(())
+    }
+
+    /// Rebuild the vector index for all non-decayed entries.
+    pub fn build_vector_index(&self) -> Result<VectorIndexSummary> {
+        let entries = self.list_entries(None)?;
+        let mut index = VectorIndex::default();
+        let mut skipped_decayed = 0usize;
+        for entry in &entries {
+            if entry.decayed {
+                skipped_decayed += 1;
+                continue;
+            }
+            index.entries.insert(
+                entry.path.clone(),
+                VectorIndexEntry {
+                    path: entry.path.clone(),
+                    embedding: weighted_embedding(entry),
+                    indexed_at: Utc::now(),
+                },
+            );
+        }
+        index.updated_at = Some(Utc::now());
+        self.save_vector_index(&index)?;
+        Ok(VectorIndexSummary {
+            indexed: index.entries.len(),
+            skipped_decayed,
+            built_at: Utc::now(),
+        })
+    }
+
+    /// Get the cached embedding for an entry if it is still fresh, otherwise
+    /// compute and (lazily) update the index. Returns (embedding, index_dirty).
+    fn embedding_for(&self, entry: &MemoryEntry, index: &mut VectorIndex) -> (Vec<f32>, bool) {
+        if let Some(cached) = index.entries.get(&entry.path) {
+            if cached.indexed_at >= entry.updated_at {
+                return (cached.embedding.clone(), false);
+            }
+        }
+        let embedding = weighted_embedding(entry);
+        index.entries.insert(
+            entry.path.clone(),
+            VectorIndexEntry {
+                path: entry.path.clone(),
+                embedding: embedding.clone(),
+                indexed_at: Utc::now(),
+            },
+        );
+        (embedding, true)
     }
 
     pub fn search_entries(&self, query: &str) -> Result<Vec<MemoryEntry>> {
@@ -382,6 +496,9 @@ impl MemoryManager {
     /// Uses local feature-hashed character n-gram embeddings (no network), with
     /// the same title 3x / tags 2x / content 1x weighting as BM25. Returns
     /// scored matches with cosine similarity in descending order.
+    ///
+    /// Embeddings are served from the persisted `vector_index.json` cache and
+    /// recomputed incrementally for edited entries.
     pub fn search_entries_vector(&self, query: &str, top_k: usize) -> Result<Vec<MemoryMatch>> {
         let entries: Vec<MemoryEntry> = self
             .list_entries(None)?
@@ -392,12 +509,18 @@ impl MemoryManager {
             return Ok(Vec::new());
         }
 
+        let mut index = self.load_vector_index()?;
+        let mut dirty = false;
         let query_vec = embed_text(query);
         let mut scored: Vec<(f64, &MemoryEntry)> = Vec::with_capacity(entries.len());
         for entry in &entries {
-            let combined = weighted_embedding(entry);
+            let (combined, changed) = self.embedding_for(entry, &mut index);
+            dirty |= changed;
             let score = cosine_similarity(&query_vec, &combined) as f64;
             scored.push((score, entry));
+        }
+        if dirty {
+            self.save_vector_index(&index)?;
         }
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -434,9 +557,16 @@ impl MemoryManager {
             .collect();
 
         let query_vec = embed_text(query);
+        let mut index = self.load_vector_index()?;
+        let mut dirty = false;
         let mut vector_scores: Vec<f64> = Vec::with_capacity(entries.len());
         for entry in &entries {
-            vector_scores.push(cosine_similarity(&query_vec, &weighted_embedding(entry)) as f64);
+            let (combined, changed) = self.embedding_for(entry, &mut index);
+            dirty |= changed;
+            vector_scores.push(cosine_similarity(&query_vec, &combined) as f64);
+        }
+        if dirty {
+            self.save_vector_index(&index)?;
         }
         let max_vec = vector_scores.iter().fold(0.0f64, |a, &b| a.max(b));
 
@@ -1269,6 +1399,47 @@ mod tests {
         assert_eq!(matches[0].method, "hybrid");
         // Scores normalized to 0..1
         assert!((0.0..=1.0).contains(&matches[0].score));
+    }
+
+    #[test]
+    fn test_vector_index_persistence_and_staleness() {
+        let (manager, _temp) = create_test_manager();
+        manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Postgres schema",
+                "users table with indexes",
+                MemoryType::Reference,
+            )
+            .unwrap();
+
+        // First search builds and persists the index.
+        let matches = manager.search_entries_vector("postgres", 5).unwrap();
+        assert_eq!(matches.len(), 1);
+        let index = manager.load_vector_index().unwrap();
+        assert_eq!(index.entries.len(), 1);
+        assert!(manager.memory_dir().join("vector_index.json").exists());
+
+        // Editing the entry invalidates the cached embedding (updated_at newer
+        // than indexed_at) and search recomputes it.
+        let mut entry = manager.list_entries(None).unwrap().remove(0);
+        entry.content = "postgres database with replication and sharding".to_string();
+        entry.updated_at = Utc::now();
+        manager.save_entry(&entry).unwrap();
+
+        let matches = manager.search_entries_vector("sharding", 5).unwrap();
+        assert!(!matches.is_empty());
+
+        // Rebuild refreshes everything.
+        let summary = manager.build_vector_index().unwrap();
+        assert_eq!(summary.indexed, 1);
+        assert_eq!(summary.skipped_decayed, 0);
+
+        // Deleting an entry drops its cached embedding.
+        manager.delete_entry(&entry.path).unwrap();
+        let index = manager.load_vector_index().unwrap();
+        assert!(index.entries.is_empty());
     }
 
     #[test]

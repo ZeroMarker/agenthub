@@ -78,6 +78,44 @@ pub struct PromptVersion {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
+/// One recorded outcome of using a prompt in a session (effectiveness tracking).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptOutcome {
+    pub session_id: String,
+    /// Session rating (1-5), when rated.
+    #[serde(default)]
+    pub rating: Option<u32>,
+    /// Whether the session completed successfully.
+    #[serde(default)]
+    pub success: Option<bool>,
+    #[serde(default)]
+    pub tokens: u32,
+    #[serde(default)]
+    pub cost_usd: f64,
+    pub recorded_at: DateTime<Utc>,
+}
+
+/// Aggregated effectiveness statistics for one prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptEffects {
+    pub prompt_id: String,
+    /// Number of recorded session outcomes.
+    pub uses: usize,
+    /// Average session rating (1-5), None when unrated.
+    pub avg_rating: Option<f64>,
+    /// Fraction of sessions marked successful, None when unknown.
+    pub success_rate: Option<f64>,
+    pub total_tokens: u32,
+    pub total_cost_usd: f64,
+    pub last_used: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct OutcomesFile {
+    #[serde(default)]
+    outcomes: Vec<PromptOutcome>,
+}
+
 pub struct PromptManager {
     prompts_dir: PathBuf,
 }
@@ -569,6 +607,155 @@ impl PromptManager {
         prompt.updated_at = Some(Utc::now());
         self.save_prompt(&prompt)?;
         Ok(())
+    }
+
+    // ---- effectiveness tracking (session outcomes) ------------------------
+
+    fn effects_dir(&self) -> PathBuf {
+        self.prompts_dir.join("effects")
+    }
+
+    fn effects_path(&self, id: &str) -> PathBuf {
+        self.effects_dir().join(format!("{}.yaml", id))
+    }
+
+    fn load_outcomes(&self, id: &str) -> Result<OutcomesFile> {
+        let path = self.effects_path(id);
+        if !path.exists() {
+            return Ok(OutcomesFile::default());
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to read outcomes: {}", e)))?;
+        serde_yaml::from_str(&content)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to parse outcomes: {}", e)))
+    }
+
+    fn save_outcomes(&self, id: &str, file: &OutcomesFile) -> Result<()> {
+        std::fs::create_dir_all(self.effects_dir()).map_err(|e| {
+            AgentHubError::PromptError(format!("Failed to create effects dir: {}", e))
+        })?;
+        let content = serde_yaml::to_string(file).map_err(|e| {
+            AgentHubError::PromptError(format!("Failed to serialize outcomes: {}", e))
+        })?;
+        std::fs::write(self.effects_path(id), content)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to write outcomes: {}", e)))
+    }
+
+    /// Record a session outcome against a prompt (append-only).
+    pub fn record_outcome(
+        &self,
+        id: &str,
+        session_id: &str,
+        rating: Option<u32>,
+        success: Option<bool>,
+        tokens: u32,
+        cost_usd: f64,
+    ) -> Result<PromptOutcome> {
+        self.get_prompt(id)?;
+        let mut file = self.load_outcomes(id)?;
+        let outcome = PromptOutcome {
+            session_id: session_id.to_string(),
+            rating,
+            success,
+            tokens,
+            cost_usd,
+            recorded_at: Utc::now(),
+        };
+        file.outcomes.push(outcome.clone());
+        self.save_outcomes(id, &file)?;
+        Ok(outcome)
+    }
+
+    /// Record an outcome derived from a session (rating, tokens, cost).
+    pub fn record_outcome_from_session(
+        &self,
+        id: &str,
+        session: &crate::session::Session,
+    ) -> Result<PromptOutcome> {
+        let (tokens, cost) = match &session.usage {
+            Some(u) => (u.total_tokens, u.estimated_cost_usd),
+            None => (0, 0.0),
+        };
+        self.record_outcome(
+            id,
+            &session.id,
+            session.rating,
+            Some(session.status == crate::session::SessionStatus::Completed),
+            tokens,
+            cost,
+        )
+    }
+
+    /// Aggregate effectiveness statistics for one prompt.
+    pub fn get_effects(&self, id: &str) -> Result<PromptEffects> {
+        self.get_prompt(id)?;
+        Ok(self.aggregate_effects(id, &self.load_outcomes(id)?))
+    }
+
+    /// Aggregate effectiveness for every prompt that has recorded outcomes.
+    pub fn list_effects(&self) -> Result<Vec<PromptEffects>> {
+        let dir = self.effects_dir();
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut effects = Vec::new();
+        for entry in std::fs::read_dir(&dir)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to read effects dir: {}", e)))?
+        {
+            let entry = entry
+                .map_err(|e| AgentHubError::PromptError(format!("Failed to read entry: {}", e)))?;
+            if entry
+                .path()
+                .extension()
+                .is_some_and(|e| e == "yaml" || e == "yml")
+            {
+                if let Some(stem) = entry.path().file_stem() {
+                    let id = stem.to_string_lossy().to_string();
+                    if let Ok(file) = self.load_outcomes(&id) {
+                        effects.push(self.aggregate_effects(&id, &file));
+                    }
+                }
+            }
+        }
+        effects.sort_by_key(|e| std::cmp::Reverse(e.uses));
+        Ok(effects)
+    }
+
+    /// Delete all recorded outcomes for a prompt.
+    pub fn clear_effects(&self, id: &str) -> Result<bool> {
+        let path = self.effects_path(id);
+        if !path.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_file(&path)
+            .map_err(|e| AgentHubError::PromptError(format!("Failed to clear effects: {}", e)))?;
+        Ok(true)
+    }
+
+    fn aggregate_effects(&self, id: &str, file: &OutcomesFile) -> PromptEffects {
+        let n = file.outcomes.len();
+        let rated: Vec<u32> = file.outcomes.iter().filter_map(|o| o.rating).collect();
+        let known_success: Vec<bool> = file.outcomes.iter().filter_map(|o| o.success).collect();
+        PromptEffects {
+            prompt_id: id.to_string(),
+            uses: n,
+            avg_rating: if rated.is_empty() {
+                None
+            } else {
+                Some(rated.iter().map(|r| *r as f64).sum::<f64>() / rated.len() as f64)
+            },
+            success_rate: if known_success.is_empty() {
+                None
+            } else {
+                Some(
+                    known_success.iter().filter(|s| **s).count() as f64
+                        / known_success.len() as f64,
+                )
+            },
+            total_tokens: file.outcomes.iter().map(|o| o.tokens).sum(),
+            total_cost_usd: file.outcomes.iter().map(|o| o.cost_usd).sum(),
+            last_used: file.outcomes.iter().map(|o| o.recorded_at).max(),
+        }
     }
 }
 
@@ -1288,5 +1475,87 @@ mod tests {
         assert!(manager
             .extract_from_session(&session_manager, &session.id, Some(5), "x", "X", "d")
             .is_err());
+    }
+
+    // ---- effectiveness tracking ----
+
+    #[test]
+    fn test_record_and_aggregate_effects() {
+        let (manager, _temp) = create_test_manager();
+        manager
+            .create_prompt("review", "Review", "d", "review {{code}}")
+            .unwrap();
+
+        manager
+            .record_outcome("review", "ses_1", Some(5), Some(true), 1200, 0.02)
+            .unwrap();
+        manager
+            .record_outcome("review", "ses_2", Some(3), Some(false), 800, 0.01)
+            .unwrap();
+        manager
+            .record_outcome("review", "ses_3", None, Some(true), 400, 0.005)
+            .unwrap();
+
+        let effects = manager.get_effects("review").unwrap();
+        assert_eq!(effects.uses, 3);
+        assert_eq!(effects.avg_rating.unwrap(), 4.0);
+        assert_eq!(effects.success_rate.unwrap(), 2.0 / 3.0);
+        assert_eq!(effects.total_tokens, 2400);
+        assert!((effects.total_cost_usd - 0.035).abs() < 1e-9);
+        assert!(effects.last_used.is_some());
+
+        // Unknown prompt rejected
+        assert!(manager
+            .record_outcome("nope", "s", None, None, 0, 0.0)
+            .is_err());
+        assert!(manager.get_effects("nope").is_err());
+
+        // Listing includes only prompts with outcomes
+        manager
+            .create_prompt("other", "Other", "d", "other")
+            .unwrap();
+        let all = manager.list_effects().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].prompt_id, "review");
+
+        // Clear
+        assert!(manager.clear_effects("review").unwrap());
+        assert!(!manager.clear_effects("review").unwrap());
+        assert_eq!(manager.get_effects("review").unwrap().uses, 0);
+    }
+
+    #[test]
+    fn test_record_outcome_from_session() {
+        use crate::session::{PricingTable, SessionManager};
+        let (manager, _temp) = create_test_manager();
+        manager
+            .create_prompt("code", "Code", "d", "code {{lang}}")
+            .unwrap();
+
+        let temp = tempfile::tempdir().unwrap();
+        let session_manager = SessionManager::new(temp.path().join("sessions"));
+        let session = session_manager.create_session("S", "codex").unwrap();
+        session_manager
+            .set_model(&session.id, "gpt-4o-mini")
+            .unwrap();
+        session_manager
+            .record_usage(&session.id, 100_000, 50_000, &PricingTable::builtin())
+            .unwrap();
+        session_manager
+            .update_status(&session.id, crate::session::SessionStatus::Completed)
+            .unwrap();
+        // Rate the session via YAML reload + rating field
+        let mut loaded = session_manager.get_session(&session.id).unwrap();
+        loaded.rating = Some(4);
+        session_manager.save_session(&loaded).unwrap();
+
+        let loaded = session_manager.get_session(&session.id).unwrap();
+        let outcome = manager
+            .record_outcome_from_session("code", &loaded)
+            .unwrap();
+        assert_eq!(outcome.rating, Some(4));
+        assert_eq!(outcome.success, Some(true));
+        assert!(outcome.tokens > 0);
+        assert!(outcome.cost_usd > 0.0);
     }
 }

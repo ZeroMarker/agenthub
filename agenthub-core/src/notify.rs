@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
-use crate::monitor::MonitorReport;
+use crate::monitor::{AlertSeverity, MonitorReport};
 
 /// Kind-specific channel configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -43,11 +43,25 @@ pub struct NotifyChannel {
     pub config: ChannelConfig,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Minimum alert severity this channel delivers (info|warning|critical).
+    #[serde(default = "default_min_severity")]
+    pub min_severity: String,
+    /// Skip re-sending an identical alert within this window (minutes).
+    #[serde(default = "default_dedup_minutes")]
+    pub dedup_minutes: u64,
     pub created_at: DateTime<Utc>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_min_severity() -> String {
+    "info".to_string()
+}
+
+fn default_dedup_minutes() -> u64 {
+    15
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -123,10 +137,26 @@ impl Notifier {
     /// Add a channel. Validates webhook URLs (must be http/https) and file
     /// paths (relative paths are resolved against the config dir).
     pub fn add_channel(&self, id: &str, config: ChannelConfig) -> Result<NotifyChannel> {
+        self.add_channel_with_options(id, config, None, None)
+    }
+
+    /// Add a channel with explicit severity/dedup settings.
+    pub fn add_channel_with_options(
+        &self,
+        id: &str,
+        config: ChannelConfig,
+        min_severity: Option<&str>,
+        dedup_minutes: Option<u64>,
+    ) -> Result<NotifyChannel> {
         if id.is_empty() {
             return Err(AgentHubError::ManagementError(
                 "Channel id must not be empty".to_string(),
             ));
+        }
+        if let Some(sev) = min_severity {
+            sev.parse::<AlertSeverity>().map_err(|e| {
+                AgentHubError::ManagementError(format!("Invalid min_severity: {}", e))
+            })?;
         }
         if let ChannelConfig::Webhook { url, .. } = &config {
             if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -147,6 +177,8 @@ impl Notifier {
             id: id.to_string(),
             config,
             enabled: true,
+            min_severity: min_severity.unwrap_or("info").to_string(),
+            dedup_minutes: dedup_minutes.unwrap_or(default_dedup_minutes()),
             created_at: Utc::now(),
         };
         file.channels.push(channel.clone());
@@ -187,21 +219,22 @@ impl Notifier {
     }
 
     /// Deliver an alert for a monitor report to every enabled channel.
-    pub fn send(&self, report: &MonitorReport) -> Result<Vec<ChannelResult>> {
-        let config = self.load_config()?;
-        let payload =
-            serde_json::to_value(NotificationPayload::from_report(report)).map_err(|e| {
-                AgentHubError::ManagementError(format!("Failed to build payload: {}", e))
-            })?;
+    pub fn send(&self, report: &MonitorReport, force: bool) -> Result<Vec<ChannelResult>> {
+        let payload = NotificationPayload::from_report(report);
         let mut results = Vec::new();
-        for channel in config.channels.iter().filter(|c| c.enabled) {
-            results.push(self.deliver(channel, &payload, report));
+        for channel in self.load_config()?.channels.iter().filter(|c| c.enabled) {
+            results.push(self.deliver(channel, &payload, force));
         }
         Ok(results)
     }
 
     /// Send only to a single named channel (enabled or not).
-    pub fn send_to(&self, channel_id: &str, report: &MonitorReport) -> Result<ChannelResult> {
+    pub fn send_to(
+        &self,
+        channel_id: &str,
+        report: &MonitorReport,
+        force: bool,
+    ) -> Result<ChannelResult> {
         let config = self.load_config()?;
         let channel = config
             .channels
@@ -210,23 +243,68 @@ impl Notifier {
             .ok_or_else(|| {
                 AgentHubError::ManagementError(format!("Channel not found: {}", channel_id))
             })?;
-        let payload =
-            serde_json::to_value(NotificationPayload::from_report(report)).map_err(|e| {
-                AgentHubError::ManagementError(format!("Failed to build payload: {}", e))
-            })?;
-        Ok(self.deliver(channel, &payload, report))
+        let payload = NotificationPayload::from_report(report);
+        Ok(self.deliver(channel, &payload, force))
+    }
+
+    /// Deliver a custom alert (not tied to a monitor report), e.g. key
+    /// rotation notifications. Respects severity and dedup like `send`.
+    pub fn send_custom(
+        &self,
+        summary: &str,
+        severity: AlertSeverity,
+        data: serde_json::Value,
+        force: bool,
+    ) -> Result<Vec<ChannelResult>> {
+        let payload = NotificationPayload::custom(summary, severity, data);
+        let mut results = Vec::new();
+        for channel in self.load_config()?.channels.iter().filter(|c| c.enabled) {
+            results.push(self.deliver(channel, &payload, force));
+        }
+        Ok(results)
     }
 
     fn deliver(
         &self,
         channel: &NotifyChannel,
-        payload: &serde_json::Value,
-        report: &MonitorReport,
+        payload: &NotificationPayload,
+        force: bool,
     ) -> ChannelResult {
-        match &channel.config {
+        // Minimum severity filter.
+        let min_severity = channel
+            .min_severity
+            .parse::<AlertSeverity>()
+            .unwrap_or(AlertSeverity::Info);
+        let severity = payload
+            .severity
+            .parse::<AlertSeverity>()
+            .unwrap_or(AlertSeverity::Info);
+        if severity < min_severity {
+            return ChannelResult {
+                channel: channel.id.clone(),
+                kind: channel_kind(&channel.config),
+                ok: true,
+                message: format!("skipped (severity {} < min {})", severity, min_severity),
+            };
+        }
+
+        // Dedup window.
+        if !force && channel.dedup_minutes > 0 && self.is_duplicate(channel, payload) {
+            return ChannelResult {
+                channel: channel.id.clone(),
+                kind: channel_kind(&channel.config),
+                ok: true,
+                message: format!(
+                    "skipped (dedup: identical alert within {}m)",
+                    channel.dedup_minutes
+                ),
+            };
+        }
+
+        let result = match &channel.config {
             ChannelConfig::Webhook { url, headers } => {
-                let result = send_webhook(url, headers, payload);
-                match result {
+                let payload_json = serde_json::to_value(payload).unwrap_or_default();
+                match send_webhook(url, headers, &payload_json) {
                     Ok(message) => ChannelResult {
                         channel: channel.id.clone(),
                         kind: "webhook".to_string(),
@@ -245,24 +323,31 @@ impl Notifier {
                 to,
                 from,
                 subject_prefix,
-            } => match self.write_email_spool(channel, to, from, subject_prefix.as_deref(), report)
-            {
-                Ok(path) => ChannelResult {
-                    channel: channel.id.clone(),
-                    kind: "email".to_string(),
-                    ok: true,
-                    message: format!("spooled to {}", path.display()),
-                },
-                Err(e) => ChannelResult {
-                    channel: channel.id.clone(),
-                    kind: "email".to_string(),
-                    ok: false,
-                    message: e.to_string(),
-                },
-            },
+            } => {
+                match self.write_email_spool(channel, to, from, subject_prefix.as_deref(), payload)
+                {
+                    Ok(path) => ChannelResult {
+                        channel: channel.id.clone(),
+                        kind: "email".to_string(),
+                        ok: true,
+                        message: format!("spooled to {}", path.display()),
+                    },
+                    Err(e) => ChannelResult {
+                        channel: channel.id.clone(),
+                        kind: "email".to_string(),
+                        ok: false,
+                        message: e.to_string(),
+                    },
+                }
+            }
             ChannelConfig::File { path } => {
                 let target = self.resolve_path(path);
-                let line = format!("[{}] {}", Utc::now().to_rfc3339(), report.alert_summary());
+                let line = format!(
+                    "[{}] [{}] {}",
+                    Utc::now().to_rfc3339(),
+                    payload.severity,
+                    payload.summary
+                );
                 match append_line(&target, &line) {
                     Ok(()) => ChannelResult {
                         channel: channel.id.clone(),
@@ -278,7 +363,69 @@ impl Notifier {
                     },
                 }
             }
+        };
+
+        if result.ok {
+            let _ = self.record_sent(channel, payload);
         }
+        result
+    }
+
+    // ---- dedup state ----
+
+    fn state_path(&self) -> PathBuf {
+        self.base_dir.join("notify_state.json")
+    }
+
+    fn load_state(&self) -> NotifyState {
+        let path = self.state_path();
+        if !path.exists() {
+            return NotifyState::default();
+        }
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str(&c).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_state(&self, state: &NotifyState) {
+        let _ = std::fs::create_dir_all(&self.base_dir);
+        if let Ok(content) = serde_json::to_string_pretty(state) {
+            let _ = std::fs::write(self.state_path(), content);
+        }
+    }
+
+    fn signature(channel: &NotifyChannel, payload: &NotificationPayload) -> String {
+        format!("{}:{}", channel.id, payload.summary)
+    }
+
+    fn is_duplicate(&self, channel: &NotifyChannel, payload: &NotificationPayload) -> bool {
+        let state = self.load_state();
+        let Some(last) = state.last_sent.get(&Self::signature(channel, payload)) else {
+            return false;
+        };
+        let window = chrono::Duration::minutes(channel.dedup_minutes as i64);
+        Utc::now().signed_duration_since(*last) < window
+    }
+
+    fn record_sent(&self, channel: &NotifyChannel, payload: &NotificationPayload) -> Result<()> {
+        let mut state = self.load_state();
+        state
+            .last_sent
+            .insert(Self::signature(channel, payload), Utc::now());
+        self.save_state(&state);
+        Ok(())
+    }
+
+    /// Clear the dedup state (e.g. after a manual `--force` run).
+    pub fn clear_dedup_state(&self) -> Result<()> {
+        let path = self.state_path();
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| {
+                AgentHubError::ManagementError(format!("Failed to clear dedup state: {}", e))
+            })?;
+        }
+        Ok(())
     }
 
     /// Relative paths in file channels resolve against the config dir.
@@ -297,7 +444,7 @@ impl Notifier {
         to: &str,
         from: &str,
         subject_prefix: Option<&str>,
-        report: &MonitorReport,
+        payload: &NotificationPayload,
     ) -> Result<PathBuf> {
         let dir = self.outbox_dir();
         std::fs::create_dir_all(&dir).map_err(|e| {
@@ -312,16 +459,16 @@ impl Notifier {
         let path = dir.join(filename);
 
         let subject = format!(
-            "{}AgentHub alert — {}",
+            "{}AgentHub alert [{}] — {}",
             subject_prefix.unwrap_or_default(),
-            report.alert_summary()
+            payload.severity,
+            payload.summary
         );
-        let report_json = report.to_json().unwrap_or_else(|_| "{}".to_string());
+        let payload_json =
+            serde_json::to_string_pretty(payload).unwrap_or_else(|_| "{}".to_string());
         let body = format!(
-            "AgentHub alert notification\n\nSummary: {}\nHealthy: {}\n\nReport:\n{}\n",
-            report.alert_summary(),
-            report.healthy,
-            report_json
+            "AgentHub alert notification\n\nSeverity: {}\nSummary: {}\nHealthy: {}\n\nPayload:\n{}\n",
+            payload.severity, payload.summary, payload.healthy, payload_json
         );
         let message = format!(
             "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{}",
@@ -335,6 +482,14 @@ impl Notifier {
             AgentHubError::ManagementError(format!("Failed to write email spool: {}", e))
         })?;
         Ok(path)
+    }
+}
+
+fn channel_kind(config: &ChannelConfig) -> String {
+    match config {
+        ChannelConfig::Webhook { .. } => "webhook".to_string(),
+        ChannelConfig::Email { .. } => "email".to_string(),
+        ChannelConfig::File { .. } => "file".to_string(),
     }
 }
 
@@ -364,13 +519,26 @@ fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
     writeln!(f, "{}", line)
 }
 
-/// The JSON payload posted to webhooks.
+/// Persisted dedup state: channel+summary signature -> last sent time.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct NotifyState {
+    #[serde(default)]
+    last_sent: std::collections::HashMap<String, DateTime<Utc>>,
+}
+
+/// The JSON payload delivered to webhooks / embedded in emails & files.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationPayload {
     pub summary: String,
     pub healthy: bool,
+    pub severity: String,
     pub generated_at: DateTime<Utc>,
-    pub report: MonitorReport,
+    /// The originating monitor report, when the alert came from `monitor`.
+    #[serde(default)]
+    pub report: Option<MonitorReport>,
+    /// Arbitrary extra data (e.g. rotation details).
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
 }
 
 impl NotificationPayload {
@@ -378,8 +546,21 @@ impl NotificationPayload {
         Self {
             summary: report.alert_summary(),
             healthy: report.healthy,
+            severity: report.severity().to_string(),
             generated_at: report.generated_at,
-            report: report.clone(),
+            report: Some(report.clone()),
+            data: None,
+        }
+    }
+
+    pub fn custom(summary: &str, severity: AlertSeverity, data: serde_json::Value) -> Self {
+        Self {
+            summary: summary.to_string(),
+            healthy: severity != AlertSeverity::Critical,
+            severity: severity.to_string(),
+            generated_at: Utc::now(),
+            report: None,
+            data: Some(data),
         }
     }
 }
@@ -541,7 +722,7 @@ mod tests {
             .unwrap();
 
         let report = sample_report();
-        let results = notifier.send(&report).unwrap();
+        let results = notifier.send(&report, true).unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].ok, "{:?}", results[0]);
         assert_eq!(results[0].kind, "file");
@@ -551,7 +732,7 @@ mod tests {
 
         // Disabled channels are skipped
         notifier.set_channel_enabled("log", false).unwrap();
-        assert!(notifier.send(&report).unwrap().is_empty());
+        assert!(notifier.send(&report, true).unwrap().is_empty());
     }
 
     #[test]
@@ -571,7 +752,7 @@ mod tests {
             .unwrap();
 
         let report = sample_report();
-        let results = notifier.send(&report).unwrap();
+        let results = notifier.send(&report, true).unwrap();
         assert!(results[0].ok, "{:?}", results[0]);
 
         let dir = notifier.outbox_dir();
@@ -615,7 +796,117 @@ mod tests {
         let payload = NotificationPayload::from_report(&sample_report());
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("\"healthy\":false"));
+        assert!(json.contains("\"severity\":\"critical\""));
         assert!(json.contains("Daily budget exceeded"));
+    }
+
+    #[test]
+    fn test_severity_filtering() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("config");
+        let notifier = Notifier::new(base.clone());
+        notifier
+            .add_channel(
+                "warn-only",
+                ChannelConfig::File {
+                    path: "warn.log".to_string(),
+                },
+            )
+            .unwrap();
+        // Bump the channel's minimum severity to warning.
+        let mut file: NotifyConfigFile =
+            serde_yaml::from_str(&std::fs::read_to_string(base.join("notify.yaml")).unwrap())
+                .unwrap();
+        file.channels[0].min_severity = "warning".to_string();
+        std::fs::write(
+            base.join("notify.yaml"),
+            serde_yaml::to_string(&file).unwrap(),
+        )
+        .unwrap();
+
+        // The sample report is critical, so it is delivered.
+        let results = notifier.send(&sample_report(), false).unwrap();
+        assert!(results[0].ok);
+        assert!(!results[0].message.contains("skipped"));
+
+        // An info-severity report is skipped.
+        let mut info_report = sample_report();
+        info_report.healthy = true;
+        info_report.warnings.clear();
+        info_report.diagnostics_failed = 0;
+        info_report.budget.alerts.clear();
+        let results = notifier.send(&info_report, false).unwrap();
+        assert!(results[0].ok);
+        assert!(results[0].message.contains("skipped (severity"));
+    }
+
+    #[test]
+    fn test_dedup_window() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("config");
+        let notifier = Notifier::new(base.clone());
+        notifier
+            .add_channel(
+                "log",
+                ChannelConfig::File {
+                    path: "alerts.log".to_string(),
+                },
+            )
+            .unwrap();
+        // Shrink dedup window to 1 minute (default is 15).
+        let mut file: NotifyConfigFile =
+            serde_yaml::from_str(&std::fs::read_to_string(base.join("notify.yaml")).unwrap())
+                .unwrap();
+        file.channels[0].dedup_minutes = 1;
+        std::fs::write(
+            base.join("notify.yaml"),
+            serde_yaml::to_string(&file).unwrap(),
+        )
+        .unwrap();
+
+        let report = sample_report();
+        // First send delivers.
+        let results = notifier.send(&report, false).unwrap();
+        assert!(results[0].message.contains("appended"));
+        // Second identical send within the window is deduped.
+        let results = notifier.send(&report, false).unwrap();
+        assert!(results[0].message.contains("dedup"));
+        // Forcing bypasses the window.
+        let results = notifier.send(&report, true).unwrap();
+        assert!(results[0].message.contains("appended"));
+
+        // State file exists.
+        assert!(base.join("notify_state.json").exists());
+        notifier.clear_dedup_state().unwrap();
+        assert!(!base.join("notify_state.json").exists());
+    }
+
+    #[test]
+    fn test_send_custom_payload() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("config");
+        let notifier = Notifier::new(base.clone());
+        notifier
+            .add_channel(
+                "log",
+                ChannelConfig::File {
+                    path: "events.log".to_string(),
+                },
+            )
+            .unwrap();
+        let results = notifier
+            .send_custom(
+                "API key rotated for agent-a",
+                AlertSeverity::Warning,
+                serde_json::json!({"agent": "agent-a", "key": "api_key"}),
+                true,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ok);
+        let content = std::fs::read_to_string(base.join("events.log")).unwrap();
+        assert!(content.contains("warning"));
+        assert!(content.contains("API key rotated"));
     }
 
     // Ensure the test-catalog type compiles against the real API surface used

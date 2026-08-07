@@ -3,7 +3,7 @@
 > 版本：v0.5
 > 创建日期：2026-06-24
 > 更新日期：2026-08-07
-> 状态：规划草案（Package 已实现；Config/Prompt/Session/Skill/Memory 具备基础实现并完成首波+第二波+第三波增强；Overview 概览与审计/备份/监控横切能力已落地；第四波完成用户权限、提示词社区共享、技能市场、插件系统与告警推送渠道）
+> 状态：规划草案（Package 已实现；Config/Prompt/Session/Skill/Memory 具备基础实现并完成首波+第二波+第三波增强；Overview 概览与审计/备份/监控横切能力已落地；第四波完成用户权限、提示词社区共享、技能市场、插件系统与告警推送渠道；第五波完成提示词效果追踪、向量索引持久化、告警分级/去重与密钥轮换审计接入）
 > 变更：v0.4 移除独立 management 模块，能力归并到所属模块；v0.5 保留 overview（概览）为独立只读模块，审计/备份/监控作为横切能力（非模块）
 
 ## 愿景
@@ -100,7 +100,7 @@ AgentHub 从"AI 编程助手的安装管理器"演进为**全生命周期的 Age
 
 **目标能力**：
 - 从 Agent 会话中提取和保存提示词 ✅（2026-08-06 第三波）
-- 提示词效果追踪（关联会话结果）
+- 提示词效果追踪（✅ 2026-08-07 第五波：`PromptEffects` 聚合会话评分/成功率/成本）
 - 社区共享 ✅（2026-08-07 第四波：`prompts/community/` 快照 + 发布/安装）
 
 **数据模型**：
@@ -210,8 +210,9 @@ triggers:
 - ✅ 导入/导出（JSON，可按 scope 过滤，merge 语义）
 
 **目标能力**：
-- 向量检索
-- 知识图谱（实体关系可视化）
+- 向量检索 ✅（2026-08-06 第三波）
+- 向量索引持久化（✅ 2026-08-07 第五波：`vector_index.json` 缓存 + 增量失效 + `memory reindex`）
+- 知识图谱（实体关系可视化）✅（2026-08-06 第三波构建 + 2026-08-07 第五波 GUI 面板）
 
 **记忆层次**：
 ```
@@ -244,7 +245,7 @@ sessions/   → 检查点、任务进度、临时笔记
 
 - **审计日志**：谁在什么时间对哪个 Agent 做了什么操作（`agenthub audit`，JSONL append-only）✅
 - **备份/恢复**：导出/导入所有配置、记忆、技能、会话与审计（`agenthub backup` / `agenthub restore`）✅（第四波纳入 users/permissions/community/notify 通道）
-- **监控与告警**（第一版 ✅）：`agenthub monitor` / `run_monitor` 聚合诊断结果、verified 未安装 Agent、预算告警与不兼容技能 → 健康状态；**告警推送渠道**（webhook/email-spool/file，✅ 2026-08-07 第四波）：`notify.yaml` 配置通道，`monitor --notify` 推送；SMTP 直发与告警去重/分级仍在规划中
+- **监控与告警**（第一版 ✅）：`agenthub monitor` / `run_monitor` 聚合诊断结果、verified 未安装 Agent、预算告警与不兼容技能 → 健康状态；**告警推送渠道**（webhook/email-spool/file，✅ 2026-08-07 第四波）：`notify.yaml` 配置通道，`monitor --notify` 推送；**告警分级/去重**（✅ 2026-08-07 第五波）：`AlertSeverity` + 通道级 `min_severity` 过滤 + `dedup_minutes` 去重窗口；SMTP 直发仍在规划中
 
 ---
 

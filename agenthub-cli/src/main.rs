@@ -130,6 +130,9 @@ enum Commands {
         /// Push the alert through the configured notification channels
         #[arg(long)]
         notify: bool,
+        /// Bypass per-channel dedup windows when pushing notifications
+        #[arg(long)]
+        notify_force: bool,
     },
     /// Manage plugins (third-party extension entry points)
     #[command(subcommand)]
@@ -176,6 +179,9 @@ enum ConfigCmd {
         agent: String,
         key: String,
         new_value: String,
+        /// Push an alert through the notification channels after rotating
+        #[arg(long)]
+        notify: bool,
     },
     /// Move a legacy inline secret from a config file into the keystore
     Migrate { agent: String, key: String },
@@ -311,6 +317,21 @@ enum PromptArgs {
         #[arg(long)]
         description: Option<String>,
     },
+    /// Show prompt effectiveness statistics (avg rating / success rate / cost)
+    Effects {
+        /// Prompt id; when omitted, all prompts with recorded outcomes
+        id: Option<String>,
+    },
+    /// Record a session outcome against a prompt
+    RecordOutcome {
+        /// Prompt id
+        id: String,
+        /// Session id to derive rating/tokens/cost from
+        #[arg(long)]
+        session: String,
+    },
+    /// Clear recorded outcomes for a prompt
+    ClearEffects { id: String },
     /// Publish a prompt template to the local community directory
     Publish {
         id: String,
@@ -378,6 +399,8 @@ enum MemoryArgs {
     /// Knowledge graph operations
     #[command(subcommand)]
     Graph(GraphCmd),
+    /// Rebuild the persisted vector index from all memories
+    Reindex,
 }
 
 #[derive(Subcommand)]
@@ -517,6 +540,12 @@ enum NotifyArgs {
         /// Subject prefix for email channels
         #[arg(long)]
         subject_prefix: Option<String>,
+        /// Minimum alert severity delivered (info|warning|critical)
+        #[arg(long, default_value = "info")]
+        min_severity: String,
+        /// Deduplicate identical alerts within this many minutes (0 disables)
+        #[arg(long, default_value_t = 15)]
+        dedup_minutes: u64,
     },
     /// Remove a channel
     Remove { id: String },
@@ -529,7 +558,12 @@ enum NotifyArgs {
         /// Restrict to one channel id
         #[arg(long)]
         channel: Option<String>,
+        /// Bypass dedup windows
+        #[arg(long)]
+        force: bool,
     },
+    /// Clear the dedup state
+    ClearState,
 }
 
 #[derive(Subcommand)]
@@ -1269,21 +1303,44 @@ pub fn cmd_config_secret_set(base_dir: &Path, agent: &str, key: &str, value: &st
         }
     }
     match manager.set_secret(agent, key, value) {
-        Ok(()) => format!(
-            "✅ Secret '{}' stored for '{}' (keystore: {})",
-            key,
-            agent,
-            {
-                let store = manager.secret_store();
-                store
-                    .base_dir()
-                    .join("secrets.yaml")
-                    .to_string_lossy()
-                    .into_owned()
-            }
-        ),
+        Ok(()) => {
+            let _ = audit_secret(base_dir, "config.secret.set", agent, key, true);
+            format!(
+                "✅ Secret '{}' stored for '{}' (keystore: {})",
+                key,
+                agent,
+                {
+                    let store = manager.secret_store();
+                    store
+                        .base_dir()
+                        .join("secrets.yaml")
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            )
+        }
         Err(e) => format!("Error: {}", e),
     }
+}
+
+fn audit_secret(
+    base_dir: &Path,
+    action: &str,
+    agent: &str,
+    key: &str,
+    success: bool,
+) -> Result<(), String> {
+    let audit = AuditManager::new(base_dir.join("audit"));
+    audit
+        .record(
+            "cli",
+            action,
+            agent,
+            Some(&format!("secret={}", key)),
+            success,
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 pub fn cmd_config_secret_get(base_dir: &Path, agent: &str, key: &str) -> String {
@@ -1298,7 +1355,10 @@ pub fn cmd_config_secret_get(base_dir: &Path, agent: &str, key: &str) -> String 
 pub fn cmd_config_secret_delete(base_dir: &Path, agent: &str, key: &str) -> String {
     let manager = ConfigManager::new(base_dir.to_path_buf());
     match manager.delete_secret(agent, key) {
-        Ok(true) => format!("✅ Secret '{}' deleted for '{}'", key, agent),
+        Ok(true) => {
+            let _ = audit_secret(base_dir, "config.secret.delete", agent, key, true);
+            format!("✅ Secret '{}' deleted for '{}'", key, agent)
+        }
         Ok(false) => format!("Secret '{}' not found for '{}'", key, agent),
         Err(e) => format!("Error: {}", e),
     }
@@ -1336,15 +1396,45 @@ pub fn cmd_config_secret_rotate(
     agent: &str,
     key: &str,
     new_value: &str,
+    notify: bool,
 ) -> String {
     let manager = ConfigManager::new(base_dir.to_path_buf());
     match manager.rotate_secret(agent, key, new_value) {
-        Ok(result) => format!(
-            "✅ Rotated '{}': {} previous value(s) archived at {}",
-            result.key,
-            result.previous_count,
-            result.rotated_at.format("%Y-%m-%d %H:%M:%S")
-        ),
+        Ok(result) => {
+            let _ = audit_secret(base_dir, "config.secret.rotate", agent, key, true);
+            let mut out = format!(
+                "✅ Rotated '{}': {} previous value(s) archived at {}",
+                result.key,
+                result.previous_count,
+                result.rotated_at.format("%Y-%m-%d %H:%M:%S")
+            );
+            if notify {
+                let notifier = Notifier::new(base_dir.to_path_buf());
+                match notifier.send_custom(
+                    &format!("API key '{}' rotated for agent '{}'", key, agent),
+                    agenthub_core::AlertSeverity::Warning,
+                    serde_json::json!({"agent": agent, "key": key, "rotated_at": result.rotated_at.to_rfc3339()}),
+                    true,
+                ) {
+                    Ok(results) => {
+                        if results.is_empty() {
+                            out.push_str("\n(notify: no channels configured)");
+                        } else {
+                            for r in &results {
+                                out.push_str(&format!(
+                                    "\n(notify {}: {} {})",
+                                    r.kind,
+                                    if r.ok { "✅" } else { "❌" },
+                                    r.message
+                                ));
+                            }
+                        }
+                    }
+                    Err(e) => out.push_str(&format!("\n(notify failed: {})", e)),
+                }
+            }
+            out
+        }
         Err(e) => format!("Error: {}", e),
     }
 }
@@ -1352,11 +1442,101 @@ pub fn cmd_config_secret_rotate(
 pub fn cmd_config_secret_migrate(base_dir: &Path, agent: &str, key: &str) -> String {
     let manager = ConfigManager::new(base_dir.to_path_buf());
     match manager.migrate_secret(agent, key) {
-        Ok(true) => format!(
-            "✅ Migrated inline secret '{}' for '{}' into the keystore",
-            key, agent
-        ),
+        Ok(true) => {
+            let _ = audit_secret(base_dir, "config.secret.migrate", agent, key, true);
+            format!(
+                "✅ Migrated inline secret '{}' for '{}' into the keystore",
+                key, agent
+            )
+        }
         Ok(false) => format!("Nothing to migrate for '{}' (no inline value found)", key),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_prompt_effects(base_dir: &Path, id: Option<&str>) -> String {
+    let manager = PromptManager::new(base_dir.join("prompts"));
+    let render_row = |e: &agenthub_core::PromptEffects| {
+        format!(
+            "{:<24} {:>6} {:>9} {:>10} {:>12} {:>10}",
+            e.prompt_id,
+            e.uses,
+            e.avg_rating
+                .map(|r| format!("{:.1}", r))
+                .unwrap_or_else(|| "-".to_string()),
+            e.success_rate
+                .map(|r| format!("{:.0}%", r * 100.0))
+                .unwrap_or_else(|| "-".to_string()),
+            format!("${:.4}", e.total_cost_usd),
+            e.last_used
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "-".to_string())
+        )
+    };
+
+    let effects: Vec<agenthub_core::PromptEffects> = match id {
+        Some(id) => match manager.get_effects(id) {
+            Ok(e) => vec![e],
+            Err(e) => return format!("Error: {}", e),
+        },
+        None => match manager.list_effects() {
+            Ok(e) => e,
+            Err(e) => return format!("Error: {}", e),
+        },
+    };
+
+    if effects.is_empty() {
+        return "No prompt effectiveness data. Record outcomes with `prompt record-outcome <id> --session <sid>`.".to_string();
+    }
+    let mut out = format!(
+        "{:<24} {:>6} {:>9} {:>10} {:>12} {:>10}\n",
+        "PROMPT", "USES", "AVG RATING", "SUCCESS", "COST", "LAST USED"
+    );
+    out.push_str(&format!("{}\n", "-".repeat(80)));
+    for e in &effects {
+        out.push_str(&render_row(e));
+        out.push('\n');
+    }
+    out
+}
+
+pub fn cmd_prompt_record_outcome(base_dir: &Path, id: &str, session_id: &str) -> String {
+    let prompt_manager = PromptManager::new(base_dir.join("prompts"));
+    let session_manager = SessionManager::new(base_dir.join("sessions"));
+    let session = match session_manager.get_session(session_id) {
+        Ok(s) => s,
+        Err(e) => return format!("Error: {}", e),
+    };
+    match prompt_manager.record_outcome_from_session(id, &session) {
+        Ok(outcome) => format!(
+            "✅ Recorded outcome for '{}' from session {} (rating {:?}, success {:?}, {} tokens, ${:.4})",
+            id,
+            session_id,
+            outcome.rating,
+            outcome.success,
+            outcome.tokens,
+            outcome.cost_usd
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_prompt_clear_effects(base_dir: &Path, id: &str) -> String {
+    let manager = PromptManager::new(base_dir.join("prompts"));
+    match manager.clear_effects(id) {
+        Ok(true) => format!("✅ Cleared recorded outcomes for '{}'", id),
+        Ok(false) => format!("No recorded outcomes for '{}'", id),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_memory_reindex(base_dir: &Path) -> String {
+    let manager = MemoryManager::new(base_dir.join("memory"));
+    match manager.build_vector_index() {
+        Ok(summary) => format!(
+            "✅ Vector index rebuilt: {} entries indexed, {} decayed skipped",
+            summary.indexed, summary.skipped_decayed
+        ),
         Err(e) => format!("Error: {}", e),
     }
 }
@@ -1669,6 +1849,7 @@ pub fn cmd_monitor(
     json: bool,
     watch: Option<u64>,
     notify: bool,
+    notify_force: bool,
 ) -> String {
     let monitor = Monitor::new(base_dir.to_path_buf(), get_platform());
 
@@ -1677,7 +1858,7 @@ pub fn cmd_monitor(
             return String::new();
         }
         let notifier = Notifier::new(base_dir.to_path_buf());
-        match notifier.send(report) {
+        match notifier.send(report, notify_force) {
             Ok(results) => {
                 if results.is_empty() {
                     "(notify: no channels configured)".to_string()
@@ -1710,6 +1891,10 @@ pub fn cmd_monitor(
                         serde_json::from_str(&report.to_json().unwrap_or_default())
                             .unwrap_or_default();
                     if let Some(obj) = v.as_object_mut() {
+                        obj.insert(
+                            "severity".to_string(),
+                            serde_json::json!(report.severity().to_string()),
+                        );
                         obj.insert("notification".to_string(), serde_json::json!(notify_line));
                     }
                     return serde_json::to_string_pretty(&v)
@@ -1720,7 +1905,7 @@ pub fn cmd_monitor(
                 } else {
                     "⚠️ ISSUES FOUND"
                 };
-                let mut out = format!("AgentHub Monitor — {}\n", status);
+                let mut out = format!("AgentHub Monitor — {} [{}]\n", status, report.severity());
                 out.push_str(&format!("{}\n", "=".repeat(50)));
                 out.push_str(&format!("版本:       {}\n", report.agenthub_version));
                 out.push_str(&format!(
@@ -2354,6 +2539,8 @@ pub fn cmd_notify_add(
     target: &str,
     from: Option<&str>,
     subject_prefix: Option<&str>,
+    min_severity: &str,
+    dedup_minutes: u64,
 ) -> String {
     let notifier = Notifier::new(base_dir.to_path_buf());
     let config = match kind {
@@ -2376,8 +2563,20 @@ pub fn cmd_notify_add(
             )
         }
     };
-    match notifier.add_channel(id, config) {
-        Ok(channel) => format!("✅ Channel '{}' added ({:?})", channel.id, kind),
+    if min_severity
+        .parse::<agenthub_core::AlertSeverity>()
+        .is_err()
+    {
+        return format!(
+            "❌ Invalid --min-severity '{}' (expected info|warning|critical)",
+            min_severity
+        );
+    }
+    match notifier.add_channel_with_options(id, config, Some(min_severity), Some(dedup_minutes)) {
+        Ok(channel) => format!(
+            "✅ Channel '{}' added ({:?}, min-severity {}, dedup {}m)",
+            channel.id, kind, channel.min_severity, channel.dedup_minutes
+        ),
         Err(e) => format!("Error: {}", e),
     }
 }
@@ -2403,7 +2602,12 @@ pub fn cmd_notify_set_enabled(base_dir: &Path, id: &str, enabled: bool) -> Strin
     }
 }
 
-pub fn cmd_notify_send(base_dir: &Path, catalog: &Catalog, channel: Option<&str>) -> String {
+pub fn cmd_notify_send(
+    base_dir: &Path,
+    catalog: &Catalog,
+    channel: Option<&str>,
+    force: bool,
+) -> String {
     let monitor = Monitor::new(base_dir.to_path_buf(), get_platform());
     let report = match monitor.run(catalog) {
         Ok(r) => r,
@@ -2411,11 +2615,11 @@ pub fn cmd_notify_send(base_dir: &Path, catalog: &Catalog, channel: Option<&str>
     };
     let notifier = Notifier::new(base_dir.to_path_buf());
     let results = match channel {
-        Some(id) => vec![match notifier.send_to(id, &report) {
+        Some(id) => vec![match notifier.send_to(id, &report, force) {
             Ok(r) => r,
             Err(e) => return format!("Error: {}", e),
         }],
-        None => match notifier.send(&report) {
+        None => match notifier.send(&report, force) {
             Ok(r) => r,
             Err(e) => return format!("Error: {}", e),
         },
@@ -2423,7 +2627,11 @@ pub fn cmd_notify_send(base_dir: &Path, catalog: &Catalog, channel: Option<&str>
     if results.is_empty() {
         return "No enabled channels configured — add one with `agenthub notify add`.".to_string();
     }
-    let mut out = format!("Alert summary: {}\n\n", report.alert_summary());
+    let mut out = format!(
+        "Alert summary: {} [{}]\n\n",
+        report.alert_summary(),
+        report.severity()
+    );
     for r in &results {
         let mark = if r.ok { "✅" } else { "❌" };
         out.push_str(&format!(
@@ -2432,6 +2640,14 @@ pub fn cmd_notify_send(base_dir: &Path, catalog: &Catalog, channel: Option<&str>
         ));
     }
     out
+}
+
+pub fn cmd_notify_clear_state(base_dir: &Path) -> String {
+    let notifier = Notifier::new(base_dir.to_path_buf());
+    match notifier.clear_dedup_state() {
+        Ok(()) => "✅ Dedup state cleared".to_string(),
+        Err(e) => format!("Error: {}", e),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2572,7 +2788,8 @@ fn main() {
                 agent,
                 key,
                 new_value,
-            } => cmd_config_secret_rotate(&data_dir(), &agent, &key, &new_value),
+                notify,
+            } => cmd_config_secret_rotate(&data_dir(), &agent, &key, &new_value, notify),
             ConfigCmd::Migrate { agent, key } => {
                 cmd_config_secret_migrate(&data_dir(), &agent, &key)
             }
@@ -2658,6 +2875,11 @@ fn main() {
                 publisher,
                 force,
             } => cmd_prompt_publish(&data_dir(), &id, &publisher, force),
+            PromptArgs::Effects { id } => cmd_prompt_effects(&data_dir(), id.as_deref()),
+            PromptArgs::RecordOutcome { id, session } => {
+                cmd_prompt_record_outcome(&data_dir(), &id, &session)
+            }
+            PromptArgs::ClearEffects { id } => cmd_prompt_clear_effects(&data_dir(), &id),
             PromptArgs::Community(cmd) => match cmd {
                 CommunityCmd::List => cmd_community_list(&data_dir()),
                 CommunityCmd::Show { id } => cmd_community_show(&data_dir(), &id),
@@ -2686,6 +2908,7 @@ fn main() {
                 }
                 GraphCmd::Export { output } => cmd_memory_graph_export(&data_dir(), output),
             },
+            MemoryArgs::Reindex => cmd_memory_reindex(&data_dir()),
         },
         Commands::Session(cmd) => match cmd {
             SessionArgs::Budget { cmd } => match cmd {
@@ -2745,6 +2968,8 @@ fn main() {
                 target,
                 from,
                 subject_prefix,
+                min_severity,
+                dedup_minutes,
             } => cmd_notify_add(
                 &data_dir(),
                 &id,
@@ -2752,21 +2977,25 @@ fn main() {
                 &target,
                 from.as_deref(),
                 subject_prefix.as_deref(),
+                &min_severity,
+                dedup_minutes,
             ),
             NotifyArgs::Remove { id } => cmd_notify_remove(&data_dir(), &id),
             NotifyArgs::Enable { id } => cmd_notify_set_enabled(&data_dir(), &id, true),
             NotifyArgs::Disable { id } => cmd_notify_set_enabled(&data_dir(), &id, false),
-            NotifyArgs::Send { channel } => match load_catalog() {
-                Ok(catalog) => cmd_notify_send(&data_dir(), &catalog, channel.as_deref()),
+            NotifyArgs::Send { channel, force } => match load_catalog() {
+                Ok(catalog) => cmd_notify_send(&data_dir(), &catalog, channel.as_deref(), force),
                 Err(e) => format!("Error: {}", e),
             },
+            NotifyArgs::ClearState => cmd_notify_clear_state(&data_dir()),
         },
         Commands::Monitor {
             json,
             watch,
             notify,
+            notify_force,
         } => match load_catalog() {
-            Ok(catalog) => cmd_monitor(&data_dir(), &catalog, json, watch, notify),
+            Ok(catalog) => cmd_monitor(&data_dir(), &catalog, json, watch, notify, notify_force),
             Err(e) => format!("Error: {}", e),
         },
     };
@@ -3239,7 +3468,7 @@ mod tests {
     fn test_cmd_monitor_runs() {
         let temp = TempDir::new().unwrap();
         let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
-        let output = cmd_monitor(temp.path(), &catalog, false, None, false);
+        let output = cmd_monitor(temp.path(), &catalog, false, None, false, false);
         assert!(output.contains("AgentHub Monitor"));
         assert!(output.contains("诊断:"));
         assert!(output.contains("预算:"));
@@ -3250,12 +3479,21 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
         // With no channels, notify is a no-op that reports it.
-        let output = cmd_monitor(temp.path(), &catalog, false, None, true);
+        let output = cmd_monitor(temp.path(), &catalog, false, None, true, false);
         assert!(output.contains("no channels configured"));
 
         // With a file channel, the alert is delivered.
-        cmd_notify_add(temp.path(), "log", "file", "alerts.log", None, None);
-        let output = cmd_monitor(temp.path(), &catalog, false, None, true);
+        cmd_notify_add(
+            temp.path(),
+            "log",
+            "file",
+            "alerts.log",
+            None,
+            None,
+            "info",
+            15,
+        );
+        let output = cmd_monitor(temp.path(), &catalog, false, None, true, false);
         assert!(output.contains("notify:"));
         assert!(temp.path().join("alerts.log").exists());
     }
@@ -3266,7 +3504,7 @@ mod tests {
     fn test_cmd_monitor_json() {
         let temp = TempDir::new().unwrap();
         let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
-        let output = cmd_monitor(temp.path(), &catalog, true, None, false);
+        let output = cmd_monitor(temp.path(), &catalog, true, None, false, false);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert!(parsed.get("healthy").is_some());
         assert!(parsed.get("budget").is_some());
@@ -3287,7 +3525,7 @@ mod tests {
         let out = cmd_config_secret_get(base, "agent-a", "api_key");
         assert_eq!(out, "sk-secret");
 
-        let out = cmd_config_secret_rotate(base, "agent-a", "api_key", "sk-new");
+        let out = cmd_config_secret_rotate(base, "agent-a", "api_key", "sk-new", false);
         assert!(out.contains("1 previous value"));
         assert_eq!(cmd_config_secret_get(base, "agent-a", "api_key"), "sk-new");
 
@@ -3560,22 +3798,36 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let base = temp.path();
 
-        let out = cmd_notify_add(base, "log", "file", "alerts.log", None, None);
+        let out = cmd_notify_add(base, "log", "file", "alerts.log", None, None, "info", 15);
         assert!(out.contains("✅"));
-        let out = cmd_notify_add(base, "ops", "webhook", "https://example.com/h", None, None);
+        let out = cmd_notify_add(
+            base,
+            "ops",
+            "webhook",
+            "https://example.com/h",
+            None,
+            None,
+            "info",
+            15,
+        );
         assert!(out.contains("✅"));
-        assert!(cmd_notify_add(base, "bad", "webhook", "not-a-url", None, None).contains("Error:"));
+        assert!(
+            cmd_notify_add(base, "bad", "webhook", "not-a-url", None, None, "info", 15)
+                .contains("Error:")
+        );
         assert!(cmd_notify_add(
             base,
             "team",
             "email",
             "t@x.com",
             Some("a@x.com"),
-            Some("[AH] ")
+            Some("[AH] "),
+            "info",
+            15
         )
         .contains("✅"));
         assert!(
-            cmd_notify_add(base, "nope", "carrier-pigeon", "x", None, None)
+            cmd_notify_add(base, "nope", "carrier-pigeon", "x", None, None, "info", 15)
                 .contains("Invalid channel kind")
         );
 
@@ -3592,13 +3844,138 @@ mod tests {
         cmd_notify_set_enabled(base, "ops", false);
         cmd_notify_set_enabled(base, "team", false);
         let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
-        let out = cmd_notify_send(base, &catalog, None);
+        let out = cmd_notify_send(base, &catalog, None, false);
         assert!(out.contains("Alert summary"));
         assert!(out.contains("✅ [file] log"));
         assert!(base.join("alerts.log").exists());
 
         assert!(cmd_notify_remove(base, "log").contains("✅"));
         assert!(cmd_notify_remove(base, "log").contains("not found"));
+    }
+
+    // ---- Wave 5 commands ----
+
+    #[test]
+    fn test_cmd_prompt_effects_flow() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let prompts = agenthub_core::PromptManager::new(base.join("prompts"));
+        prompts
+            .create_prompt("review", "Review", "d", "review {{code}}")
+            .unwrap();
+
+        // No data yet
+        assert!(cmd_prompt_effects(base, None).contains("No prompt effectiveness data"));
+
+        // Seed a session with usage + rating
+        let sessions = agenthub_core::SessionManager::new(base.join("sessions"));
+        let session = sessions.create_session("S1", "codex").unwrap();
+        sessions.set_model(&session.id, "gpt-4o-mini").unwrap();
+        sessions
+            .record_usage(
+                &session.id,
+                50_000,
+                25_000,
+                &agenthub_core::PricingTable::builtin(),
+            )
+            .unwrap();
+        sessions
+            .update_status(&session.id, agenthub_core::SessionStatus::Completed)
+            .unwrap();
+        let mut loaded = sessions.get_session(&session.id).unwrap();
+        loaded.rating = Some(5);
+        sessions.save_session(&loaded).unwrap();
+
+        let out = cmd_prompt_record_outcome(base, "review", &session.id);
+        assert!(out.contains("✅"));
+        assert!(out.contains("rating Some(5)"));
+
+        let out = cmd_prompt_effects(base, None);
+        assert!(out.contains("review"));
+        assert!(out.contains("AVG RATING"));
+        assert!(out.contains("5.0"));
+        assert!(out.contains("100%"));
+
+        // Unknown session errors
+        assert!(cmd_prompt_record_outcome(base, "review", "nope").starts_with("Error:"));
+
+        // Clear
+        assert!(cmd_prompt_clear_effects(base, "review").contains("✅"));
+        assert!(cmd_prompt_effects(base, Some("review")).contains("USES"));
+        assert!(cmd_prompt_effects(base, Some("nope")).starts_with("Error:"));
+    }
+
+    #[test]
+    fn test_cmd_memory_reindex() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let memories = agenthub_core::MemoryManager::new(base.join("memory"));
+        memories
+            .create_entry(
+                agenthub_core::MemoryScope::Global,
+                None,
+                "Note",
+                "content about postgres",
+                agenthub_core::MemoryType::Free,
+            )
+            .unwrap();
+        let out = cmd_memory_reindex(base);
+        assert!(out.contains("✅ Vector index rebuilt"));
+        assert!(out.contains("1 entries indexed"));
+        assert!(base.join("memory").join("vector_index.json").exists());
+    }
+
+    #[test]
+    fn test_cmd_rotate_audits_and_notifies() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        cmd_config_secret_set(base, "agent-a", "api_key", "sk-old");
+
+        // Add a file channel so --notify delivers
+        cmd_notify_add(base, "log", "file", "events.log", None, None, "info", 15);
+
+        let out = cmd_config_secret_rotate(base, "agent-a", "api_key", "sk-new", true);
+        assert!(out.contains("✅ Rotated"));
+        assert!(out.contains("notify"));
+        assert!(base.join("events.log").exists());
+
+        // Audit events recorded for the secret operations
+        let audit = agenthub_core::AuditManager::new(base.join("audit"));
+        let events = audit.load_all().unwrap();
+        assert!(events.iter().any(|e| e.action == "config.secret.set"));
+        assert!(events.iter().any(|e| e.action == "config.secret.rotate"));
+    }
+
+    #[test]
+    fn test_cmd_notify_severity_and_dedup() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        // Channel that only accepts warning+ alerts
+        let out = cmd_notify_add(base, "warn", "file", "warn.log", None, None, "warning", 5);
+        assert!(out.contains("min-severity warning"));
+
+        // Invalid severity rejected
+        assert!(
+            cmd_notify_add(base, "bad", "file", "x.log", None, None, "loud", 5)
+                .contains("Invalid --min-severity")
+        );
+
+        // The monitor report is critical (many verified agents missing), so it passes.
+        let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
+        let out = cmd_notify_send(base, &catalog, None, false);
+        assert!(out.contains("Alert summary"));
+        assert!(out.contains("✅ [file] warn"));
+
+        // A second send within the dedup window is skipped.
+        let out = cmd_notify_send(base, &catalog, None, false);
+        assert!(out.contains("dedup"));
+
+        // Forcing bypasses the window.
+        let out = cmd_notify_send(base, &catalog, None, true);
+        assert!(out.contains("appended"));
+
+        assert!(cmd_notify_clear_state(base).contains("✅"));
     }
 
     const TEST_AGENTS_JSON: &str = r#"{

@@ -260,7 +260,9 @@ agenthub <command> [options]
 | `skill check-compat` | 技能版本兼容检查 | `agenthub skill check-compat *` |
 | `skill market` | 技能市场（搜索/评分/安装统计） | `agenthub skill market search rust` |
 | `plugin` | 插件注册/钩子执行 | `agenthub plugin run on_monitor` |
-| `notify` | 告警推送通道（webhook/email/file） | `agenthub notify add ops webhook https://…` |
+| `notify` | 告警推送通道（webhook/email/file，含分级/去重） | `agenthub notify add ops webhook https://… --min-severity warning` |
+| `prompt effects` | 提示词效果追踪（评分/成功率/成本） | `agenthub prompt effects` |
+| `memory reindex` | 重建向量索引 | `agenthub memory reindex` |
 
 ### 通用选项
 

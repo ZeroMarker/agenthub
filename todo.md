@@ -23,6 +23,39 @@
 - [x] 验证：vue-tsc 0 错误、vite build 通过、vitest 11/11 全过
 - [x] 提交 `f7df6d9` 已推送 origin/main；未发版（v1.3.0 候选）
 
+## 第五波（2026-08-07）— ✅ 完成（效果追踪 + 索引持久化 + 告警分级/去重 + 审计接入）
+
+### ✅ Prompt 效果追踪（关联会话结果）
+- [x] `PromptOutcome`（session_id/rating/success/tokens/cost）+ `PromptEffects`（uses/avg_rating/success_rate/total_cost/last_used），存储 `prompts/effects/<id>.yaml`
+- [x] `record_outcome` / `record_outcome_from_session`（从会话自动提取评分/tokens/成本）/ `get_effects` / `list_effects` / `clear_effects`
+- [x] CLI `prompt effects [id]` / `prompt record-outcome <id> --session <sid>` / `prompt clear-effects <id>`；Tauri `get/list_prompt_effects`、`record_prompt_outcome`、`clear_prompt_effects`
+- [x] GUI Prompt 管理器新增 Effects 页签（记录会话结果 + 效果排行表）
+
+### ✅ Memory 向量索引持久化
+- [x] `VectorIndex`（`memory/vector_index.json`）：按 path 缓存加权嵌入（title×3/tags×2/content×1），`indexed_at` 与 `entry.updated_at` 比较判定失效；搜索时增量重算并回写
+- [x] `build_vector_index`（全量重建，跳过 decayed）+ `delete_entry` 同步清除缓存
+- [x] CLI `memory reindex`；Tauri `build_vector_index`；GUI 新增知识图谱面板（实体列表 + 邻居关系，交互式）
+
+### ✅ 横切：告警分级 + 去重
+- [x] `AlertSeverity`（info/warning/critical）：`MonitorReport::severity()` 派生（诊断失败/预算超限/不兼容技能 → critical）
+- [x] 通道级 `min_severity` 过滤 + `dedup_minutes` 去重窗口（`notify_state.json` 持久化），`--force` 绕过
+- [x] `send_custom`（非监控告警，如密钥轮换通知）；CLI `notify add --min-severity --dedup-minutes`、`notify send --force`、`notify clear-state`；`monitor --notify-force`
+
+### ✅ Config：API Key 轮换通知/审计接入
+- [x] `config secret set|rotate|migrate|delete` 自动记录审计事件（`config.secret.*`）；`config rotate --notify` 通过通道推送轮换告警
+
+### 📊 验证结果
+- Rust：246 测试全过（188 core + 9 集成 + 44 cli + 5 tauri），clippy 0 警告，fmt 干净
+- 前端：11 测试全过，vue-tsc 0 错误，vite build 通过
+- 变更：prompt 效果追踪 + memory 向量索引 + notify 分级去重 + 审计接入 + GUI（Prompt Effects 页签、Memory 图谱面板）
+
+### 本波未覆盖（留待后续）
+- Config：OS keyring 后端、基于权限的 CLI 鉴权强制执行
+- Prompt：社区推送渠道（当前本地目录同步）
+- Skill：在线技能市场（需网络）、插件市场
+- 横切：SMTP 直发（当前 email 通道落盘 .eml 待 MTA 投递）
+- Overview：仪表盘交互化（当前静态导出）
+
 ## 第四波（2026-08-07）— ✅ 完成（治理 + 共享 + 扩展 + 告警）
 
 ### ✅ Config 用户与权限（归并自原 management）

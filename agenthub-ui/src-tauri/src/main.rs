@@ -2632,6 +2632,8 @@ async fn add_notify_channel(
     target: String,
     from: Option<String>,
     subject_prefix: Option<String>,
+    min_severity: Option<String>,
+    dedup_minutes: Option<u64>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<agenthub_core::NotifyChannel, String> {
     let config = match kind.as_str() {
@@ -2648,7 +2650,7 @@ async fn add_notify_channel(
         other => return Err(format!("Invalid channel kind '{}'", other)),
     };
     notifier(&state)
-        .add_channel(&id, config)
+        .add_channel_with_options(&id, config, min_severity.as_deref(), dedup_minutes)
         .map_err(|e| e.to_string())
 }
 
@@ -2675,11 +2677,74 @@ async fn set_notify_channel_enabled(
 
 #[tauri::command]
 async fn send_notification(
+    force: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<agenthub_core::ChannelResult>, String> {
     let catalog = state.catalog.read().await;
     let report = state.monitor.run(&catalog).map_err(|e| e.to_string())?;
-    notifier(&state).send(&report).map_err(|e| e.to_string())
+    notifier(&state)
+        .send(&report, force.unwrap_or(false))
+        .map_err(|e| e.to_string())
+}
+
+// ---- wave 5: prompt effects, memory reindex ----
+
+#[tauri::command]
+async fn get_prompt_effects(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::PromptEffects, String> {
+    state
+        .prompt_manager
+        .get_effects(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_prompt_effects(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::PromptEffects>, String> {
+    state
+        .prompt_manager
+        .list_effects()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn record_prompt_outcome(
+    prompt_id: String,
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::PromptOutcome, String> {
+    let session = state
+        .session_manager
+        .get_session(&session_id)
+        .map_err(|e| e.to_string())?;
+    state
+        .prompt_manager
+        .record_outcome_from_session(&prompt_id, &session)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn clear_prompt_effects(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    state
+        .prompt_manager
+        .clear_effects(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn build_vector_index(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::VectorIndexSummary, String> {
+    state
+        .memory_manager
+        .build_vector_index()
+        .map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -2843,7 +2908,12 @@ fn main() {
             add_notify_channel,
             remove_notify_channel,
             set_notify_channel_enabled,
-            send_notification
+            send_notification,
+            get_prompt_effects,
+            list_prompt_effects,
+            record_prompt_outcome,
+            clear_prompt_effects,
+            build_vector_index
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

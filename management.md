@@ -21,9 +21,9 @@
 | Skill | ✅ 基础实现 | `SKILL.md` 解析、安装、启停、依赖检查、工作流、技能市场、插件系统 |
 | Memory | ✅ 基础实现 | Markdown 记忆、scope/type 分类、标签、BM25/向量/混合检索、记忆衰减、知识图谱 |
 | Overview | ✅ 完成 | 只读聚合各模块状态/成本/审计 → 仪表盘（`agenthub status`、GUI 概览视图、HTML 仪表盘、趋势） |
-| 横切能力 | ✅ 完成 | 审计日志（JSONL）、备份/恢复、监控与告警（含 webhook/email-spool/file 推送渠道） |
+| 横切能力 | ✅ 完成 | 审计日志（JSONL）、备份/恢复、监控与告警（webhook/email-spool/file 推送 + 分级/去重） |
 
-仍属后续规划：OS keyring 后端、在线技能市场、SMTP 直发、告警去重/分级、项目级技能作用域。
+仍属后续规划：OS keyring 后端、在线技能市场、SMTP 直发、项目级技能作用域。
 
 ---
 

@@ -1,8 +1,9 @@
 use agenthub_core::{
-    Agent, AuditManager, AuditQuery, BackupManager, Catalog, ConfigManager, ConfigValue,
-    DiagnosticManager, ImportSummary, Installer, MemoryManager, MemoryScope, Monitor,
-    OverviewReport, Platform, PromptManager, RealCommandRunner, SessionManager, SkillManager,
-    WorkflowManager, WorkflowStep,
+    Agent, AuditManager, AuditQuery, BackupManager, Catalog, ChannelConfig, CommunityManager,
+    ConfigManager, ConfigValue, DiagnosticManager, ImportSummary, Installer, MarketplaceManager,
+    MemoryManager, MemoryScope, Monitor, Notifier, OverviewReport, Platform, PluginManager,
+    PromptManager, RealCommandRunner, SessionManager, SkillManager, UserManager, WorkflowManager,
+    WorkflowStep,
 };
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
@@ -126,7 +127,16 @@ enum Commands {
         /// Re-run every N seconds until interrupted (for cron/systemd loops)
         #[arg(long)]
         watch: Option<u64>,
+        /// Push the alert through the configured notification channels
+        #[arg(long)]
+        notify: bool,
     },
+    /// Manage plugins (third-party extension entry points)
+    #[command(subcommand)]
+    Plugin(PluginArgs),
+    /// Manage alert notification channels (webhook / email / file)
+    #[command(subcommand)]
+    Notify(NotifyArgs),
 }
 
 #[derive(Subcommand)]
@@ -169,6 +179,79 @@ enum ConfigCmd {
     },
     /// Move a legacy inline secret from a config file into the keystore
     Migrate { agent: String, key: String },
+    /// Manage workspace users
+    #[command(subcommand)]
+    User(UserCmd),
+    /// Manage user permissions
+    #[command(subcommand)]
+    Perm(PermCmd),
+}
+
+#[derive(Subcommand)]
+enum UserCmd {
+    /// List users
+    List,
+    /// Show a user's details and permissions
+    Show { id: String },
+    /// Create a user
+    Create {
+        id: String,
+        name: String,
+        #[arg(long)]
+        email: Option<String>,
+        /// Comma-separated roles (admin, operator, viewer)
+        #[arg(long, default_value = "viewer")]
+        roles: String,
+    },
+    /// Delete a user (and their permissions)
+    Delete { id: String },
+    /// Add/remove roles
+    #[command(subcommand)]
+    Role(RoleCmd),
+}
+
+#[derive(Subcommand)]
+enum RoleCmd {
+    /// Add a role to a user
+    Add { id: String, role: String },
+    /// Remove a role from a user
+    Remove { id: String, role: String },
+}
+
+#[derive(Subcommand)]
+enum PermCmd {
+    /// Grant a permission (action read|write|admin, optional --module/--agent)
+    Grant {
+        user: String,
+        action: String,
+        #[arg(long)]
+        module: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Revoke a permission
+    Revoke {
+        user: String,
+        action: String,
+        #[arg(long)]
+        module: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// List permissions (optionally for one user)
+    List {
+        #[arg(long)]
+        user: Option<String>,
+    },
+    /// Check whether a user can perform an action
+    Check {
+        user: String,
+        action: String,
+        #[arg(long)]
+        module: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -228,6 +311,39 @@ enum PromptArgs {
         #[arg(long)]
         description: Option<String>,
     },
+    /// Publish a prompt template to the local community directory
+    Publish {
+        id: String,
+        /// Publisher identity recorded in the snapshot
+        #[arg(long, default_value = "local")]
+        publisher: String,
+        /// Overwrite an existing community snapshot
+        #[arg(long)]
+        force: bool,
+    },
+    /// Manage the prompt community directory
+    #[command(subcommand)]
+    Community(CommunityCmd),
+}
+
+#[derive(Subcommand)]
+enum CommunityCmd {
+    /// List community prompts
+    List,
+    /// Show a community prompt
+    Show { id: String },
+    /// Install a community prompt as a local template
+    Install {
+        id: String,
+        /// Install under a different local id
+        #[arg(long)]
+        new_id: Option<String>,
+        /// Overwrite an existing local template
+        #[arg(long)]
+        force: bool,
+    },
+    /// Delete a community prompt
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]
@@ -328,6 +444,92 @@ enum SkillArgs {
     /// Orchestrate skills into reusable workflows
     #[command(subcommand)]
     Workflow(WorkflowCmd),
+    /// Local skill marketplace (search, rate, install stats)
+    #[command(subcommand)]
+    Market(MarketCmd),
+}
+
+#[derive(Subcommand)]
+enum MarketCmd {
+    /// Re-scan the packages directory and rebuild the index
+    Refresh,
+    /// Search marketplace packages by name/description/tags
+    Search { query: String },
+    /// Show a marketplace package
+    Info { name: String },
+    /// Install a marketplace package as a skill
+    Install { name: String },
+    /// Rate a marketplace package (1-5)
+    Rate {
+        name: String,
+        rating: u8,
+        /// Rater identity
+        #[arg(long)]
+        rater: Option<String>,
+    },
+    /// Aggregated marketplace statistics
+    Stats,
+    /// Add a skill directory as a marketplace package
+    AddPackage {
+        name: String,
+        /// Path to the directory containing SKILL.md
+        dir: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginArgs {
+    /// List registered plugins
+    List,
+    /// Show a plugin's manifest and hooks
+    Show { name: String },
+    /// Register a plugin by copying its directory
+    Register {
+        name: String,
+        /// Path to the directory containing plugin.yaml
+        dir: PathBuf,
+    },
+    /// Unregister a plugin
+    Unregister { name: String },
+    /// Enable a plugin
+    Enable { name: String },
+    /// Disable a plugin
+    Disable { name: String },
+    /// Run all hooks registered for an event (on_install, on_uninstall,
+    /// on_session_end, on_monitor, on_backup)
+    Run { event: String },
+}
+
+#[derive(Subcommand)]
+enum NotifyArgs {
+    /// List notification channels
+    List,
+    /// Add a channel: webhook <url> | email <to> | file <path>
+    Add {
+        id: String,
+        /// Channel kind: webhook | email | file
+        kind: String,
+        /// Target: webhook URL, email recipient, or file path
+        target: String,
+        /// Sender address for email channels
+        #[arg(long)]
+        from: Option<String>,
+        /// Subject prefix for email channels
+        #[arg(long)]
+        subject_prefix: Option<String>,
+    },
+    /// Remove a channel
+    Remove { id: String },
+    /// Enable a channel
+    Enable { id: String },
+    /// Disable a channel
+    Disable { id: String },
+    /// Send the current monitor alert through the channels
+    Send {
+        /// Restrict to one channel id
+        #[arg(long)]
+        channel: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1461,17 +1663,57 @@ pub fn cmd_workflow_run(base_dir: &Path, id: &str) -> String {
     }
 }
 
-pub fn cmd_monitor(base_dir: &Path, catalog: &Catalog, json: bool, watch: Option<u64>) -> String {
+pub fn cmd_monitor(
+    base_dir: &Path,
+    catalog: &Catalog,
+    json: bool,
+    watch: Option<u64>,
+    notify: bool,
+) -> String {
     let monitor = Monitor::new(base_dir.to_path_buf(), get_platform());
+
+    let push_alerts = |report: &agenthub_core::MonitorReport| -> String {
+        if !notify {
+            return String::new();
+        }
+        let notifier = Notifier::new(base_dir.to_path_buf());
+        match notifier.send(report) {
+            Ok(results) => {
+                if results.is_empty() {
+                    "(notify: no channels configured)".to_string()
+                } else {
+                    let parts: Vec<String> = results
+                        .iter()
+                        .map(|r| {
+                            format!(
+                                "{} {}:{}",
+                                if r.ok { "✅" } else { "❌" },
+                                r.channel,
+                                r.message
+                            )
+                        })
+                        .collect();
+                    format!("(notify: {})", parts.join(", "))
+                }
+            }
+            Err(e) => format!("(notify failed: {})", e),
+        }
+    };
 
     let run_once = |json: bool| -> String {
         match monitor.run(catalog) {
             Ok(report) => {
+                let notify_line = push_alerts(&report);
                 if json {
-                    return match report.to_json() {
-                        Ok(j) => j,
-                        Err(e) => format!("❌ Monitor failed: {}", e),
-                    };
+                    // JSON consumers attach the notification results separately.
+                    let mut v: serde_json::Value =
+                        serde_json::from_str(&report.to_json().unwrap_or_default())
+                            .unwrap_or_default();
+                    if let Some(obj) = v.as_object_mut() {
+                        obj.insert("notification".to_string(), serde_json::json!(notify_line));
+                    }
+                    return serde_json::to_string_pretty(&v)
+                        .unwrap_or_else(|e| format!("❌ {}", e));
                 }
                 let status = if report.healthy {
                     "✅ HEALTHY"
@@ -1511,6 +1753,9 @@ pub fn cmd_monitor(base_dir: &Path, catalog: &Catalog, json: bool, watch: Option
                 for warning in &report.warnings {
                     out.push_str(&format!("⚠️ {}\n", warning));
                 }
+                if !notify_line.is_empty() {
+                    out.push_str(&format!("{}\n", notify_line));
+                }
                 out
             }
             Err(e) => format!("❌ Monitor failed: {}", e),
@@ -1527,10 +1772,16 @@ pub fn cmd_monitor(base_dir: &Path, catalog: &Catalog, json: bool, watch: Option
             loop {
                 match monitor.run(catalog) {
                     Ok(report) => {
+                        let notify_line = push_alerts(&report);
                         out.push_str(&format!(
-                            "[{}] {}\n",
+                            "[{}] {}{}\n",
                             Utc::now().format("%H:%M:%S"),
-                            report.alert_summary()
+                            report.alert_summary(),
+                            if notify_line.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" {}", notify_line)
+                            }
                         ));
                     }
                     Err(e) => {
@@ -1542,6 +1793,645 @@ pub fn cmd_monitor(base_dir: &Path, catalog: &Catalog, json: bool, watch: Option
         }
         _ => run_once(json),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Wave 4: users & permissions, prompt community, skill marketplace, plugins,
+// notification channels
+// ---------------------------------------------------------------------------
+
+pub fn cmd_user_list(base_dir: &Path) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    match manager.list_users() {
+        Ok(users) => {
+            let mut out = format!(
+                "{:<16} {:<24} {:<28} {:<8}\n",
+                "ID", "NAME", "EMAIL", "ROLES"
+            );
+            out.push_str(&format!("{}\n", "-".repeat(80)));
+            for u in &users {
+                out.push_str(&format!(
+                    "{:<16} {:<24} {:<28} {:<8}\n",
+                    u.id,
+                    u.name,
+                    u.email.as_deref().unwrap_or("-"),
+                    u.roles.join(",")
+                ));
+            }
+            out.push_str(&format!("\n{} user(s)", users.len()));
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_user_show(base_dir: &Path, id: &str) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    match manager.get_user(id) {
+        Ok(user) => {
+            let mut out = format!(
+                "User:  {} ({})\nEmail: {}\nRoles: {}\n",
+                user.name,
+                user.id,
+                user.email.as_deref().unwrap_or("-"),
+                user.roles.join(", ")
+            );
+            let perms = manager.list_permissions(Some(id)).unwrap_or_default();
+            out.push_str(&format!("\nPermissions ({}):\n", perms.len()));
+            if perms.is_empty() {
+                out.push_str("  (none)\n");
+            }
+            for p in &perms {
+                out.push_str(&format!(
+                    "  {} : {}{}\n",
+                    p.action,
+                    p.module.as_deref().unwrap_or("*"),
+                    p.agent
+                        .as_deref()
+                        .map(|a| format!("@{}", a))
+                        .unwrap_or_default()
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_user_create(
+    base_dir: &Path,
+    id: &str,
+    name: &str,
+    email: Option<&str>,
+    roles: &str,
+) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    let roles_vec: Vec<String> = roles
+        .split(',')
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .collect();
+    match manager.create_user(id, name, email, roles_vec) {
+        Ok(user) => format!(
+            "✅ User '{}' created (roles: {})",
+            user.id,
+            user.roles.join(", ")
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_user_delete(base_dir: &Path, id: &str) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    if id == "admin" {
+        return "Refusing to delete the built-in 'admin' user.".to_string();
+    }
+    match manager.delete_user(id) {
+        Ok(true) => format!("✅ User '{}' deleted (permissions removed)", id),
+        Ok(false) => format!("User '{}' not found", id),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_user_role_add(base_dir: &Path, id: &str, role: &str) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    match manager.add_role(id, role) {
+        Ok(user) => format!(
+            "✅ Role '{}' added to '{}' (now: {})",
+            role,
+            user.id,
+            user.roles.join(", ")
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_user_role_remove(base_dir: &Path, id: &str, role: &str) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    match manager.remove_role(id, role) {
+        Ok(user) => format!(
+            "✅ Role '{}' removed from '{}' (now: {})",
+            role,
+            user.id,
+            user.roles.join(", ")
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_perm_grant(
+    base_dir: &Path,
+    user: &str,
+    action: &str,
+    module: Option<&str>,
+    agent: Option<&str>,
+) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    match manager.grant_permission(user, action, module, agent, None) {
+        Ok(p) => format!(
+            "✅ Granted {}:{}{} to '{}'",
+            p.action,
+            p.module.as_deref().unwrap_or("*"),
+            p.agent
+                .as_deref()
+                .map(|a| format!("@{}", a))
+                .unwrap_or_default(),
+            p.user_id
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_perm_revoke(
+    base_dir: &Path,
+    user: &str,
+    action: &str,
+    module: Option<&str>,
+    agent: Option<&str>,
+) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    match manager.revoke_permission(user, action, module, agent) {
+        Ok(true) => format!("✅ Permission revoked from '{}'", user),
+        Ok(false) => format!("No matching permission to revoke for '{}'", user),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_perm_list(base_dir: &Path, user: Option<&str>) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    match manager.list_permissions(user) {
+        Ok(perms) => {
+            if perms.is_empty() {
+                return "No permissions granted.".to_string();
+            }
+            let mut out = format!(
+                "{:<16} {:<8} {:<14} {:<14}\n",
+                "USER", "ACTION", "MODULE", "AGENT"
+            );
+            out.push_str(&format!("{}\n", "-".repeat(60)));
+            for p in &perms {
+                out.push_str(&format!(
+                    "{:<16} {:<8} {:<14} {:<14}\n",
+                    p.user_id,
+                    p.action,
+                    p.module.as_deref().unwrap_or("*"),
+                    p.agent.as_deref().unwrap_or("*")
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_perm_check(
+    base_dir: &Path,
+    user: &str,
+    action: &str,
+    module: Option<&str>,
+    agent: Option<&str>,
+) -> String {
+    let manager = UserManager::new(base_dir.to_path_buf());
+    match manager.check_permission(user, action, module, agent) {
+        Ok(true) => format!(
+            "✅ '{}' may {} on {}{}",
+            user,
+            action,
+            module.unwrap_or("*"),
+            agent.map(|a| format!("@{}", a)).unwrap_or_default()
+        ),
+        Ok(false) => format!(
+            "❌ '{}' may NOT {} on {}{}",
+            user,
+            action,
+            module.unwrap_or("*"),
+            agent.map(|a| format!("@{}", a)).unwrap_or_default()
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_prompt_publish(base_dir: &Path, id: &str, publisher: &str, force: bool) -> String {
+    let prompt_manager = PromptManager::new(base_dir.join("prompts"));
+    let community = CommunityManager::new(base_dir.join("prompts"));
+    match community.publish_by_id(&prompt_manager, id, publisher, force) {
+        Ok(p) => format!(
+            "✅ Published '{}' v{} to the community (publisher: {})",
+            p.id, p.version, p.publisher
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_community_list(base_dir: &Path) -> String {
+    let community = CommunityManager::new(base_dir.join("prompts"));
+    match community.list() {
+        Ok(prompts) => {
+            if prompts.is_empty() {
+                return "No community prompts.".to_string();
+            }
+            let mut out = format!(
+                "{:<24} {:<30} {:<6} {:<12} {}\n",
+                "ID", "NAME", "VER", "PUBLISHED", "PUBLISHER"
+            );
+            out.push_str(&format!("{}\n", "-".repeat(90)));
+            for p in &prompts {
+                out.push_str(&format!(
+                    "{:<24} {:<30} {:<6} {:<12} {}\n",
+                    p.id,
+                    p.name,
+                    p.version,
+                    p.published_at.format("%Y-%m-%d"),
+                    p.publisher
+                ));
+            }
+            out.push_str(&format!("\n{} prompt(s)", prompts.len()));
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_community_show(base_dir: &Path, id: &str) -> String {
+    let community = CommunityManager::new(base_dir.join("prompts"));
+    match community.get(id) {
+        Ok(p) => serde_json::to_string_pretty(&p).unwrap_or_else(|e| format!("Error: {}", e)),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_community_install(
+    base_dir: &Path,
+    id: &str,
+    new_id: Option<&str>,
+    force: bool,
+) -> String {
+    let prompt_manager = PromptManager::new(base_dir.join("prompts"));
+    let community = CommunityManager::new(base_dir.join("prompts"));
+    match community.install(&prompt_manager, id, new_id, force) {
+        Ok(template) => format!(
+            "✅ Installed community prompt '{}' as local template '{}' (v{})",
+            id, template.id, template.version
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_community_delete(base_dir: &Path, id: &str) -> String {
+    let community = CommunityManager::new(base_dir.join("prompts"));
+    match community.delete(id) {
+        Ok(true) => format!("✅ Community prompt '{}' deleted", id),
+        Ok(false) => format!("Community prompt '{}' not found", id),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_refresh(base_dir: &Path) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    match manager.refresh() {
+        Ok(stats) => format!(
+            "✅ Marketplace index refreshed: {} package(s), {} install(s), {} rated",
+            stats.package_count, stats.total_installs, stats.rated_count
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_search(base_dir: &Path, query: &str) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    match manager.search(query) {
+        Ok(skills) => {
+            if skills.is_empty() {
+                return format!("No marketplace packages match '{}'.", query);
+            }
+            let mut out = format!(
+                "{:<20} {:<10} {:<8} {:<8} {:<8} {}\n",
+                "NAME", "VERSION", "INSTALLS", "RATING", "COUNT", "DESCRIPTION"
+            );
+            out.push_str(&format!("{}\n", "-".repeat(100)));
+            for s in &skills {
+                out.push_str(&format!(
+                    "{:<20} {:<10} {:<8} {:<8} {:<8} {}\n",
+                    s.name,
+                    s.version,
+                    s.installs,
+                    s.rating_avg
+                        .map(|r| format!("{:.1}", r))
+                        .unwrap_or_else(|| "-".to_string()),
+                    s.rating_count,
+                    s.description
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_info(base_dir: &Path, name: &str) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    match manager.info(name) {
+        Ok(s) => serde_json::to_string_pretty(&s).unwrap_or_else(|e| format!("Error: {}", e)),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_install(base_dir: &Path, name: &str) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    let skill_manager = SkillManager::new(base_dir.join("skills"));
+    match manager.install(&skill_manager, name) {
+        Ok(()) => format!("✅ Installed marketplace package '{}' as a skill", name),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_rate(base_dir: &Path, name: &str, rating: u8, rater: Option<&str>) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    match manager.rate(name, rating, rater) {
+        Ok(entry) => format!(
+            "✅ Rated '{}' {}★ (by {})",
+            name,
+            entry.rating,
+            entry.rater.as_deref().unwrap_or("anonymous")
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_stats(base_dir: &Path) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    match manager.stats() {
+        Ok(stats) => {
+            let mut out = format!(
+                "Marketplace: {} package(s), {} install(s), {} rated\n\nTop rated:\n",
+                stats.package_count, stats.total_installs, stats.rated_count
+            );
+            for s in &stats.top_rated {
+                out.push_str(&format!(
+                    "  {:<20} rating {} count {} installs {}\n",
+                    s.name,
+                    s.rating_avg
+                        .map(|r| format!("{:.1}", r))
+                        .unwrap_or_else(|| "-".to_string()),
+                    s.rating_count,
+                    s.installs
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_add_package(base_dir: &Path, name: &str, dir: &Path) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    match manager.add_package(name, dir) {
+        Ok(skill) => format!(
+            "✅ Added '{}' v{} as a marketplace package",
+            skill.name, skill.version
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_plugin_list(base_dir: &Path) -> String {
+    let manager = PluginManager::new(base_dir.join("skills"));
+    match manager.list_plugins() {
+        Ok(plugins) => {
+            if plugins.is_empty() {
+                return "No plugins registered.".to_string();
+            }
+            let mut out = format!(
+                "{:<20} {:<10} {:<8} {:<8} {}\n",
+                "NAME", "VERSION", "ENABLED", "HOOKS", "DESCRIPTION"
+            );
+            out.push_str(&format!("{}\n", "-".repeat(90)));
+            for p in &plugins {
+                out.push_str(&format!(
+                    "{:<20} {:<10} {:<8} {:<8} {}\n",
+                    p.manifest.name,
+                    p.manifest.version,
+                    if p.enabled { "yes" } else { "no" },
+                    p.manifest.hooks.len(),
+                    p.manifest.description.as_deref().unwrap_or("")
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_plugin_show(base_dir: &Path, name: &str) -> String {
+    let manager = PluginManager::new(base_dir.join("skills"));
+    match manager.load_plugin(name) {
+        Ok(plugin) => {
+            let mut out = format!(
+                "{} v{} — {}\nAuthor: {}\nEnabled: {}\n\nHooks:\n",
+                plugin.manifest.name,
+                plugin.manifest.version,
+                plugin.manifest.description.as_deref().unwrap_or(""),
+                plugin.manifest.author.as_deref().unwrap_or("-"),
+                plugin.enabled
+            );
+            if plugin.manifest.hooks.is_empty() {
+                out.push_str("  (none)\n");
+            }
+            for h in &plugin.manifest.hooks {
+                out.push_str(&format!(
+                    "  {}: {}\n",
+                    h.event,
+                    h.description.as_deref().unwrap_or(&h.command)
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_plugin_register(base_dir: &Path, name: &str, dir: &Path) -> String {
+    let manager = PluginManager::new(base_dir.join("skills"));
+    match manager.register_plugin(name, dir) {
+        Ok(plugin) => format!(
+            "✅ Plugin '{}' registered ({} hook(s), enabled)",
+            plugin.manifest.name,
+            plugin.manifest.hooks.len()
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_plugin_unregister(base_dir: &Path, name: &str) -> String {
+    let manager = PluginManager::new(base_dir.join("skills"));
+    match manager.unregister_plugin(name) {
+        Ok(true) => format!("✅ Plugin '{}' unregistered", name),
+        Ok(false) => format!("Plugin '{}' not found", name),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_plugin_enable(base_dir: &Path, name: &str, enabled: bool) -> String {
+    let manager = PluginManager::new(base_dir.join("skills"));
+    let result = if enabled {
+        manager.enable_plugin(name)
+    } else {
+        manager.disable_plugin(name)
+    };
+    match result {
+        Ok(()) => format!(
+            "✅ Plugin '{}' {}",
+            name,
+            if enabled { "enabled" } else { "disabled" }
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_plugin_run(base_dir: &Path, event: &str) -> String {
+    let manager = PluginManager::new(base_dir.join("skills"));
+    match manager.run_hook(event) {
+        Ok(results) => {
+            if results.is_empty() {
+                return format!("No plugins responded to '{}'.", event);
+            }
+            let mut out = String::new();
+            for r in &results {
+                let mark = if r.ok { "✅" } else { "❌" };
+                let output = if r.output.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {}", r.output.replace('\n', " | "))
+                };
+                out.push_str(&format!(
+                    "{} {}.{} ({}ms){}\n",
+                    mark, r.plugin, r.event, r.duration_ms, output
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_notify_list(base_dir: &Path) -> String {
+    let notifier = Notifier::new(base_dir.to_path_buf());
+    match notifier.list_channels() {
+        Ok(channels) => {
+            if channels.is_empty() {
+                return "No notification channels configured.".to_string();
+            }
+            let mut out = format!("{:<16} {:<8} {:<8} {}\n", "ID", "KIND", "ENABLED", "TARGET");
+            out.push_str(&format!("{}\n", "-".repeat(90)));
+            for c in &channels {
+                let target = match &c.config {
+                    ChannelConfig::Webhook { url, .. } => url.clone(),
+                    ChannelConfig::Email { to, .. } => to.clone(),
+                    ChannelConfig::File { path } => path.clone(),
+                };
+                out.push_str(&format!(
+                    "{:<16} {:<8} {:<8} {}\n",
+                    c.id,
+                    match &c.config {
+                        ChannelConfig::Webhook { .. } => "webhook",
+                        ChannelConfig::Email { .. } => "email",
+                        ChannelConfig::File { .. } => "file",
+                    },
+                    if c.enabled { "yes" } else { "no" },
+                    target
+                ));
+            }
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_notify_add(
+    base_dir: &Path,
+    id: &str,
+    kind: &str,
+    target: &str,
+    from: Option<&str>,
+    subject_prefix: Option<&str>,
+) -> String {
+    let notifier = Notifier::new(base_dir.to_path_buf());
+    let config = match kind {
+        "webhook" => ChannelConfig::Webhook {
+            url: target.to_string(),
+            headers: Vec::new(),
+        },
+        "email" => ChannelConfig::Email {
+            to: target.to_string(),
+            from: from.unwrap_or("agenthub@localhost").to_string(),
+            subject_prefix: subject_prefix.map(|s| s.to_string()),
+        },
+        "file" => ChannelConfig::File {
+            path: target.to_string(),
+        },
+        other => {
+            return format!(
+                "❌ Invalid channel kind '{}' (expected webhook|email|file)",
+                other
+            )
+        }
+    };
+    match notifier.add_channel(id, config) {
+        Ok(channel) => format!("✅ Channel '{}' added ({:?})", channel.id, kind),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_notify_remove(base_dir: &Path, id: &str) -> String {
+    let notifier = Notifier::new(base_dir.to_path_buf());
+    match notifier.remove_channel(id) {
+        Ok(true) => format!("✅ Channel '{}' removed", id),
+        Ok(false) => format!("Channel '{}' not found", id),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_notify_set_enabled(base_dir: &Path, id: &str, enabled: bool) -> String {
+    let notifier = Notifier::new(base_dir.to_path_buf());
+    match notifier.set_channel_enabled(id, enabled) {
+        Ok(_) => format!(
+            "✅ Channel '{}' {}",
+            id,
+            if enabled { "enabled" } else { "disabled" }
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_notify_send(base_dir: &Path, catalog: &Catalog, channel: Option<&str>) -> String {
+    let monitor = Monitor::new(base_dir.to_path_buf(), get_platform());
+    let report = match monitor.run(catalog) {
+        Ok(r) => r,
+        Err(e) => return format!("Error: {}", e),
+    };
+    let notifier = Notifier::new(base_dir.to_path_buf());
+    let results = match channel {
+        Some(id) => vec![match notifier.send_to(id, &report) {
+            Ok(r) => r,
+            Err(e) => return format!("Error: {}", e),
+        }],
+        None => match notifier.send(&report) {
+            Ok(r) => r,
+            Err(e) => return format!("Error: {}", e),
+        },
+    };
+    if results.is_empty() {
+        return "No enabled channels configured — add one with `agenthub notify add`.".to_string();
+    }
+    let mut out = format!("Alert summary: {}\n\n", report.alert_summary());
+    for r in &results {
+        let mark = if r.ok { "✅" } else { "❌" };
+        out.push_str(&format!(
+            "{} [{}] {} — {}\n",
+            mark, r.kind, r.channel, r.message
+        ));
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1686,6 +2576,60 @@ fn main() {
             ConfigCmd::Migrate { agent, key } => {
                 cmd_config_secret_migrate(&data_dir(), &agent, &key)
             }
+            ConfigCmd::User(cmd) => match cmd {
+                UserCmd::List => cmd_user_list(&data_dir()),
+                UserCmd::Show { id } => cmd_user_show(&data_dir(), &id),
+                UserCmd::Create {
+                    id,
+                    name,
+                    email,
+                    roles,
+                } => cmd_user_create(&data_dir(), &id, &name, email.as_deref(), &roles),
+                UserCmd::Delete { id } => cmd_user_delete(&data_dir(), &id),
+                UserCmd::Role(cmd) => match cmd {
+                    RoleCmd::Add { id, role } => cmd_user_role_add(&data_dir(), &id, &role),
+                    RoleCmd::Remove { id, role } => cmd_user_role_remove(&data_dir(), &id, &role),
+                },
+            },
+            ConfigCmd::Perm(cmd) => match cmd {
+                PermCmd::Grant {
+                    user,
+                    action,
+                    module,
+                    agent,
+                } => cmd_perm_grant(
+                    &data_dir(),
+                    &user,
+                    &action,
+                    module.as_deref(),
+                    agent.as_deref(),
+                ),
+                PermCmd::Revoke {
+                    user,
+                    action,
+                    module,
+                    agent,
+                } => cmd_perm_revoke(
+                    &data_dir(),
+                    &user,
+                    &action,
+                    module.as_deref(),
+                    agent.as_deref(),
+                ),
+                PermCmd::List { user } => cmd_perm_list(&data_dir(), user.as_deref()),
+                PermCmd::Check {
+                    user,
+                    action,
+                    module,
+                    agent,
+                } => cmd_perm_check(
+                    &data_dir(),
+                    &user,
+                    &action,
+                    module.as_deref(),
+                    agent.as_deref(),
+                ),
+            },
         },
         Commands::Prompt(cmd) => match cmd {
             PromptArgs::Export { id, output } => {
@@ -1709,6 +2653,19 @@ fn main() {
                 name.as_deref(),
                 description.as_deref(),
             ),
+            PromptArgs::Publish {
+                id,
+                publisher,
+                force,
+            } => cmd_prompt_publish(&data_dir(), &id, &publisher, force),
+            PromptArgs::Community(cmd) => match cmd {
+                CommunityCmd::List => cmd_community_list(&data_dir()),
+                CommunityCmd::Show { id } => cmd_community_show(&data_dir(), &id),
+                CommunityCmd::Install { id, new_id, force } => {
+                    cmd_community_install(&data_dir(), &id, new_id.as_deref(), force)
+                }
+                CommunityCmd::Delete { id } => cmd_community_delete(&data_dir(), &id),
+            },
         },
         Commands::Memory(cmd) => match cmd {
             MemoryArgs::Export { scope, output } => {
@@ -1755,9 +2712,61 @@ fn main() {
                 WorkflowCmd::Delete { id } => cmd_workflow_delete(&data_dir(), &id),
                 WorkflowCmd::Run { id } => cmd_workflow_run(&data_dir(), &id),
             },
+            SkillArgs::Market(cmd) => match cmd {
+                MarketCmd::Refresh => cmd_market_refresh(&data_dir()),
+                MarketCmd::Search { query } => cmd_market_search(&data_dir(), &query),
+                MarketCmd::Info { name } => cmd_market_info(&data_dir(), &name),
+                MarketCmd::Install { name } => cmd_market_install(&data_dir(), &name),
+                MarketCmd::Rate {
+                    name,
+                    rating,
+                    rater,
+                } => cmd_market_rate(&data_dir(), &name, rating, rater.as_deref()),
+                MarketCmd::Stats => cmd_market_stats(&data_dir()),
+                MarketCmd::AddPackage { name, dir } => {
+                    cmd_market_add_package(&data_dir(), &name, &dir)
+                }
+            },
         },
-        Commands::Monitor { json, watch } => match load_catalog() {
-            Ok(catalog) => cmd_monitor(&data_dir(), &catalog, json, watch),
+        Commands::Plugin(cmd) => match cmd {
+            PluginArgs::List => cmd_plugin_list(&data_dir()),
+            PluginArgs::Show { name } => cmd_plugin_show(&data_dir(), &name),
+            PluginArgs::Register { name, dir } => cmd_plugin_register(&data_dir(), &name, &dir),
+            PluginArgs::Unregister { name } => cmd_plugin_unregister(&data_dir(), &name),
+            PluginArgs::Enable { name } => cmd_plugin_enable(&data_dir(), &name, true),
+            PluginArgs::Disable { name } => cmd_plugin_enable(&data_dir(), &name, false),
+            PluginArgs::Run { event } => cmd_plugin_run(&data_dir(), &event),
+        },
+        Commands::Notify(cmd) => match cmd {
+            NotifyArgs::List => cmd_notify_list(&data_dir()),
+            NotifyArgs::Add {
+                id,
+                kind,
+                target,
+                from,
+                subject_prefix,
+            } => cmd_notify_add(
+                &data_dir(),
+                &id,
+                &kind,
+                &target,
+                from.as_deref(),
+                subject_prefix.as_deref(),
+            ),
+            NotifyArgs::Remove { id } => cmd_notify_remove(&data_dir(), &id),
+            NotifyArgs::Enable { id } => cmd_notify_set_enabled(&data_dir(), &id, true),
+            NotifyArgs::Disable { id } => cmd_notify_set_enabled(&data_dir(), &id, false),
+            NotifyArgs::Send { channel } => match load_catalog() {
+                Ok(catalog) => cmd_notify_send(&data_dir(), &catalog, channel.as_deref()),
+                Err(e) => format!("Error: {}", e),
+            },
+        },
+        Commands::Monitor {
+            json,
+            watch,
+            notify,
+        } => match load_catalog() {
+            Ok(catalog) => cmd_monitor(&data_dir(), &catalog, json, watch, notify),
             Err(e) => format!("Error: {}", e),
         },
     };
@@ -2230,10 +3239,25 @@ mod tests {
     fn test_cmd_monitor_runs() {
         let temp = TempDir::new().unwrap();
         let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
-        let output = cmd_monitor(temp.path(), &catalog, false, None);
+        let output = cmd_monitor(temp.path(), &catalog, false, None, false);
         assert!(output.contains("AgentHub Monitor"));
         assert!(output.contains("诊断:"));
         assert!(output.contains("预算:"));
+    }
+
+    #[test]
+    fn test_cmd_monitor_with_notify() {
+        let temp = TempDir::new().unwrap();
+        let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
+        // With no channels, notify is a no-op that reports it.
+        let output = cmd_monitor(temp.path(), &catalog, false, None, true);
+        assert!(output.contains("no channels configured"));
+
+        // With a file channel, the alert is delivered.
+        cmd_notify_add(temp.path(), "log", "file", "alerts.log", None, None);
+        let output = cmd_monitor(temp.path(), &catalog, false, None, true);
+        assert!(output.contains("notify:"));
+        assert!(temp.path().join("alerts.log").exists());
     }
 
     // ---- Wave 3 commands ----
@@ -2242,7 +3266,7 @@ mod tests {
     fn test_cmd_monitor_json() {
         let temp = TempDir::new().unwrap();
         let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
-        let output = cmd_monitor(temp.path(), &catalog, true, None);
+        let output = cmd_monitor(temp.path(), &catalog, true, None, false);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert!(parsed.get("healthy").is_some());
         assert!(parsed.get("budget").is_some());
@@ -2361,6 +3385,220 @@ mod tests {
         let html = std::fs::read_to_string(&out_path).unwrap();
         assert!(html.contains("<!DOCTYPE html>"));
         assert!(html.contains("__AGENTHUB_DASHBOARD__"));
+    }
+
+    // ---- Wave 4 commands ----
+
+    #[test]
+    fn test_cmd_user_and_perm_flow() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        // Admin is auto-created
+        let out = cmd_user_list(base);
+        assert!(out.contains("admin"));
+        assert!(out.contains("1 user(s)"));
+
+        let out = cmd_user_create(base, "alice", "Alice", Some("a@x.com"), "viewer");
+        assert!(out.contains("✅"));
+
+        let out = cmd_user_show(base, "alice");
+        assert!(out.contains("Alice"));
+        assert!(out.contains("a@x.com"));
+        assert!(out.contains("(none)"));
+
+        // Role management
+        assert!(cmd_user_role_add(base, "alice", "operator").contains("✅"));
+        assert!(cmd_user_role_remove(base, "alice", "operator").contains("✅"));
+
+        // Permissions
+        let out = cmd_perm_grant(base, "alice", "write", Some("config"), None);
+        assert!(out.contains("Granted write:config"));
+        let out = cmd_perm_grant(base, "alice", "read", None, Some("codex"));
+        assert!(out.contains("Granted read:*@codex"));
+
+        let out = cmd_perm_list(base, Some("alice"));
+        assert!(out.contains("alice"));
+        assert!(out.contains("write"));
+
+        assert!(cmd_perm_check(base, "alice", "write", Some("config"), None).contains("may"));
+        assert!(cmd_perm_check(base, "alice", "write", Some("memory"), None).contains("may NOT"));
+        // admin bypasses
+        assert!(cmd_perm_check(base, "admin", "admin", Some("x"), None).contains("may"));
+
+        // Revoke
+        assert!(cmd_perm_revoke(base, "alice", "write", Some("config"), None).contains("✅"));
+        assert!(cmd_perm_check(base, "alice", "write", Some("config"), None).contains("may NOT"));
+
+        // Delete
+        assert!(cmd_user_delete(base, "alice").contains("✅"));
+        assert!(cmd_user_delete(base, "admin").contains("Refusing"));
+        assert!(cmd_user_list(base).contains("1 user(s)"));
+    }
+
+    #[test]
+    fn test_cmd_prompt_publish_and_community() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let prompts = agenthub_core::PromptManager::new(base.join("prompts"));
+        prompts
+            .create_prompt("review", "Review", "d", "review {{code}}")
+            .unwrap();
+
+        let out = cmd_prompt_publish(base, "review", "alice", false);
+        assert!(out.contains("Published 'review' v1"));
+
+        // Duplicate publish errors without force
+        assert!(cmd_prompt_publish(base, "review", "alice", false).contains("Error:"));
+        assert!(cmd_prompt_publish(base, "review", "alice", true).contains("Published"));
+
+        let out = cmd_community_list(base);
+        assert!(out.contains("review"));
+        assert!(out.contains("alice"));
+
+        let out = cmd_community_show(base, "review");
+        assert!(out.contains("\"template\": \"review {{code}}\""));
+
+        // Install into a fresh workspace (same community file via copy)
+        let fresh = temp.path().join("fresh");
+        std::fs::create_dir_all(fresh.join("prompts")).unwrap();
+        std::fs::create_dir_all(fresh.join("prompts").join("community")).unwrap();
+        std::fs::copy(
+            base.join("prompts").join("community").join("review.yaml"),
+            fresh.join("prompts").join("community").join("review.yaml"),
+        )
+        .unwrap();
+        let out = cmd_community_install(&fresh, "review", None, false);
+        assert!(out.contains("Installed community prompt 'review'"));
+        assert!(cmd_community_install(&fresh, "review", None, false).contains("Error:"));
+        assert!(cmd_community_install(&fresh, "review", Some("review2"), false).contains("✅"));
+
+        assert!(cmd_community_delete(base, "review").contains("✅"));
+        assert!(cmd_community_delete(base, "review").contains("not found"));
+    }
+
+    #[test]
+    fn test_cmd_market_flow() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        // Seed a marketplace package
+        let src = temp.path().join("pkg-src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("SKILL.md"),
+            "---\nname: rust-dev\ndescription: \"Rust workflow\"\nversion: 1.0.0\ntags: [rust, cargo]\ncategory: testing\n---\n\n# Rust\n",
+        )
+        .unwrap();
+        let out = cmd_market_add_package(base, "rust-dev", &src);
+        assert!(out.contains("Added 'rust-dev'"));
+
+        let out = cmd_market_refresh(base);
+        assert!(out.contains("1 package(s)"));
+
+        let out = cmd_market_search(base, "cargo");
+        assert!(out.contains("rust-dev"));
+        assert!(cmd_market_search(base, "nope").contains("No marketplace packages"));
+
+        let out = cmd_market_info(base, "rust-dev");
+        assert!(out.contains("rust-dev"));
+
+        assert!(cmd_market_rate(base, "rust-dev", 5, Some("alice")).contains("✅"));
+        assert!(cmd_market_rate(base, "rust-dev", 6, None).contains("Error:"));
+
+        let out = cmd_market_stats(base);
+        assert!(out.contains("1 package(s)"));
+        assert!(out.contains("rating 5.0"));
+
+        // Install from marketplace
+        let out = cmd_market_install(base, "rust-dev");
+        assert!(out.contains("Installed marketplace package"));
+        let skills = agenthub_core::SkillManager::new(base.join("skills"));
+        assert!(skills.get_skill("rust-dev").is_ok());
+        let out = cmd_market_stats(base);
+        assert!(out.contains("1 install(s)"));
+    }
+
+    #[test]
+    fn test_cmd_plugin_flow() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        let src = temp.path().join("plugin-src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("plugin.yaml"),
+            "name: notifier\nversion: 0.1.0\ndescription: \"Test plugin\"\nhooks:\n  - event: on_install\n    command: \"echo hook-ran\"\n    args: []\n",
+        )
+        .unwrap();
+
+        let out = cmd_plugin_register(base, "notifier", &src);
+        assert!(out.contains("✅"));
+
+        let out = cmd_plugin_list(base);
+        assert!(out.contains("notifier"));
+        assert!(out.contains("yes")); // enabled
+
+        let out = cmd_plugin_show(base, "notifier");
+        assert!(out.contains("on_install"));
+
+        let out = cmd_plugin_run(base, "on_install");
+        assert!(out.contains("notifier.on_install"));
+        assert!(out.contains("hook-ran"));
+        assert!(cmd_plugin_run(base, "on_monitor").contains("No plugins responded"));
+
+        assert!(cmd_plugin_enable(base, "notifier", false).contains("✅"));
+        assert!(cmd_plugin_run(base, "on_install").contains("No plugins responded"));
+        assert!(cmd_plugin_enable(base, "notifier", true).contains("✅"));
+
+        assert!(cmd_plugin_unregister(base, "notifier").contains("✅"));
+        assert!(cmd_plugin_list(base).contains("No plugins registered"));
+    }
+
+    #[test]
+    fn test_cmd_notify_flow() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        let out = cmd_notify_add(base, "log", "file", "alerts.log", None, None);
+        assert!(out.contains("✅"));
+        let out = cmd_notify_add(base, "ops", "webhook", "https://example.com/h", None, None);
+        assert!(out.contains("✅"));
+        assert!(cmd_notify_add(base, "bad", "webhook", "not-a-url", None, None).contains("Error:"));
+        assert!(cmd_notify_add(
+            base,
+            "team",
+            "email",
+            "t@x.com",
+            Some("a@x.com"),
+            Some("[AH] ")
+        )
+        .contains("✅"));
+        assert!(
+            cmd_notify_add(base, "nope", "carrier-pigeon", "x", None, None)
+                .contains("Invalid channel kind")
+        );
+
+        let out = cmd_notify_list(base);
+        assert!(out.contains("log"));
+        assert!(out.contains("webhook"));
+        assert!(out.contains("email"));
+
+        assert!(cmd_notify_set_enabled(base, "log", false).contains("✅"));
+        assert!(cmd_notify_list(base).contains("no"));
+        assert!(cmd_notify_set_enabled(base, "log", true).contains("✅"));
+
+        // Send uses the file channel (no network); webhook skipped when disabled
+        cmd_notify_set_enabled(base, "ops", false);
+        cmd_notify_set_enabled(base, "team", false);
+        let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();
+        let out = cmd_notify_send(base, &catalog, None);
+        assert!(out.contains("Alert summary"));
+        assert!(out.contains("✅ [file] log"));
+        assert!(base.join("alerts.log").exists());
+
+        assert!(cmd_notify_remove(base, "log").contains("✅"));
+        assert!(cmd_notify_remove(base, "log").contains("not found"));
     }
 
     const TEST_AGENTS_JSON: &str = r#"{

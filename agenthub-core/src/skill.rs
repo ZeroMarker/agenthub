@@ -133,6 +133,16 @@ impl SkillManager {
         self.skills_dir.join("installed")
     }
 
+    /// Parse a SKILL.md manifest (public: used by the marketplace module).
+    pub fn parse_manifest_pub(content: &str) -> Result<SkillManifest> {
+        Self::parse_manifest(content)
+    }
+
+    /// Recursively copy a skill directory (public: used by the marketplace module).
+    pub fn copy_dir_recursive_pub(src: &Path, dst: &Path) -> Result<()> {
+        Self::copy_dir_recursive(src, dst)
+    }
+
     fn parse_manifest(content: &str) -> Result<SkillManifest> {
         // Extract YAML frontmatter between --- markers
         let parts: Vec<&str> = content.splitn(3, "---").collect();

@@ -247,13 +247,20 @@ agenthub <command> [options]
 | `audit` | 查询审计日志 | `agenthub audit --action install --last-days 7` |
 | `backup` | 备份全部数据 | `agenthub backup --output ./backup.json` |
 | `restore` | 从备份恢复 | `agenthub restore ./backup.json` |
-| `monitor` | 健康/预算/兼容性监控 | `agenthub monitor` |
+| `monitor` | 健康/预算/兼容性监控（`--json`/`--watch`/`--notify`） | `agenthub monitor --notify` |
 | `config-template` | 配置模板管理 | `agenthub config-template apply codex llm-default` |
+| `config user` | 用户管理（角色） | `agenthub config user create alice "Alice" --roles viewer` |
+| `config perm` | 细粒度权限 | `agenthub config perm grant alice write --module config` |
+| `prompt publish` | 发布提示词到社区目录 | `agenthub prompt publish review --publisher alice` |
+| `prompt community` | 社区提示词管理 | `agenthub prompt community install review` |
 | `prompt export/import` | 提示词导入导出（含版本） | `agenthub prompt export-all --output p.json` |
 | `memory export/import` | 记忆导入导出 | `agenthub memory import memories.json --merge` |
 | `session budget` | 成本预算/告警 | `agenthub session budget set --daily 5 --monthly 50` |
 | `session fork` | 携带上下文创建新会话 | `agenthub session fork <id> --agent claude-code` |
 | `skill check-compat` | 技能版本兼容检查 | `agenthub skill check-compat *` |
+| `skill market` | 技能市场（搜索/评分/安装统计） | `agenthub skill market search rust` |
+| `plugin` | 插件注册/钩子执行 | `agenthub plugin run on_monitor` |
+| `notify` | 告警推送通道（webhook/email/file） | `agenthub notify add ops webhook https://…` |
 
 ### 通用选项
 

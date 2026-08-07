@@ -23,6 +23,44 @@
 - [x] 验证：vue-tsc 0 错误、vite build 通过、vitest 11/11 全过
 - [x] 提交 `f7df6d9` 已推送 origin/main；未发版（v1.3.0 候选）
 
+## 第四波（2026-08-07）— ✅ 完成（治理 + 共享 + 扩展 + 告警）
+
+### ✅ Config 用户与权限（归并自原 management）
+- [x] `UserManager`（`users.yaml`/`permissions.yaml`）：内置 `admin` 角色全量放行，`operator`/`viewer` 角色；用户 CRUD + 角色增删
+- [x] 细粒度权限：`grant/revoke/list/check_permission`，按 module 与 agent 作用域（`read|write|admin`，`*` 通配，write 隐含 read）
+- [x] CLI `config user list|show|create|delete|role add|remove` / `config perm grant|revoke|list|check`；Tauri `list/create/delete_user`、`add/remove_user_role`、`grant/revoke/list/check_permission`
+
+### ✅ Prompt 社区共享
+- [x] `CommunityManager`：`prompts/community/` 快照带来源追溯（publisher/published_at/source），`publish`（force 覆盖）/`list`/`get`/`delete`/`install`（可换 id）
+- [x] CLI `prompt publish` / `prompt community list|show|install|delete`；Tauri `publish_prompt`、`list/get/install/delete_community_prompt`
+- [x] GUI Prompt 管理器新增 Community 页签（发布/安装/删除）
+
+### ✅ Skill 技能市场（本地注册表，离线可用）
+- [x] `MarketplaceManager`：`skills/marketplace/`（packages + index.json + ratings），搜索（name/description/tags）、评分（1-5 历史）、安装计数、`refresh` 重建索引保留统计、`add_package` 导入
+- [x] CLI `skill market refresh|search|info|install|rate|stats|add-package`；Tauri `market_*`
+
+### ✅ Skill 插件系统（归并自原 management）
+- [x] `PluginManager`：`skills/plugins/<name>/plugin.yaml` 清单（entry + hooks），`register/unregister/enable/disable/run_hook`，钩子事件 `on_install/on_uninstall/on_session_end/on_monitor/on_backup`，命令执行捕获输出 + 30s 超时
+- [x] CLI `plugin list|show|register|unregister|enable|disable|run <event>`；Tauri `list/register/unregister_plugin`、`set_plugin_enabled`、`run_plugin_hook`
+
+### ✅ 横切：告警推送渠道
+- [x] `Notifier`（`notify.yaml` 通道配置）：webhook（ureq HTTP(S) JSON POST，带超时）、email（RFC-2822 `.eml` 落盘 outbox，MTA 投递不在 v1 范围）、file（追加日志）
+- [x] `monitor --notify` 将监控报告推送至启用通道；CLI `notify list|add|remove|enable|disable|send`；Tauri `list/add/remove/set_enabled_notify_channel`、`send_notification`
+
+### ✅ 备份扩展
+- [x] 备份纳入 users/permissions/community_prompts/notify_channels（secrets 值仍有意排除）
+
+### 📊 验证结果
+- Rust：236 测试全过（182 core + 9 集成 + 40 cli + 5 tauri），clippy 0 警告，fmt 干净
+- 前端：11 测试全过，vue-tsc 0 错误，vite build 通过
+- 变更：5 个新 core 模块（users/community/marketplace/plugin/notify）+ backup 扩展 + CLI 11 组命令 + Tauri 24 个命令 + 新 Extensions 视图 + Prompt 社区页签
+
+### 本波未覆盖（留待后续）
+- Config：OS keyring 后端、基于权限的 CLI 鉴权强制执行（当前为查询接口）
+- Prompt：社区推送渠道（当前本地目录同步）、提示词效果追踪
+- Skill：在线技能市场（需网络）、插件市场
+- 横切：SMTP 直发（当前 email 通道落盘 .eml 待 MTA 投递）、告警去重/分级
+
 ## 长期规划第三波（2026-08-06）— ✅ 完成（安全存储 + 智能检索 + 工作流编排）
 
 ### ✅ Config 密钥链存储 + API Key 轮换
@@ -254,7 +292,7 @@ All UI components have been migrated to the Material 3 design token system:
 - [x] 配置模板（模型、温度、token 限制）✅（2026-08-06 第二波）
 - [x] API Key 密钥链存储（文件密钥链 SecretStore，0600 权限；OS keyring 已评估暂缓）✅（2026-08-06 第三波）
 - [x] API Key 轮换（rotate 归档旧值可回滚）✅（2026-08-06 第三波）
-- [ ] 用户与权限（归并自原 management）
+- [x] 用户与权限（✅ 2026-08-07 第四波）
 
 ### Session 会话管理
 - [x] 成本追踪（模型价格表 + record_usage）✅（2026-08-06 首波）
@@ -266,13 +304,13 @@ All UI components have been migrated to the Material 3 design token system:
 - [x] 版本控制、变量校验、使用统计 ✅（2026-08-06 首波）
 - [x] 导入/导出（含版本历史）✅（2026-08-06 第二波）
 - [x] 从 Agent 会话中提取提示词（URL/路径/版本等 → {{占位符}} 模板）✅（2026-08-06 第三波）
-- [ ] 社区共享
+- [x] 社区共享（✅ 2026-08-07 第四波）
 
 ### Skill 技能管理
 - [x] 版本管理与兼容性检查 ✅（2026-08-06 第二波）
 - [x] 工作流编排（多技能组合，含可选步骤/依赖/兼容性校验）✅（2026-08-06 第三波）
-- [ ] 技能市场（发现、评分、安装统计）
-- [ ] 插件系统（第三方扩展入口，归并自原 management）
+- [x] 技能市场（✅ 2026-08-07 第四波）
+- [x] 插件系统（✅ 2026-08-07 第四波）
 
 ### Memory 记忆管理
 - [x] BM25 语义检索 ✅（2026-08-06 首波）
@@ -291,4 +329,4 @@ All UI components have been migrated to the Material 3 design token system:
 - [x] 备份/恢复 ✅（2026-08-06 首波；第三波扩展纳入 workflows + memory_graph）
 - [x] 监控与告警（第一版：诊断/未安装/预算/兼容性）✅（2026-08-06 第二波）
 - [x] 监控定时化入口（`monitor --json` / `--watch` 供 cron/systemd）✅（2026-08-06 第三波）
-- [ ] 告警推送渠道（邮件/webhook）
+- [x] 告警推送渠道（webhook/email-spool/file，✅ 2026-08-07 第四波）

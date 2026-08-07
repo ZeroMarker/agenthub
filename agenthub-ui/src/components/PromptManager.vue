@@ -16,6 +16,26 @@ interface PromptInfo {
   version: number
 }
 
+interface CommunityPromptInfo {
+  id: string
+  name: string
+  description: string
+  template: string
+  tags: string[]
+  category: string | null
+  version: number
+  publisher: string
+  published_at: string
+  source: string | null
+}
+
+const view = ref<'templates' | 'community'>('templates')
+const communityPrompts = ref<CommunityPromptInfo[]>([])
+const selectedCommunity = ref<CommunityPromptInfo | null>(null)
+const publisherName = ref('local')
+const installNewId = ref('')
+const communityLoading = ref(false)
+
 const prompts = ref<PromptInfo[]>([])
 const selectedPrompt = ref<PromptInfo | null>(null)
 const showCreateForm = ref(false)
@@ -103,6 +123,73 @@ function selectPrompt(prompt: PromptInfo) {
   renderVars.value = {}
 }
 
+async function loadCommunity() {
+  communityLoading.value = true
+  try {
+    communityPrompts.value = await invoke<CommunityPromptInfo[]>('list_community_prompts')
+  } catch (error) {
+    showMessage(`Failed to load community prompts: ${error}`, 'error')
+  } finally {
+    communityLoading.value = false
+  }
+}
+
+async function publishSelected() {
+  if (!selectedPrompt.value) return
+  communityLoading.value = true
+  try {
+    await invoke('publish_prompt', {
+      id: selectedPrompt.value.id,
+      publisher: publisherName.value.trim() || 'local',
+      force: false,
+    })
+    await loadCommunity()
+    showMessage(`Published '${selectedPrompt.value.id}' to community`, 'success')
+  } catch (error) {
+    showMessage(`Failed to publish: ${error}`, 'error')
+  } finally {
+    communityLoading.value = false
+  }
+}
+
+async function installCommunity(prompt: CommunityPromptInfo) {
+  communityLoading.value = true
+  try {
+    await invoke('install_community_prompt', {
+      id: prompt.id,
+      newId: installNewId.value.trim() || null,
+      force: false,
+    })
+    installNewId.value = ''
+    await loadCommunity()
+    await loadPrompts()
+    showMessage(`Installed '${prompt.id}' as a local template`, 'success')
+  } catch (error) {
+    showMessage(`Failed to install: ${error}`, 'error')
+  } finally {
+    communityLoading.value = false
+  }
+}
+
+async function deleteCommunity(prompt: CommunityPromptInfo) {
+  communityLoading.value = true
+  try {
+    await invoke('delete_community_prompt', { id: prompt.id })
+    selectedCommunity.value = null
+    await loadCommunity()
+    showMessage('Community prompt deleted', 'success')
+  } catch (error) {
+    showMessage(`Failed to delete: ${error}`, 'error')
+  } finally {
+    communityLoading.value = false
+  }
+}
+
+function switchView(next: typeof view.value) {
+  view.value = next
+  if (next === 'community') loadCommunity()
+}
+
 function showMessage(msg: string, type: 'success' | 'error') {
   message.value = msg
   messageType.value = type
@@ -114,10 +201,25 @@ onMounted(loadPrompts)
 
 <template>
   <div class="prompt-manager">
-    <PageHeader title="Prompt Manager" subtitle="Create and manage prompt templates" />
+    <PageHeader title="Prompt Manager" subtitle="Create, share and manage prompt templates" />
 
     <NotificationBar :message="message" :type="messageType" @close="message = ''" />
 
+    <div class="m3-tabs" role="tablist" aria-label="Prompt sections">
+      <button
+        v-for="t in [{ id: 'templates', label: 'Templates' }, { id: 'community', label: 'Community' }]"
+        :key="t.id"
+        :class="['m3-tab', { active: view === t.id }]"
+        role="tab"
+        :aria-selected="view === t.id"
+        @click="switchView(t.id as typeof view)"
+      >
+        {{ t.label }}
+      </button>
+    </div>
+
+    <!-- ============ Templates ============ -->
+    <template v-if="view === 'templates'">
     <div class="actions">
       <button class="create-btn" @click="showCreateForm = !showCreateForm">
         {{ showCreateForm ? 'Cancel' : 'Create Prompt' }}
@@ -182,8 +284,73 @@ onMounted(loadPrompts)
             Delete
           </button>
         </div>
+
+        <div class="actions publish-box">
+          <h3>Publish to community</h3>
+          <div class="publish-row">
+            <input v-model="publisherName" placeholder="Publisher" />
+            <button class="create-btn" @click="publishSelected" :disabled="communityLoading">
+              Publish
+            </button>
+          </div>
+        </div>
       </div>
     </div>
+    </template>
+
+    <!-- ============ Community ============ -->
+    <template v-else>
+      <div class="actions">
+        <span class="hint">Community prompts are local snapshots you can publish and install — share the
+        <code>prompts/community</code> directory (e.g. via git) to collaborate offline.</span>
+      </div>
+      <div class="content-layout">
+        <div class="prompt-list">
+          <h3>Community ({{ communityPrompts.length }})</h3>
+          <LoadingSpinner v-if="communityLoading && communityPrompts.length === 0" />
+          <div v-else class="list-items">
+            <div
+              v-for="prompt in communityPrompts"
+              :key="prompt.id"
+              :class="['prompt-item', { active: selectedCommunity?.id === prompt.id }]"
+              @click="selectedCommunity = prompt"
+            >
+              <div class="prompt-info">
+                <span class="prompt-name">{{ prompt.name }}</span>
+                <span class="prompt-id">{{ prompt.id }} · by {{ prompt.publisher }}</span>
+              </div>
+              <span class="version">v{{ prompt.version }}</span>
+            </div>
+          </div>
+          <EmptyState v-if="communityPrompts.length === 0 && !communityLoading" text="No community prompts yet" />
+        </div>
+
+        <div class="prompt-detail" v-if="selectedCommunity">
+          <h2>{{ selectedCommunity.name }}</h2>
+          <p class="description">{{ selectedCommunity.description }}</p>
+          <p class="description">
+            Published {{ new Date(selectedCommunity.published_at).toLocaleDateString() }} by
+            {{ selectedCommunity.publisher }} · source {{ selectedCommunity.source ?? '-' }}
+          </p>
+          <div class="tags" v-if="selectedCommunity.tags.length">
+            <span v-for="tag in selectedCommunity.tags" :key="tag" class="tag">{{ tag }}</span>
+          </div>
+          <div class="template-preview">
+            <h3>Template</h3>
+            <pre>{{ selectedCommunity.template }}</pre>
+          </div>
+          <div class="actions install-box">
+            <input v-model="installNewId" placeholder="Install as id (optional)" />
+            <button class="create-btn" @click="installCommunity(selectedCommunity)" :disabled="communityLoading">
+              Install as template
+            </button>
+            <button class="delete-btn" @click="deleteCommunity(selectedCommunity)" :disabled="communityLoading">
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -218,6 +385,17 @@ onMounted(loadPrompts)
 .render-section button { padding: 0.5rem 1rem; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; margin-bottom: 1rem; }
 .delete-btn { padding: 0.5rem 1rem; background: var(--md-sys-color-error); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; }
 .list-items { max-height: calc(100vh - 350px); overflow-y: auto; }
+
+/* Community tab */
+.m3-tabs { display: flex; gap: 0.25rem; background: var(--md-sys-color-surface-variant); border-radius: var(--md-sys-shape-sm); padding: 0.25rem; margin-bottom: 1.5rem; width: fit-content; }
+.m3-tab { padding: 0.5rem 1.25rem; border: none; background: transparent; border-radius: var(--md-sys-shape-xs); color: var(--md-sys-color-on-surface-variant); font: var(--md-sys-typescale-label-large); cursor: pointer; }
+.m3-tab.active { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+.hint { color: var(--md-sys-color-on-surface-variant); font-size: 0.9rem; }
+.hint code { background: var(--md-sys-color-surface-variant); padding: 0.1rem 0.35rem; border-radius: var(--md-sys-shape-xs); }
+.publish-box, .install-box { display: flex; align-items: center; gap: 0.75rem; border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: 1rem; margin-top: 1rem; }
+.publish-box h3 { margin: 0; font-size: 0.95rem; color: var(--md-sys-color-on-surface); }
+.publish-row { display: flex; gap: 0.6rem; align-items: center; flex: 1; }
+.publish-box input, .install-box input { flex: 1; padding: 0.5rem 0.9rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-sm); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
 
 /* Responsive */
 @media (max-width: 900px) {

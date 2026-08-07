@@ -1,8 +1,9 @@
 use agenthub_core::{
-    Agent, AgentKind, AuditManager, AuditQuery, BackupManager, Catalog, ConfigManager, ConfigValue,
-    DiagnosticManager, Installer, MemoryManager, MemoryScope, MemoryType, Monitor, OverviewReport,
-    Platform, PricingTable, PromptManager, RealCommandRunner, Result, SessionManager, SkillManager,
-    StatusOverview, WorkflowManager, WorkflowStep,
+    Agent, AgentKind, AuditManager, AuditQuery, BackupManager, Catalog, CommunityManager,
+    ConfigManager, ConfigValue, DiagnosticManager, Installer, MarketplaceManager, MemoryManager,
+    MemoryScope, MemoryType, Monitor, Notifier, OverviewReport, Platform, PluginManager,
+    PricingTable, PromptManager, RealCommandRunner, Result, SessionManager, SkillManager,
+    StatusOverview, UserManager, WorkflowManager, WorkflowStep,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -2308,6 +2309,379 @@ async fn get_dashboard_html(
         .map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Wave 4: users & permissions, prompt community, skill marketplace, plugins,
+// notification channels
+// ---------------------------------------------------------------------------
+
+fn user_manager(state: &AppState) -> UserManager {
+    UserManager::new(state.config_manager.config_dir().to_path_buf())
+}
+
+fn community_manager(state: &AppState) -> CommunityManager {
+    CommunityManager::new(state.prompt_manager.prompts_dir().to_path_buf())
+}
+
+fn marketplace_manager(state: &AppState) -> MarketplaceManager {
+    MarketplaceManager::new(state.skill_manager.skills_dir().to_path_buf())
+}
+
+fn plugin_manager(state: &AppState) -> PluginManager {
+    PluginManager::new(state.skill_manager.skills_dir().to_path_buf())
+}
+
+fn notifier(state: &AppState) -> Notifier {
+    Notifier::new(state.config_manager.config_dir().to_path_buf())
+}
+
+// ---- users & permissions ----
+
+#[tauri::command]
+async fn list_users(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::User>, String> {
+    user_manager(&state).list_users().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_user(
+    id: String,
+    name: String,
+    email: Option<String>,
+    roles: Option<Vec<String>>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::User, String> {
+    user_manager(&state)
+        .create_user(&id, &name, email.as_deref(), roles.unwrap_or_default())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_user(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    if id == "admin" {
+        return Err("Refusing to delete the built-in 'admin' user".to_string());
+    }
+    user_manager(&state)
+        .delete_user(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn add_user_role(
+    id: String,
+    role: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::User, String> {
+    user_manager(&state)
+        .add_role(&id, &role)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn remove_user_role(
+    id: String,
+    role: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::User, String> {
+    user_manager(&state)
+        .remove_role(&id, &role)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn grant_permission(
+    user: String,
+    action: String,
+    module: Option<String>,
+    agent: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::Permission, String> {
+    user_manager(&state)
+        .grant_permission(&user, &action, module.as_deref(), agent.as_deref(), None)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn revoke_permission(
+    user: String,
+    action: String,
+    module: Option<String>,
+    agent: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    user_manager(&state)
+        .revoke_permission(&user, &action, module.as_deref(), agent.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_permissions(
+    user: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::Permission>, String> {
+    user_manager(&state)
+        .list_permissions(user.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn check_permission(
+    user: String,
+    action: String,
+    module: Option<String>,
+    agent: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    user_manager(&state)
+        .check_permission(&user, &action, module.as_deref(), agent.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+// ---- prompt community ----
+
+#[tauri::command]
+async fn publish_prompt(
+    id: String,
+    publisher: Option<String>,
+    force: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::CommunityPrompt, String> {
+    community_manager(&state)
+        .publish_by_id(
+            &state.prompt_manager,
+            &id,
+            publisher.as_deref().unwrap_or("local"),
+            force,
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_community_prompts(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::CommunityPrompt>, String> {
+    community_manager(&state).list().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_community_prompt(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::CommunityPrompt, String> {
+    community_manager(&state)
+        .get(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn install_community_prompt(
+    id: String,
+    new_id: Option<String>,
+    force: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::PromptTemplate, String> {
+    community_manager(&state)
+        .install(&state.prompt_manager, &id, new_id.as_deref(), force)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_community_prompt(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    community_manager(&state)
+        .delete(&id)
+        .map_err(|e| e.to_string())
+}
+
+// ---- skill marketplace ----
+
+#[tauri::command]
+async fn market_search(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::MarketplaceSkill>, String> {
+    marketplace_manager(&state)
+        .search(&query)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn market_info(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::MarketplaceSkill, String> {
+    marketplace_manager(&state)
+        .info(&name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn market_install(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    marketplace_manager(&state)
+        .install(&state.skill_manager, &name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn market_rate(
+    name: String,
+    rating: u8,
+    rater: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::SkillRating, String> {
+    marketplace_manager(&state)
+        .rate(&name, rating, rater.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn market_stats(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::MarketplaceStats, String> {
+    marketplace_manager(&state)
+        .stats()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn market_refresh(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::MarketplaceStats, String> {
+    marketplace_manager(&state)
+        .refresh()
+        .map_err(|e| e.to_string())
+}
+
+// ---- plugins ----
+
+#[tauri::command]
+async fn list_plugins(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::Plugin>, String> {
+    plugin_manager(&state)
+        .list_plugins()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn register_plugin(
+    name: String,
+    dir: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::Plugin, String> {
+    plugin_manager(&state)
+        .register_plugin(&name, std::path::Path::new(&dir))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn unregister_plugin(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    plugin_manager(&state)
+        .unregister_plugin(&name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_plugin_enabled(
+    name: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    if enabled {
+        plugin_manager(&state).enable_plugin(&name)
+    } else {
+        plugin_manager(&state).disable_plugin(&name)
+    }
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn run_plugin_hook(
+    event: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::PluginRunResult>, String> {
+    plugin_manager(&state)
+        .run_hook(&event)
+        .map_err(|e| e.to_string())
+}
+
+// ---- notification channels ----
+
+#[tauri::command]
+async fn list_notify_channels(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::NotifyChannel>, String> {
+    notifier(&state).list_channels().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn add_notify_channel(
+    id: String,
+    kind: String,
+    target: String,
+    from: Option<String>,
+    subject_prefix: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::NotifyChannel, String> {
+    let config = match kind.as_str() {
+        "webhook" => agenthub_core::ChannelConfig::Webhook {
+            url: target,
+            headers: Vec::new(),
+        },
+        "email" => agenthub_core::ChannelConfig::Email {
+            to: target,
+            from: from.unwrap_or_else(|| "agenthub@localhost".to_string()),
+            subject_prefix,
+        },
+        "file" => agenthub_core::ChannelConfig::File { path: target },
+        other => return Err(format!("Invalid channel kind '{}'", other)),
+    };
+    notifier(&state)
+        .add_channel(&id, config)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn remove_notify_channel(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    notifier(&state)
+        .remove_channel(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_notify_channel_enabled(
+    id: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::NotifyChannel, String> {
+    notifier(&state)
+        .set_channel_enabled(&id, enabled)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn send_notification(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::ChannelResult>, String> {
+    let catalog = state.catalog.read().await;
+    let report = state.monitor.run(&catalog).map_err(|e| e.to_string())?;
+    notifier(&state).send(&report).map_err(|e| e.to_string())
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -2439,7 +2813,37 @@ fn main() {
             delete_workflow,
             run_workflow,
             extract_prompt_from_session,
-            get_dashboard_html
+            get_dashboard_html,
+            list_users,
+            create_user,
+            delete_user,
+            add_user_role,
+            remove_user_role,
+            grant_permission,
+            revoke_permission,
+            list_permissions,
+            check_permission,
+            publish_prompt,
+            list_community_prompts,
+            get_community_prompt,
+            install_community_prompt,
+            delete_community_prompt,
+            market_search,
+            market_info,
+            market_install,
+            market_rate,
+            market_stats,
+            market_refresh,
+            list_plugins,
+            register_plugin,
+            unregister_plugin,
+            set_plugin_enabled,
+            run_plugin_hook,
+            list_notify_channels,
+            add_notify_channel,
+            remove_notify_channel,
+            set_notify_channel_enabled,
+            send_notification
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

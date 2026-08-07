@@ -16,6 +16,7 @@ hostname = "0.4"
 dirs = "6"
 rand = "0.8"
 shell-words = "1.1"
+ureq = { version = "3.3", default-features = false, features = ["json", "rustls"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

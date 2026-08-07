@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added (Wave 4: governance + sharing + extensibility + alerting)
+- **Users & permissions (Config)**: `UserManager` with `users.yaml` / `permissions.yaml`;
+  built-in `admin` role bypasses all checks, `operator`/`viewer` roles, fine-grained
+  grants scoped per module and per agent (`read|write|admin`, `*` wildcards, write-implies-read)
+- **Prompt community sharing**: `prompts/community/` snapshots with provenance
+  (publisher, publish time, source id) — publish/install fully offline; the community
+  directory can be synced via git/shared storage
+- **Skill marketplace**: local registry under `skills/marketplace/` with search
+  (name/description/tags), ratings (1-5 with history), install counters, index refresh
+  and package import from a source directory
+- **Plugin system (Skill)**: plugins are directories with `plugin.yaml` manifests and
+  hook commands for `on_install` / `on_uninstall` / `on_session_end` / `on_monitor` /
+  `on_backup`; hooks run with captured output and a bounded timeout
+- **Alert notification channels (cross-cutting)**: `notify.yaml`-configured channels —
+  webhook (HTTP(S) JSON POST via `ureq`, bounded timeouts), email (RFC-2822 `.eml` spool,
+  MTA delivery out of scope) and file append; `monitor --notify` pushes alerts through them
+- **Backup extension**: users, permissions, community prompts and notify channels are now
+  included in backups (secret values remain excluded)
+- **CLI**: `config user list|show|create|delete|role`, `config perm grant|revoke|list|check`,
+  `prompt publish`, `prompt community list|show|install|delete`,
+  `skill market refresh|search|info|install|rate|stats|add-package`, `plugin list|show|register|unregister|enable|disable|run`,
+  `notify list|add|remove|enable|disable|send`, `monitor --notify`
+- **Tauri**: `list/create/delete_user`, `add/remove_user_role`, `grant/revoke/list/check_permission`,
+  `publish_prompt`, `list/get/install/delete_community_prompt`, `market_*`,
+  `list/register/unregister_plugin`, `set_plugin_enabled`, `run_plugin_hook`,
+  `list/add/remove/set_enabled_notify_channel`, `send_notification`
+- **UI**: new **Extensions** view (Marketplace / Plugins / Notifications / Users tabs),
+  Prompt Manager community tab (publish/install/delete community prompts)
+
 ### Changed
 - **UI: full M3 token migration** — ConfigManager, SkillManager, PromptManager, SessionManager,
   MemoryManager and DiagnosticView were still on legacy hardcoded colors (~150 occurrences)

@@ -4,12 +4,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::audit::{AuditEvent, AuditManager};
+use crate::community::{CommunityManager, CommunityPrompt};
 use crate::config::{AgentConfig, ConfigManager};
 use crate::error::{AgentHubError, Result};
 use crate::graph::KnowledgeGraph;
 use crate::memory::{MemoryEntry, MemoryManager};
+use crate::notify::{Notifier, NotifyChannel};
 use crate::prompt::{PromptManager, PromptTemplate};
 use crate::session::{Session, SessionManager, SessionTemplate};
+use crate::users::{Permission, User, UserManager};
 use crate::workflow::{Workflow, WorkflowManager};
 
 /// Current backup file format version.
@@ -27,6 +30,14 @@ pub struct BackupCounts {
     pub workflows: usize,
     #[serde(default)]
     pub memory_graph: bool,
+    #[serde(default)]
+    pub users: usize,
+    #[serde(default)]
+    pub permissions: usize,
+    #[serde(default)]
+    pub community_prompts: usize,
+    #[serde(default)]
+    pub notify_channels: usize,
     pub audit_events: usize,
 }
 
@@ -55,6 +66,14 @@ pub struct BackupData {
     pub workflows: Vec<Workflow>,
     #[serde(default)]
     pub memory_graph: Option<KnowledgeGraph>,
+    #[serde(default)]
+    pub users: Vec<User>,
+    #[serde(default)]
+    pub permissions: Vec<Permission>,
+    #[serde(default)]
+    pub community_prompts: Vec<CommunityPrompt>,
+    #[serde(default)]
+    pub notify_channels: Vec<NotifyChannel>,
     #[serde(default)]
     pub audit_events: Vec<AuditEvent>,
 }
@@ -108,6 +127,17 @@ impl BackupManager {
         let memory_graph = memory_manager.load_graph().ok();
         let audit_events = audit_manager.load_all()?;
 
+        // Wave 4 data: users/permissions, community prompts, notify channels.
+        let user_manager = UserManager::new(self.base_dir.clone());
+        let users = user_manager.list_users().unwrap_or_default();
+        let permissions = user_manager.list_permissions(None).unwrap_or_default();
+        let community_prompts = CommunityManager::new(self.base_dir.join("prompts"))
+            .list()
+            .unwrap_or_default();
+        let notify_channels = Notifier::new(self.base_dir.clone())
+            .list_channels()
+            .unwrap_or_default();
+
         let counts = BackupCounts {
             configs: configs.len(),
             prompts: prompts.len(),
@@ -117,6 +147,10 @@ impl BackupManager {
             memories: memories.len(),
             workflows: workflows.len(),
             memory_graph: memory_graph.is_some(),
+            users: users.len(),
+            permissions: permissions.len(),
+            community_prompts: community_prompts.len(),
+            notify_channels: notify_channels.len(),
             audit_events: audit_events.len(),
         };
 
@@ -148,6 +182,10 @@ impl BackupManager {
             memories,
             workflows,
             memory_graph,
+            users,
+            permissions,
+            community_prompts,
+            notify_channels,
             audit_events,
         };
 
@@ -235,6 +273,13 @@ impl BackupManager {
             )
             .map_err(|e| AgentHubError::BackupError(format!("Failed to write graph: {}", e)))?;
         }
+
+        // Wave 4 data: users/permissions, community prompts, notify channels.
+        let user_manager = UserManager::new(self.base_dir.clone());
+        user_manager.import_users(&data.users)?;
+        user_manager.import_permissions(&data.permissions)?;
+        CommunityManager::new(self.base_dir.join("prompts")).import(&data.community_prompts)?;
+        Notifier::new(self.base_dir.clone()).import_channels(&data.notify_channels)?;
 
         // Replace the audit log with the backup's events.
         audit_manager.clear()?;
@@ -341,6 +386,11 @@ mod tests {
         assert_eq!(manifest.counts.memories, 1);
         assert_eq!(manifest.counts.workflows, 1);
         assert_eq!(manifest.counts.audit_events, 1);
+        // Wave 4: admin user is auto-created; community + notify included.
+        assert_eq!(manifest.counts.users, 1);
+        assert_eq!(manifest.counts.permissions, 0);
+        assert_eq!(manifest.counts.community_prompts, 0);
+        assert_eq!(manifest.counts.notify_channels, 0);
 
         // Backup operation itself is audited
         let audit = AuditManager::new(base.join("audit"));
@@ -415,6 +465,10 @@ mod tests {
                     memories: 0,
                     workflows: 0,
                     memory_graph: false,
+                    users: 0,
+                    permissions: 0,
+                    community_prompts: 0,
+                    notify_channels: 0,
                     audit_events: 0,
                 },
             },
@@ -426,6 +480,10 @@ mod tests {
             memories: Vec::new(),
             workflows: Vec::new(),
             memory_graph: None,
+            users: Vec::new(),
+            permissions: Vec::new(),
+            community_prompts: Vec::new(),
+            notify_channels: Vec::new(),
             audit_events: Vec::new(),
         };
         std::fs::write(&backup_path, serde_json::to_string_pretty(&data).unwrap()).unwrap();

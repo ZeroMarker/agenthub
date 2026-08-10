@@ -2,6 +2,14 @@
 
 > 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill）；**保留 overview（概览）为独立只读模块**；审计日志、备份/恢复作为横切能力（非模块），详见 goal.md v0.5。
 
+## 发布记录（2026-08-10）— ✅ v1.4.0 已发布
+
+- [x] v1.4.0（图标重设计 + 发版流程修复）：9 平台产物 + 4 SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.4.0
+- [x] 新发版流程首次实战验证：push tag → prepare 幂等预建 draft → releaseId 直传 → 4 平台构建上传 → 校验和附加 → `gh release edit --draft=false`，全程零手动干预
+- [x] 新流程暴露 2 个 bug 已修复（同轮内）：① prepare 无 checkout，gh 无法推断仓库 → 显式 `-R github.repository`；② `gh release view --json id` 返回 GraphQL node_id（`RE_...`）导致 tauri-action `Number()` → NaN 跳过全部上传 → 改用 `--json databaseId`（数字 REST id）
+- [x] 校验和验证：SHA256SUMS 4 文件 9 条目全部 sha256sum -c PASS
+- [x] 版本同步 1.3.0→1.4.0：Cargo.toml/Cargo.lock（含 src-tauri `agenthub` 包 1.2.0 漂移一并修正）/package.json/package-lock.json/tauri.conf.json
+
 ## 发布记录（2026-08-07）— ✅ v1.3.0 已发布
 
 - [x] v1.3.0（wave 4 + wave 5 + M3 token 全量迁移）：9 平台产物 + 4 SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.3.0

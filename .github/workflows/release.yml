@@ -46,7 +46,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.resolve.outputs.tag }}"
-          gh release create "$TAG" \
+          gh release create "$TAG" -R "${{ github.repository }}" \
             --draft \
             --title "AgentHub $TAG" \
             --notes "## AgentHub $TAG
@@ -55,7 +55,7 @@ jobs:
 
             SHA-256 checksums are attached for every artifact. Signing status per platform: see [docs/signing-policy.md](docs/signing-policy.md). Unsigned artifacts are explicitly declared there." \
             || echo "::warning::Draft release for $TAG already exists, reusing it"
-          RELEASE_ID="$(gh release view "$TAG" --json id -q .id)"
+          RELEASE_ID="$(gh release view "$TAG" -R "${{ github.repository }}" --json id -q .id)"
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
           echo "Draft release #$RELEASE_ID ready for $TAG"
 

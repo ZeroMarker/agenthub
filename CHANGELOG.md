@@ -10,6 +10,14 @@ All notable changes to this project will be documented in this file.
   mismatched blue window icon / purple favicon; updated Tauri icons (PNG/ICO/ICNS),
   `favicon.svg`, and the in-app nav-rail brand mark
 
+### Fixed
+- **Release workflow 403**: root-caused `Resource not accessible by integration` when
+  tauri-action created the release on tag-push runs — repo Actions default workflow
+  permissions were `read`; set to `write`. Hardened `release.yml` with a `prepare` job
+  that resolves the tag and idempotently pre-creates the draft release, passing
+  `releaseId` to tauri-action (upload-only path, no release creation). Added
+  `workflow_dispatch` `version` input for manual releases
+
 ## [1.3.0] - 2026-08-07
 
 ### Added (Wave 4: governance + sharing + extensibility + alerting)

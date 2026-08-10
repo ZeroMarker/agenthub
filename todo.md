@@ -18,7 +18,7 @@
 - [x] 发版中 tauri-action 创建 release 403 排查：probe 证实 GITHUB_TOKEN 有写权限（POST 201）；workflow_dispatch 下 tauri-action 正常；最终以「预创建 draft release → push tag」绕过，4/4 平台上传成功
 - [x] tauri-action 升级 `@v0` → `@v1`（v1.0.0，2026-06-29），inputs 全兼容
 - [x] UI：Material 3 Expressive 增强（spring 动效、expressive 形状、导航激活指示条）
-- [x] 遗留：v1.1.0 发版时 push-tag 场景的 tauri-action 403 根因未定（GitHub 端行为）；后续发版可复用「预建 draft」流程
+- [x] 遗留已修复（2026-08-10）：push-tag 场景 tauri-action 403 根因确认——仓库 Actions 默认权限 `default_workflow_permissions: read`（`Resource not accessible by integration`）；已改为 `write` 并加固 release.yml：`prepare` 任务幂等预建 draft release + `releaseId` 直传（tauri-action 只走上传路径）+ `workflow_dispatch` 支持 `version` 输入手动发版
 
 ## UI 全面优化（2026-08-06）— ✅ 完成（M3 token 全量迁移 + 缺陷修复）
 

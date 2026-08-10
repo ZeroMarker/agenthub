@@ -5,12 +5,62 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.4.0 → tag v1.4.0). Leave empty when triggered by a pushed tag.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
 
 jobs:
+  # Resolve the release tag and ensure the draft release exists BEFORE the build matrix.
+  # tauri-action historically hit "Resource not accessible by integration" (403) when it
+  # created the release itself on tag-push runs; pre-creating the draft via `gh` (proven
+  # working) and handing tauri-action a releaseId keeps it on the upload-only path.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      release_id: ${{ steps.ensure.outputs.release_id }}
+    steps:
+      - name: Resolve release tag
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v${{ inputs.version }}"
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "v" ]; then
+            echo "::error::Could not resolve release tag — push a v* tag or provide the workflow_dispatch 'version' input"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: $TAG"
+
+      - name: Ensure draft release exists
+        id: ensure
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.resolve.outputs.tag }}"
+          gh release create "$TAG" \
+            --draft \
+            --title "AgentHub $TAG" \
+            --notes "## AgentHub $TAG
+
+            See [CHANGELOG](CHANGELOG.md) for details.
+
+            SHA-256 checksums are attached for every artifact. Signing status per platform: see [docs/signing-policy.md](docs/signing-policy.md). Unsigned artifacts are explicitly declared there." \
+            || echo "::warning::Draft release for $TAG already exists, reusing it"
+          RELEASE_ID="$(gh release view "$TAG" --json id -q .id)"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+          echo "Draft release #$RELEASE_ID ready for $TAG"
+
   release:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -59,22 +109,13 @@ jobs:
         run: npm ci
         working-directory: agenthub-ui
 
-      - name: Build Tauri app
+      - name: Build Tauri app and upload to release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: agenthub-ui
-          tagName: ${{ github.ref_name }}
-          releaseName: 'AgentHub ${{ github.ref_name }}'
-          releaseBody: |
-            ## AgentHub ${{ github.ref_name }}
-            
-            See [CHANGELOG](CHANGELOG.md) for details.
-
-            SHA-256 checksums are attached for every artifact. Signing status per platform: see [docs/signing-policy.md](docs/signing-policy.md). Unsigned artifacts are explicitly declared there.
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.prepare.outputs.release_id }}
           args: --target ${{ matrix.target }}
 
       - name: Generate SHA-256 checksums
@@ -119,5 +160,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if compgen -G 'SHA256SUMS-*' > /dev/null; then
-            gh release upload "${{ github.ref_name }}" SHA256SUMS-* --clobber
+            gh release upload "${{ needs.prepare.outputs.tag }}" SHA256SUMS-* --clobber
           fi

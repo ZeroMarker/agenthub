@@ -482,10 +482,12 @@ cargo test -- --nocapture
 
 ### 发布流水线（`.github/workflows/release.yml`）
 
-触发条件：推送 `v*` tag
+触发条件：推送 `v*` tag，或 `workflow_dispatch` 手动触发（输入 `version`，如 `1.4.0` → 自动创建 `v1.4.0` tag + draft release）
 
-- 自动构建 Windows / macOS (ARM + x86) / Linux 安装包
-- 生成 GitHub Release draft
+- `prepare` 任务先解析 tag 并**幂等预建 draft release**（`gh release create --draft`，已存在则复用）
+- 自动构建 Windows / macOS (ARM + x86) / Linux 安装包，上传到预建的 draft release（`releaseId` 直传，避开 tauri-action 自建 release）
+- 生成 GitHub Release draft，全部资产上传后手动发布（`gh release edit --draft=false`）
+- 历史问题：tauri-action 在 push-tag 触发下自建 release 曾报 `403 Resource not accessible by integration`（仓库 Actions 默认权限为 read 所致，已改为 write；且预建 draft + `releaseId` 使发布走上传专用路径，不再依赖其 createRelease）
 - 支持的目标平台：
   - `x86_64-pc-windows-msvc`
   - `aarch64-apple-darwin`

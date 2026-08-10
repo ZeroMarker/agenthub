@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.4.0] - 2026-08-10
 
 ### Changed
 - **App icon redesign**: unified brand mark across desktop and web — purple→indigo squircle

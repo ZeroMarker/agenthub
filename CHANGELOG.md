@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **App icon redesign**: unified brand mark across desktop and web — purple→indigo squircle
+  gradient with a rounded white lightning bolt and a cyan hub-orbit node, replacing the
+  mismatched blue window icon / purple favicon; updated Tauri icons (PNG/ICO/ICNS),
+  `favicon.svg`, and the in-app nav-rail brand mark
+
 ## [1.3.0] - 2026-08-07
 
 ### Added (Wave 4: governance + sharing + extensibility + alerting)

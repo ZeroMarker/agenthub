@@ -20,7 +20,11 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
     <!-- M3 Navigation Rail -->
     <nav class="nav-rail" role="navigation" aria-label="Main navigation">
       <div class="nav-rail-brand">
-        <span class="brand-icon">⚡</span>
+        <span class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          </svg>
+        </span>
         <span class="brand-label">AgentHub</span>
       </div>
       <div class="nav-rail-items">
@@ -122,8 +126,10 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
 }
 
 .brand-icon {
-  font-size: 1.5rem;
   flex-shrink: 0;
+  color: var(--md-sys-color-primary);
+  display: flex;
+  align-items: center;
 }
 
 .brand-label {

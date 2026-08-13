@@ -82,6 +82,7 @@ cargo test -p agenthub-core -p agenthub-cli
 export NODE_OPTIONS="--max-old-space-size=512"
 npm ci --no-audit --no-fund
 npm run build        # vue-tsc + vite build
+npm test             # Vitest 组件测试
 ```
 
 ---
@@ -164,7 +165,7 @@ jobs:
       CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Disk check
         run: df -h / && free -m
@@ -196,13 +197,15 @@ jobs:
     env:
       NODE_OPTIONS: --max-old-space-size=512
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 'lts/*'
       - run: npm ci --no-audit --no-fund
         working-directory: agenthub-ui
       - run: npm run build
+        working-directory: agenthub-ui
+      - run: npm test
         working-directory: agenthub-ui
 ```
 
@@ -232,7 +235,7 @@ cargo test -p agenthub-core -p agenthub-cli
 
 # 前端（宿主机或 Node 容器）：
 export NODE_OPTIONS="--max-old-space-size=512"
-cd agenthub-ui && npm ci --no-audit --no-fund && npm run build
+cd agenthub-ui && npm ci --no-audit --no-fund && npm run build && npm test
 ```
 
 ---

@@ -1,7 +1,7 @@
 # 代码签名策略
 
 > 版本：v1.0
-> 状态：草案（发布于 v1.0.0 前定稿）
+> 状态：规划中（截至 v1.4.0，各平台产物尚未签名；当前依赖 SHA-256 校验和）
 > 相关：`SECURITY.md`、`.github/workflows/release.yml`
 
 本文档定义 AgentHub 发布产物的代码签名策略，覆盖 Windows、macOS 和 Linux 三个平台。
@@ -41,7 +41,7 @@
 |---|---|
 | 现状 | Linux 无统一的强制签名机制；发行版仓库是主要信任链 |
 | 推荐做法 | 发布 `.deb`/`.rpm` 时使用发行版打包签名（如 `debsign`、`rpmsign`），AppImage 可选用 GPG 签名 |
-| 最低要求 | 附带 `SHA-256SUMS.txt` + 发布者 GPG 公钥，用户可自行验证 |
+| 最低要求 | 附带 `SHA256SUMS-<target>`；引入 GPG 签名后同时发布公钥，供用户验证 |
 
 ## 3. 未签名产物声明
 
@@ -60,7 +60,7 @@
 - [ ] 所有证书/密钥已注入 CI secrets（`WINDOWS_CERT_BASE64`、`MACOS_CERT_P12`、`APPLE_API_KEY`、`GPG_KEY` 等）
 - [ ] Windows：`signtool` 验证通过（`signtool verify /pa /v`）
 - [ ] macOS：公证完成且 stapler 成功（`xcrun stapler validate`）
-- [ ] 所有产物已生成 `SHA-256SUMS.txt` 并随 Release 上传
+- [x] 所有产物已生成 `SHA256SUMS-<target>` 并随 Release 上传
 - [ ] 未签名平台已按模板声明
 - [ ] 下载并核验任一产物的校验和与签名
 
@@ -68,7 +68,7 @@
 
 ```bash
 # 校验和
-sha256sum -c SHA-256SUMS.txt
+sha256sum -c SHA256SUMS-<target>
 
 # Windows 签名验证
 signtool verify /pa /v <file>.exe

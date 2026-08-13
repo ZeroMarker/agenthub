@@ -9,7 +9,9 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in AgentHub, please report it privately by emailing **security@agenthub.dev** (placeholder — replace with actual address before release).
+If you discover a security vulnerability in AgentHub, report it privately
+through the repository's **Security → Report a vulnerability** form:
+<https://github.com/ZeroMarker/agenthub/security/advisories/new>.
 
 **Do not** report security vulnerabilities through public GitHub issues.
 
@@ -27,43 +29,47 @@ You should receive a response within 48 hours. If the issue is confirmed, we wil
 AgentHub executes system commands (npm, pip, winget, brew) to install and uninstall agents. Key security considerations:
 
 - **Command injection**: All external commands use structured arguments, not shell concatenation. User-provided agent names are validated before passing to commands.
+- **Filesystem boundaries**: Identifiers used as persisted path components reject traversal, path separators, control characters, and unsafe relative paths. Backup and import flows reuse the same validation.
 - **Supply chain**: Install commands use official package registries. Manual installers only open the agent's homepage — no auto-execution of untrusted scripts.
 - **Permissions**: AgentHub does not request elevated privileges. All operations run at the user's permission level.
 
 ## Code Signing
 
-AgentHub release binaries and installers are signed to ensure authenticity and integrity.
+AgentHub release binaries and installers are currently **unsigned**. Every
+release includes SHA-256 checksums so users can verify download integrity. The
+planned platform signing approach is documented in `docs/signing-policy.md`.
 
 ### Windows
 
-- **CLI binaries**: Signed with an Extended Validation (EV) code signing certificate via Azure Key Vault during the release workflow.
-- **Desktop installer (MSI)**: The Tauri-bundled MSI is signed with the same certificate. Windows SmartScreen will show the publisher name on first run.
-- **Signature verification**: Run `Get-AuthenticodeSignature agenthub-cli.exe` in PowerShell to verify.
+- Windows binaries and installers are currently unsigned and may trigger
+  SmartScreen warnings. Verify their published SHA-256 checksums before use.
 
 ### macOS
 
-- **CLI binaries**: Signed and notarized by Apple Notary Service using an Apple Developer ID certificate.
-- **Desktop app (DMG)**: The `.dmg` is signed and notarized. Gatekeeper will allow installation without override.
-- **Signature verification**: Run `codesign -dv --verbose=4 /path/to/agenthub` and `spctl -a -t exec -vv /path/to/agenthub`.
+- macOS binaries and application bundles are currently unsigned and not
+  notarized. Gatekeeper may require an explicit user override after checksum
+  verification.
 
 ### Linux
 
-- **AppImage**: GPG-signed using the project's release key. Verify with `gpg --verify agenthub-x86_64.AppImage.asc`.
-- **DEB/RPM packages**: Signed with a Debian-compliant signing key at build time.
+- Linux AppImage, DEB and RPM artifacts are currently unsigned. Verify the
+  published SHA-256 checksums before installation.
 
 ### Checksums
 
-Every release publishes SHA-256 checksums for all artifacts in a `SHA256SUMS` file. Verify before use:
+Every release publishes platform-specific SHA-256 checksum files. Download the
+checksum file attached alongside the artifact and verify before use:
 
 ```bash
-# Compare your download against the published checksum
-sha256sum agenthub-cli-x86_64-pc-windows-msvc.zip
-# Expected output should match the SHA256SUMS file
+sha256sum -c SHA256SUMS-<target>
 ```
 
 ### CI/CD Integrity
 
-All release builds run on GitHub Actions hosted runners. Build steps are defined in `.github/workflows/release.yml` and are reproducible via the tagged commit. No unsigned artifacts are published to release pages.
+All release builds run on GitHub Actions hosted runners. Build steps are
+defined in `.github/workflows/release.yml` and are reproducible from the tagged
+commit. Release notes must disclose the current unsigned status; checksums are
+generated and attached by the release workflow.
 
 ## Security Best Practices
 
@@ -72,4 +78,5 @@ All release builds run on GitHub Actions hosted runners. Build steps are defined
 3. Keep AgentHub updated to the latest version
 4. Report suspicious package behavior through the issue tracker
 5. Verify SHA-256 checksums before running downloaded release artifacts
-6. On macOS, verify code signatures with `codesign` and `spctl` before first launch
+6. Treat operating-system warnings for unsigned artifacts seriously and only
+   override them after confirming the checksum and release source

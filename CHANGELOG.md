@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Filesystem hardening**: validate every user-controlled identifier used as a
+  persisted path component across config, prompts, sessions, workflows,
+  community prompts, marketplace ratings, skills, plugins and memories;
+  imported memory paths must be relative and contain no traversal components
+- **CI coverage**: run frontend Vitest tests on every `main` push and pull
+  request, lint all Rust targets with Clippy, and use the Node.js 24-compatible
+  `actions/checkout@v5` and `actions/setup-node@v5` actions
+- **Architecture documentation**: record the catalog and installer decisions in
+  ADR 0001 and mark the original v1.0 project plan as historical
+
+### Fixed
+- Prevent crafted IDs and imported backup data from escaping their intended
+  storage directories through `..`, path separators or unsafe relative paths
+
 ## [1.4.0] - 2026-08-10
 
 ### Changed

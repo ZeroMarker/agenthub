@@ -415,7 +415,7 @@ cargo run -- list
 cargo fmt --all
 
 # Rust lint
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 # 前端类型检查
 cd agenthub-ui && npm run build
@@ -441,6 +441,9 @@ cargo test -p agenthub-core
 
 # 运行带输出的测试
 cargo test -- --nocapture
+
+# 运行前端测试
+cd agenthub-ui && npm test
 ```
 
 ### 测试层级
@@ -462,8 +465,9 @@ cargo test -- --nocapture
 
 - Rust 测试 (`cargo test --workspace`)
 - 格式检查 (`cargo fmt --check`)
-- Clippy lint (`cargo clippy -D warnings`)
+- Clippy lint (`cargo clippy --workspace --all-targets -- -D warnings`)
 - 前端构建 (`npm run build`)
+- 前端测试 (`npm test`)
 
 ### 低资源 CI（`.github/workflows/ci-low-resource.yml`）
 

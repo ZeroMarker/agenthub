@@ -38,7 +38,7 @@
 
 ### 最近验证
 
-- [x] 2026-08-13 CI：Rust workspace tests + fmt + clippy 通过，前端类型检查/生产构建通过（run `31657765244`）
+- [x] 2026-08-13 CI：Rust workspace tests + fmt + all-targets clippy 通过，前端类型检查/生产构建/Vitest 通过（run `31658863746`）
 
 ## 发布记录（2026-08-10）— ✅ v1.4.0 已发布
 

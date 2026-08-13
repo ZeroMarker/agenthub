@@ -28,12 +28,13 @@ cargo test --workspace
 
 # Format and lint
 cargo fmt --all -- --check
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Frontend (Tauri desktop)
 cd agenthub-ui
 npm install
 npm run build
+npm test
 ```
 
 ## Making Changes
@@ -42,12 +43,13 @@ npm run build
 2. Make your changes
 3. Run `cargo test --workspace` to ensure all tests pass
 4. Run `cargo fmt --all` to format code
-5. Run `cargo clippy --workspace -- -D warnings` for lint
+5. Run `cargo clippy --workspace --all-targets -- -D warnings` for lint
 6. Submit a pull request
 
 ## Code Standards
 
 - Respect the single source of truth: agent metadata lives in `agents.json` and is consumed through `agenthub-core`.
+- Follow [ADR 0001](docs/adr/0001-catalog-and-installer-architecture.md) for catalog and installer architecture decisions.
 - All installer logic must go through the installer adapter layer in `agenthub-core` — no hardcoded commands in CLI or UI.
 - New agents or changes to agent metadata should be made in `agents.json` with appropriate verification dates.
 - Tests are required for new installer adapters, status detection, and catalog parsing.
@@ -94,7 +96,8 @@ Before submitting a PR, verify:
 
 - [ ] `cargo test --workspace` passes
 - [ ] `cargo fmt --all -- --check` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [ ] `cargo clippy --workspace --all-targets -- -D warnings` passes
 - [ ] `cd agenthub-ui && npm run build` succeeds
+- [ ] `cd agenthub-ui && npm test` passes
 - [ ] New agents are verified and tested on at least one platform
 - [ ] CHANGELOG.md is updated

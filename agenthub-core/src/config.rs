@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
 use crate::secrets::{RotationResult, SecretInfo, SecretStore};
+use crate::storage::is_safe_id;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -161,6 +162,15 @@ pub struct ConfigTemplate {
 }
 
 impl ConfigManager {
+    fn validate_id(kind: &str, id: &str) -> Result<()> {
+        if !is_safe_id(id) {
+            return Err(AgentHubError::ConfigError(format!(
+                "Invalid {kind} id: {id}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(config_dir: PathBuf) -> Self {
         Self {
             config_dir,
@@ -215,6 +225,7 @@ impl ConfigManager {
     }
 
     pub fn load_config(&self, agent_id: &str) -> Result<AgentConfig> {
+        Self::validate_id("agent", agent_id)?;
         let path = self.agent_config_path(agent_id);
         if !path.exists() {
             return Err(AgentHubError::ConfigError(format!(
@@ -231,6 +242,7 @@ impl ConfigManager {
     }
 
     pub fn save_config(&self, config: &AgentConfig) -> Result<()> {
+        Self::validate_id("agent", &config.agent_id)?;
         let agents_dir = self.config_dir.join("agents");
         std::fs::create_dir_all(&agents_dir).map_err(|e| {
             AgentHubError::ConfigError(format!("Failed to create config dir: {}", e))
@@ -515,6 +527,7 @@ impl ConfigManager {
     }
 
     pub fn get_template(&self, id: &str) -> Result<ConfigTemplate> {
+        Self::validate_id("template", id)?;
         let path = self.template_path(id);
         if !path.exists() {
             return Err(AgentHubError::ConfigError(format!(
@@ -531,6 +544,7 @@ impl ConfigManager {
     }
 
     pub fn save_template(&self, template: &ConfigTemplate) -> Result<()> {
+        Self::validate_id("template", &template.id)?;
         std::fs::create_dir_all(self.templates_dir()).map_err(|e| {
             AgentHubError::ConfigError(format!("Failed to create templates dir: {}", e))
         })?;
@@ -558,6 +572,7 @@ impl ConfigManager {
         secret_keys: Vec<String>,
         custom: HashMap<String, ConfigValue>,
     ) -> Result<ConfigTemplate> {
+        Self::validate_id("template", id)?;
         let path = self.template_path(id);
         if path.exists() {
             return Err(AgentHubError::ConfigError(format!(
@@ -587,6 +602,7 @@ impl ConfigManager {
     }
 
     pub fn delete_template(&self, id: &str) -> Result<bool> {
+        Self::validate_id("template", id)?;
         let path = self.template_path(id);
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| {

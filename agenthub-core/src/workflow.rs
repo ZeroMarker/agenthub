@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
 use crate::skill::SkillManager;
+use crate::storage::is_safe_id;
 
 /// One step in a workflow: run a skill (optionally with arguments).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +70,15 @@ pub struct WorkflowManager {
 }
 
 impl WorkflowManager {
+    fn validate_id(id: &str) -> Result<()> {
+        if !is_safe_id(id) {
+            return Err(AgentHubError::SkillError(format!(
+                "Invalid workflow id: {id}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(skills_dir: PathBuf) -> Self {
         Self {
             workflows_dir: skills_dir.join("workflows"),
@@ -111,6 +121,7 @@ impl WorkflowManager {
     }
 
     pub fn get_workflow(&self, id: &str) -> Result<Workflow> {
+        Self::validate_id(id)?;
         let path = self.workflow_path(id);
         if !path.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -131,11 +142,7 @@ impl WorkflowManager {
         description: &str,
         steps: Vec<WorkflowStep>,
     ) -> Result<Workflow> {
-        if id.trim().is_empty() {
-            return Err(AgentHubError::SkillError(
-                "Workflow id must not be empty".to_string(),
-            ));
-        }
+        Self::validate_id(id)?;
         if steps.is_empty() {
             return Err(AgentHubError::SkillError(
                 "Workflow must contain at least one step".to_string(),
@@ -155,6 +162,7 @@ impl WorkflowManager {
     }
 
     pub fn save_workflow(&self, workflow: &Workflow) -> Result<()> {
+        Self::validate_id(&workflow.id)?;
         std::fs::create_dir_all(&self.workflows_dir).map_err(|e| {
             AgentHubError::SkillError(format!("Failed to create workflows dir: {}", e))
         })?;
@@ -167,6 +175,7 @@ impl WorkflowManager {
     }
 
     pub fn delete_workflow(&self, id: &str) -> Result<bool> {
+        Self::validate_id(id)?;
         let path = self.workflow_path(id);
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| {

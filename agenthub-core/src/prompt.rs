@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::storage::is_safe_id;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptVariable {
@@ -130,6 +131,15 @@ pub struct PromptExtraction {
 }
 
 impl PromptManager {
+    fn validate_id(id: &str) -> Result<()> {
+        if !is_safe_id(id) {
+            return Err(AgentHubError::PromptError(format!(
+                "Invalid prompt id: {id}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(prompts_dir: PathBuf) -> Self {
         Self { prompts_dir }
     }
@@ -170,6 +180,7 @@ impl PromptManager {
 
     /// List the historical snapshots of a prompt, oldest first.
     pub fn list_versions(&self, id: &str) -> Result<Vec<PromptTemplate>> {
+        Self::validate_id(id)?;
         let dir = self.versions_dir(id);
         if !dir.exists() {
             return Ok(Vec::new());
@@ -198,6 +209,7 @@ impl PromptManager {
 
     /// Load a specific historical snapshot of a prompt.
     pub fn get_version(&self, id: &str, version: u32) -> Result<PromptTemplate> {
+        Self::validate_id(id)?;
         let path = self.version_path(id, version);
         if !path.exists() {
             return Err(AgentHubError::PromptError(format!(
@@ -228,6 +240,7 @@ impl PromptManager {
 
     /// Import historical snapshots (used by backup restore).
     pub fn import_versions(&self, id: &str, versions: &[PromptTemplate]) -> Result<()> {
+        Self::validate_id(id)?;
         for version in versions {
             let dir = self.versions_dir(id);
             std::fs::create_dir_all(&dir).map_err(|e| {
@@ -363,6 +376,7 @@ impl PromptManager {
     }
 
     pub fn get_prompt(&self, id: &str) -> Result<PromptTemplate> {
+        Self::validate_id(id)?;
         let path = self.prompt_path(id);
         if !path.exists() {
             return Err(AgentHubError::PromptError(format!(
@@ -381,6 +395,7 @@ impl PromptManager {
         description: &str,
         template: &str,
     ) -> Result<PromptTemplate> {
+        Self::validate_id(id)?;
         let path = self.prompt_path(id);
         if path.exists() {
             return Err(AgentHubError::PromptError(format!(
@@ -485,6 +500,7 @@ impl PromptManager {
     }
 
     pub fn save_prompt(&self, prompt: &PromptTemplate) -> Result<()> {
+        Self::validate_id(&prompt.id)?;
         std::fs::create_dir_all(self.templates_dir()).map_err(|e| {
             AgentHubError::PromptError(format!("Failed to create prompts dir: {}", e))
         })?;
@@ -529,6 +545,7 @@ impl PromptManager {
     }
 
     pub fn delete_prompt(&self, id: &str) -> Result<bool> {
+        Self::validate_id(id)?;
         let path = self.prompt_path(id);
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| {

@@ -20,6 +20,7 @@ pub mod secrets;
 pub mod session;
 pub mod skill;
 pub mod status;
+mod storage;
 pub mod users;
 pub mod workflow;
 

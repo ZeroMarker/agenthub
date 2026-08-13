@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::storage::is_safe_id;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -247,6 +248,15 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
+    fn validate_id(kind: &str, id: &str) -> Result<()> {
+        if !is_safe_id(id) {
+            return Err(AgentHubError::SessionError(format!(
+                "Invalid {kind} id: {id}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(sessions_dir: PathBuf) -> Self {
         Self { sessions_dir }
     }
@@ -302,6 +312,7 @@ impl SessionManager {
     }
 
     pub fn get_session(&self, id: &str) -> Result<Session> {
+        Self::validate_id("session", id)?;
         let path = self.session_path(id);
         if !path.exists() {
             return Err(AgentHubError::SessionError(format!(
@@ -343,6 +354,7 @@ impl SessionManager {
     }
 
     pub fn save_session(&self, session: &Session) -> Result<()> {
+        Self::validate_id("session", &session.id)?;
         std::fs::create_dir_all(self.data_dir()).map_err(|e| {
             AgentHubError::SessionError(format!("Failed to create sessions dir: {}", e))
         })?;
@@ -421,6 +433,7 @@ impl SessionManager {
     }
 
     pub fn delete_session(&self, id: &str) -> Result<bool> {
+        Self::validate_id("session", id)?;
         let path = self.session_path(id);
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| {
@@ -545,6 +558,7 @@ impl SessionManager {
         messages: Vec<TemplateMessage>,
         tags: Vec<String>,
     ) -> Result<SessionTemplate> {
+        Self::validate_id("session template", id)?;
         let path = self.template_path(id);
         if path.exists() {
             return Err(AgentHubError::SessionError(format!(
@@ -572,6 +586,7 @@ impl SessionManager {
     }
 
     pub fn save_template(&self, template: &SessionTemplate) -> Result<()> {
+        Self::validate_id("session template", &template.id)?;
         std::fs::create_dir_all(self.templates_dir()).map_err(|e| {
             AgentHubError::SessionError(format!("Failed to create templates dir: {}", e))
         })?;
@@ -626,6 +641,7 @@ impl SessionManager {
     }
 
     pub fn get_template(&self, id: &str) -> Result<SessionTemplate> {
+        Self::validate_id("session template", id)?;
         let path = self.template_path(id);
         if !path.exists() {
             return Err(AgentHubError::SessionError(format!(
@@ -638,6 +654,7 @@ impl SessionManager {
     }
 
     pub fn delete_template(&self, id: &str) -> Result<bool> {
+        Self::validate_id("session template", id)?;
         let path = self.template_path(id);
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| {
@@ -1295,5 +1312,26 @@ mod tests {
         // Default title + same agent
         let fork2 = manager.fork_session(&source.id, None, None).unwrap();
         assert_eq!(fork2.agent, "codex");
+    }
+
+    #[test]
+    fn rejects_unsafe_session_and_template_ids() {
+        let (manager, temp) = create_test_manager();
+        let mut session = manager.create_session("Safe", "codex").unwrap();
+        session.id = "../escape".to_string();
+        assert!(manager.save_session(&session).is_err());
+        assert!(manager.get_session("../escape").is_err());
+        assert!(!temp.path().join("escape.yaml").exists());
+
+        let template = SessionTemplate {
+            id: "../escape".to_string(),
+            name: "Unsafe".to_string(),
+            description: String::new(),
+            agent: None,
+            messages: Vec::new(),
+            tags: Vec::new(),
+            created_at: None,
+        };
+        assert!(manager.save_template(&template).is_err());
     }
 }

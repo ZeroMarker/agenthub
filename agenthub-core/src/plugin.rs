@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::storage::is_safe_id;
 
 /// Built-in lifecycle hook event names.
 pub const HOOK_INSTALL: &str = "on_install";
@@ -74,6 +75,15 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
+    fn validate_name(name: &str) -> Result<()> {
+        if !is_safe_id(name) {
+            return Err(AgentHubError::SkillError(format!(
+                "Invalid plugin name: {name}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(skills_dir: PathBuf) -> Self {
         Self { skills_dir }
     }
@@ -92,6 +102,7 @@ impl PluginManager {
 
     /// Load a plugin manifest from its directory.
     pub fn load_plugin(&self, name: &str) -> Result<Plugin> {
+        Self::validate_name(name)?;
         let dir = self.plugin_dir(name);
         let path = dir.join("plugin.yaml");
         if !path.exists() {
@@ -147,6 +158,7 @@ impl PluginManager {
 
     /// Register a plugin by copying its directory into the plugins dir.
     pub fn register_plugin(&self, name: &str, source_dir: &Path) -> Result<Plugin> {
+        Self::validate_name(name)?;
         let source_manifest = source_dir.join("plugin.yaml");
         if !source_manifest.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -186,6 +198,7 @@ impl PluginManager {
     }
 
     pub fn unregister_plugin(&self, name: &str) -> Result<bool> {
+        Self::validate_name(name)?;
         let dir = self.plugin_dir(name);
         if !dir.exists() {
             return Ok(false);
@@ -197,6 +210,7 @@ impl PluginManager {
     }
 
     pub fn enable_plugin(&self, name: &str) -> Result<()> {
+        Self::validate_name(name)?;
         let dir = self.plugin_dir(name);
         if !dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -210,6 +224,7 @@ impl PluginManager {
     }
 
     pub fn disable_plugin(&self, name: &str) -> Result<()> {
+        Self::validate_name(name)?;
         let dir = self.plugin_dir(name);
         if !dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -498,5 +513,13 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(!results[0].ok);
         assert!(results[1].ok);
+    }
+
+    #[test]
+    fn test_rejects_unsafe_plugin_names() {
+        let temp = TempDir::new().unwrap();
+        let pm = PluginManager::new(temp.path().join("skills"));
+        assert!(pm.load_plugin("../escape").is_err());
+        assert!(pm.unregister_plugin("../escape").is_err());
     }
 }

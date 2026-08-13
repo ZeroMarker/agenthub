@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
 use crate::prompt::{PromptManager, PromptTemplate, PromptVariable};
+use crate::storage::is_safe_id;
 
 /// A prompt published to the community directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +44,15 @@ pub struct CommunityManager {
 }
 
 impl CommunityManager {
+    fn validate_id(id: &str) -> Result<()> {
+        if !is_safe_id(id) {
+            return Err(AgentHubError::PromptError(format!(
+                "Invalid community prompt id: {id}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(prompts_dir: PathBuf) -> Self {
         Self { prompts_dir }
     }
@@ -69,6 +79,7 @@ impl CommunityManager {
         publisher: &str,
         force: bool,
     ) -> Result<CommunityPrompt> {
+        Self::validate_id(&prompt.id)?;
         let path = self.community_path(&prompt.id);
         if path.exists() && !force {
             return Err(AgentHubError::PromptError(format!(
@@ -142,6 +153,7 @@ impl CommunityManager {
     }
 
     pub fn get(&self, id: &str) -> Result<CommunityPrompt> {
+        Self::validate_id(id)?;
         let path = self.community_path(id);
         if !path.exists() {
             return Err(AgentHubError::PromptError(format!(
@@ -162,6 +174,7 @@ impl CommunityManager {
     }
 
     pub fn delete(&self, id: &str) -> Result<bool> {
+        Self::validate_id(id)?;
         let path = self.community_path(id);
         if !path.exists() {
             return Ok(false);
@@ -178,6 +191,7 @@ impl CommunityManager {
             AgentHubError::PromptError(format!("Failed to create community dir: {}", e))
         })?;
         for prompt in prompts {
+            Self::validate_id(&prompt.id)?;
             let content = serde_yaml::to_string(prompt).map_err(|e| {
                 AgentHubError::PromptError(format!("Failed to serialize community prompt: {}", e))
             })?;
@@ -294,5 +308,28 @@ mod tests {
         // With a new id it succeeds
         assert!(cm.install(&pm2, "src", Some("src-clone"), false).is_ok());
         assert!(pm2.get_prompt("src-clone").is_ok());
+    }
+
+    #[test]
+    fn test_import_rejects_unsafe_ids() {
+        let temp = TempDir::new().unwrap();
+        let cm = CommunityManager::new(temp.path().join("prompts"));
+        let prompt = CommunityPrompt {
+            id: "../escape".to_string(),
+            name: "Unsafe".to_string(),
+            description: String::new(),
+            template: String::new(),
+            variables: Vec::new(),
+            tags: Vec::new(),
+            category: None,
+            version: 1,
+            author: None,
+            publisher: "test".to_string(),
+            published_at: Utc::now(),
+            source: None,
+        };
+
+        assert!(cm.import(&[prompt]).is_err());
+        assert!(!temp.path().join("prompts/escape.yaml").exists());
     }
 }

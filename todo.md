@@ -2,6 +2,44 @@
 
 > 规划已修订（2026-08-06）：**移除独立的 management 模块**。原功能归并到所属模块（package/config/session/skill）；**保留 overview（概览）为独立只读模块**；审计日志、备份/恢复作为横切能力（非模块），详见 goal.md v0.5。
 
+## 当前待办（2026-08-13）
+
+> 以本节作为当前执行清单；下方各波次和发布记录仅作历史存档。
+
+### P0：安全与正确性
+
+- [x] 配置、配置模板、提示词和工作流持久化入口拒绝路径穿越与非法 ID（`10c59ef`）
+- [x] 将安全 ID 校验扩展到 Session、Community、Marketplace、Skill、Plugin 和 Memory 等其余文件持久化模块
+- [x] 为各持久化模块增加危险 ID / 相对路径回归测试（`../`、路径分隔符、控制字符、过长 ID）
+- [x] 加固备份恢复和导入流程，所有按 ID/路径恢复的模块复用同一安全校验
+- [ ] Config：配置校验与默认值回退
+- [ ] Config：配置变更历史与回滚
+
+### P1：CI 与工程治理
+
+- [x] CI 前端任务加入 `npm test`，避免仅构建不运行已有 Vitest 测试
+- [x] CI Clippy 扩展为 `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] 升级 `actions/checkout` 与 `actions/setup-node` 到 v5，消除 Node.js 20 action runtime 弃用警告
+- [ ] 建立覆盖率采集与门禁，落实核心模块不低于 80% 的验收目标
+- [ ] 补充导入/恢复、损坏文件、并发写入等负向测试
+- [x] 建立 ADR，记录清单格式、安装器接口和平台策略
+- [x] 将 `PROJECT_PLAN.md` 标记为 v1.0 历史计划，并清理已完成但仍未勾选的发布任务
+
+### P2：产品能力增强
+
+- [ ] Config：增加 OS keyring 后端，保留文件密钥存储作为兼容回退
+- [ ] Skill：在线技能市场与插件市场
+- [ ] Skill：项目级 / 用户级 / 全局级技能作用域
+- [ ] Notify：SMTP 直接发送（当前 email 通道仅生成 `.eml`）
+- [ ] Session：API 调用次数、成本趋势与导出
+- [ ] Prompt：社区远程推送与同步渠道
+- [ ] Overview：交互式 Web 仪表盘与指标钻取（当前为静态 HTML 导出）
+- [ ] Beta：邀请 3–5 名真实用户完成安装、查询、升级和卸载任务测试
+
+### 最近验证
+
+- [x] 2026-08-13 CI：Rust workspace tests + fmt + clippy 通过，前端类型检查/生产构建通过（run `31657765244`）
+
 ## 发布记录（2026-08-10）— ✅ v1.4.0 已发布
 
 - [x] v1.4.0（图标重设计 + 发版流程修复）：9 平台产物 + 4 SHA-256 校验和，https://github.com/ZeroMarker/agenthub/releases/tag/v1.4.0

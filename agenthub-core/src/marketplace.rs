@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
 use crate::skill::SkillManager;
+use crate::storage::is_safe_id;
 
 /// A skill available in the marketplace (as indexed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +83,15 @@ pub struct MarketplaceManager {
 }
 
 impl MarketplaceManager {
+    fn validate_name(name: &str) -> Result<()> {
+        if !is_safe_id(name) {
+            return Err(AgentHubError::SkillError(format!(
+                "Invalid marketplace skill name: {name}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(skills_dir: PathBuf) -> Self {
         Self { skills_dir }
     }
@@ -162,6 +172,9 @@ impl MarketplaceManager {
                     continue;
                 };
                 let name = manifest.name.clone();
+                if !is_safe_id(&name) {
+                    continue;
+                }
                 // Carry over stats from the previous index.
                 let previous = index.skills.iter().find(|s| s.name == name);
                 let (installs, rating_avg, rating_count) = match previous {
@@ -205,6 +218,7 @@ impl MarketplaceManager {
 
     /// Add a skill package (a directory containing SKILL.md) to the marketplace.
     pub fn add_package(&self, name: &str, source_dir: &Path) -> Result<MarketplaceSkill> {
+        Self::validate_name(name)?;
         let manifest_path = source_dir.join("SKILL.md");
         if !manifest_path.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -270,6 +284,7 @@ impl MarketplaceManager {
 
     /// Look up one skill in the index.
     pub fn info(&self, name: &str) -> Result<MarketplaceSkill> {
+        Self::validate_name(name)?;
         let index = self.load_index()?;
         index
             .skills
@@ -286,6 +301,7 @@ impl MarketplaceManager {
     /// Install a marketplace package into the installed skills directory,
     /// bumping the install counter.
     pub fn install(&self, skill_manager: &SkillManager, name: &str) -> Result<()> {
+        Self::validate_name(name)?;
         let skill = self.info(name)?;
         if !skill.available {
             return Err(AgentHubError::SkillError(format!(
@@ -312,6 +328,7 @@ impl MarketplaceManager {
     }
 
     fn load_ratings(&self, name: &str) -> Result<(Option<f64>, u64)> {
+        Self::validate_name(name)?;
         let path = self.ratings_path(name);
         if !path.exists() {
             return Ok((None, 0));
@@ -330,6 +347,7 @@ impl MarketplaceManager {
 
     /// Rate a marketplace skill (1-5). Updates the index average.
     pub fn rate(&self, name: &str, rating: u8, rater: Option<&str>) -> Result<SkillRating> {
+        Self::validate_name(name)?;
         if !(1..=5).contains(&rating) {
             return Err(AgentHubError::SkillError(format!(
                 "Rating must be 1-5, got {}",
@@ -543,5 +561,14 @@ mod tests {
         let info = mm.info("rust-dev").unwrap();
         assert_eq!(info.installs, 1);
         assert_eq!(info.rating_count, 1);
+    }
+
+    #[test]
+    fn test_rejects_unsafe_marketplace_names() {
+        let temp = TempDir::new().unwrap();
+        let mm = MarketplaceManager::new(temp.path().join("skills"));
+        assert!(mm.info("../escape").is_err());
+        assert!(mm.rate("../escape", 5, None).is_err());
+        assert!(!temp.path().join("escape.json").exists());
     }
 }

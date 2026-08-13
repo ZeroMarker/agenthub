@@ -1,5 +1,7 @@
 # AgentHub 项目计划
 
+> 状态：v1.0 历史计划（已完成）。当前执行项与 v1.5+ 后续路线以 `todo.md` 顶部的「当前待办」为准。
+
 > 版本：v1.0
 > 更新日期：2026-07-07
 > 当前阶段：Beta 体验完善
@@ -126,7 +128,7 @@ installers:
 - [x] 将"已验证"拆分为 `catalog_verified_at`、`installer_verified_at` 和 `status`。
 - [x] 修正明显的名称问题，例如 `gork-build` 与实际产品名称不一致的风险。
 - [x] 定义支持等级：`verified`、`community`、`manual`、`deprecated`。
-- [ ] 建立 ADR，记录清单格式、安装器接口和平台策略。
+- [x] 建立 ADR，记录清单格式、安装器接口和平台策略（`docs/adr/0001-catalog-and-installer-architecture.md`）。
 
 ### M1：核心重构
 
@@ -162,7 +164,7 @@ installers:
 - [x] 明确代码签名策略；未签名产物必须在文档中说明（`docs/signing-policy.md`）。
 - [x] 增加 `CONTRIBUTING.md`、安全策略、变更日志和问题模板。
 - [x] 更新 README，使支持状态由清单自动生成，避免手工漂移（`scripts/generate-support-matrix.py`，已修正 README 与 agents.json 的漂移）。
-- [ ] 发布 `v1.0.0` 并完成安装、升级、卸载回归测试。
+- [x] 发布 `v1.0.0` 并完成安装、升级、卸载回归测试（2026-08-06 完成）。
 
 ## 7. 验收标准
 
@@ -220,11 +222,10 @@ v1.0 发布前必须满足：
 
 ## 12. 下一步
 
-首个迭代按以下顺序执行：
+以下为 v1.0 启动时的历史执行顺序，相关重构已完成：
 
 1. 冻结当前原型功能，只修复阻塞性问题。
 2. 建立共享清单 schema，并完成 25 个条目的平台安装映射。
 3. 新建 `agenthub-core`，先迁移查询和 dry-run，再迁移真实执行。
 4. 为核心模型和安装器命令生成补齐测试。
 5. CLI 验收通过后，让 Tauri 后端切换到共享核心库。
-

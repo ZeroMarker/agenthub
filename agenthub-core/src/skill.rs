@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::storage::is_safe_id;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillManifest {
@@ -113,6 +114,15 @@ fn compare_versions(a: &str, b: &str) -> i32 {
 }
 
 impl SkillManager {
+    fn validate_name(name: &str) -> Result<()> {
+        if !is_safe_id(name) {
+            return Err(AgentHubError::SkillError(format!(
+                "Invalid skill name: {name}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(skills_dir: PathBuf) -> Self {
         Self {
             skills_dir,
@@ -247,6 +257,7 @@ impl SkillManager {
     }
 
     pub fn get_skill(&self, skill_name: &str) -> Result<Skill> {
+        Self::validate_name(skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if !skill_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -259,6 +270,7 @@ impl SkillManager {
     }
 
     pub fn install_skill(&self, skill_name: &str, source_dir: &Path) -> Result<Skill> {
+        Self::validate_name(skill_name)?;
         let dest_dir = self.installed_dir().join(skill_name);
         if dest_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -282,6 +294,7 @@ impl SkillManager {
     }
 
     pub fn uninstall_skill(&self, skill_name: &str) -> Result<bool> {
+        Self::validate_name(skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if !skill_dir.exists() {
             return Ok(false);
@@ -294,6 +307,7 @@ impl SkillManager {
     }
 
     pub fn enable_skill(&self, skill_name: &str) -> Result<()> {
+        Self::validate_name(skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if !skill_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -310,6 +324,7 @@ impl SkillManager {
     }
 
     pub fn disable_skill(&self, skill_name: &str) -> Result<()> {
+        Self::validate_name(skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if !skill_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -663,5 +678,13 @@ triggers: []
         assert!(names.contains(&"constrained-ok"));
         assert!(names.contains(&"constrained-no"));
         assert!(!names.contains(&"unconstrained"));
+    }
+
+    #[test]
+    fn test_rejects_unsafe_skill_names() {
+        let temp = TempDir::new().unwrap();
+        let manager = SkillManager::new(temp.path().to_path_buf());
+        assert!(manager.get_skill("../escape").is_err());
+        assert!(manager.uninstall_skill("../escape").is_err());
     }
 }

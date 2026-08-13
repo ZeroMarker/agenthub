@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::storage::{is_safe_id, is_safe_relative_path};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -119,6 +120,15 @@ pub struct MemoryManager {
 }
 
 impl MemoryManager {
+    fn validate_path(path: &str) -> Result<()> {
+        if !is_safe_relative_path(Path::new(path)) {
+            return Err(AgentHubError::MemoryError(format!(
+                "Invalid memory path: {path}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn new(memory_dir: PathBuf) -> Self {
         Self { memory_dir }
     }
@@ -303,11 +313,24 @@ impl MemoryManager {
         content: &str,
         memory_type: MemoryType,
     ) -> Result<MemoryEntry> {
+        if let Some(scope_id) = scope_id {
+            if !is_safe_id(scope_id) {
+                return Err(AgentHubError::MemoryError(format!(
+                    "Invalid memory scope id: {scope_id}"
+                )));
+            }
+        }
+        let slug = title.to_lowercase().replace(' ', "-");
+        if !is_safe_id(&slug) {
+            return Err(AgentHubError::MemoryError(format!(
+                "Invalid memory title for storage: {title}"
+            )));
+        }
         let dir = self.scope_dir(&scope, scope_id);
         std::fs::create_dir_all(&dir)
             .map_err(|e| AgentHubError::MemoryError(format!("Failed to create dir: {}", e)))?;
 
-        let filename = format!("{}.md", title.to_lowercase().replace(' ', "-"));
+        let filename = format!("{slug}.md");
         let path = dir.join(&filename);
         let relative_path = path
             .strip_prefix(&self.memory_dir)
@@ -336,6 +359,7 @@ impl MemoryManager {
     }
 
     pub fn save_entry(&self, entry: &MemoryEntry) -> Result<()> {
+        Self::validate_path(&entry.path)?;
         let path = self.memory_dir.join(&entry.path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -355,6 +379,7 @@ impl MemoryManager {
     }
 
     pub fn delete_entry(&self, path: &str) -> Result<bool> {
+        Self::validate_path(path)?;
         let full_path = self.memory_dir.join(path);
         if full_path.exists() {
             std::fs::remove_file(&full_path).map_err(|e| {
@@ -661,6 +686,7 @@ impl MemoryManager {
 
     /// Mark an entry as recently accessed (used to keep it from decaying).
     pub fn touch(&self, path: &str) -> Result<()> {
+        Self::validate_path(path)?;
         let mut entry = self.load_entry_from_file(&self.memory_dir.join(path))?;
         entry.last_accessed_at = Some(Utc::now());
         self.save_entry(&entry)
@@ -668,6 +694,7 @@ impl MemoryManager {
 
     /// Set the importance (0-10) of an entry.
     pub fn set_importance(&self, path: &str, importance: u8) -> Result<()> {
+        Self::validate_path(path)?;
         let mut entry = self.load_entry_from_file(&self.memory_dir.join(path))?;
         entry.importance = importance.min(10);
         entry.updated_at = Utc::now();
@@ -676,6 +703,7 @@ impl MemoryManager {
 
     /// Revive a decayed entry and mark it as recently accessed.
     pub fn revive(&self, path: &str) -> Result<()> {
+        Self::validate_path(path)?;
         let mut entry = self.load_entry_from_file(&self.memory_dir.join(path))?;
         entry.decayed = false;
         entry.last_accessed_at = Some(Utc::now());
@@ -1460,5 +1488,33 @@ mod tests {
 
         let matches = manager.search_entries_vector("legacy monorepo", 5).unwrap();
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_rejects_unsafe_memory_paths_and_scope_ids() {
+        let (manager, temp) = create_test_manager();
+        let mut entry = manager
+            .create_entry(
+                MemoryScope::Global,
+                None,
+                "Safe note",
+                "content",
+                MemoryType::Free,
+            )
+            .unwrap();
+        entry.path = "../escape.md".to_string();
+        assert!(manager.save_entry(&entry).is_err());
+        assert!(manager.delete_entry("../escape.md").is_err());
+        assert!(!temp.path().join("escape.md").exists());
+
+        assert!(manager
+            .create_entry(
+                MemoryScope::Project,
+                Some("../escape"),
+                "Unsafe scope",
+                "content",
+                MemoryType::Free,
+            )
+            .is_err());
     }
 }

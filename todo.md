@@ -12,8 +12,8 @@
 - [x] 将安全 ID 校验扩展到 Session、Community、Marketplace、Skill、Plugin 和 Memory 等其余文件持久化模块
 - [x] 为各持久化模块增加危险 ID / 相对路径回归测试（`../`、路径分隔符、控制字符、过长 ID）
 - [x] 加固备份恢复和导入流程，所有按 ID/路径恢复的模块复用同一安全校验
-- [ ] Config：配置校验与默认值回退
-- [ ] Config：配置变更历史与回滚
+- [x] Config：配置校验与默认值回退（已知设置项语义校验 + 缺省/越界值安全默认回退 + `config validate|repair` + 旧配置缺字段宽容解析）
+- [x] Config：配置变更历史与回滚（每次变更前快照 `history/<agent>/v<N>.yaml`，版本单调递增，快照脱敏内联密钥；`config history|rollback`）
 
 ### P1：CI 与工程治理
 
@@ -38,7 +38,7 @@
 
 ### 最近验证
 
-- [x] 2026-08-13 CI：Rust workspace tests + fmt + all-targets clippy 通过，前端类型检查/生产构建/Vitest 通过（run `31658863746`）
+- [x] 2026-08-14 本机验证：cargo test --workspace 全绿（271 测试：210 core + 47 cli + 9 集成 + 5 tauri），fmt 干净，all-targets clippy 0 警告；CLI `config validate|repair|history|rollback` 端到端冒烟通过；tauri cargo check 通过
 
 ## 发布记录（2026-08-10）— ✅ v1.4.0 已发布
 

@@ -191,6 +191,17 @@ enum ConfigCmd {
     /// Manage user permissions
     #[command(subcommand)]
     Perm(PermCmd),
+    /// Validate an agent config against known setting rules (errors when out-of-range)
+    Validate {
+        /// Agent id; validates all agents when omitted
+        agent: Option<String>,
+    },
+    /// Validate and repair an agent config, applying default values in place
+    Repair { agent: String },
+    /// Show an agent config's change history
+    History { agent: String },
+    /// Roll back an agent config to a previous version (current state is preserved)
+    Rollback { agent: String, version: u32 },
 }
 
 #[derive(Subcommand)]
@@ -1450,6 +1461,142 @@ pub fn cmd_config_secret_migrate(base_dir: &Path, agent: &str, key: &str) -> Str
             )
         }
         Ok(false) => format!("Nothing to migrate for '{}' (no inline value found)", key),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_validate(base_dir: &Path, agent: Option<&str>) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    let agents = match agent {
+        Some(id) => vec![id.to_string()],
+        None => manager.list_configs().unwrap_or_default(),
+    };
+    if agents.is_empty() {
+        return "No agent configs to validate.".to_string();
+    }
+
+    let mut out = String::new();
+    let mut has_error = false;
+    for id in agents {
+        match manager.load_config(&id) {
+            Ok(config) => {
+                let issues = agenthub_core::validate_config(&config);
+                if issues.is_empty() {
+                    out.push_str(&format!("✅ {}: OK\n", id));
+                } else {
+                    out.push_str(&format!("{}:\n", id));
+                    for issue in &issues {
+                        let tag = match issue.severity {
+                            agenthub_core::IssueSeverity::Error => "ERROR",
+                            agenthub_core::IssueSeverity::Warning => "WARN",
+                        };
+                        if issue.severity == agenthub_core::IssueSeverity::Error {
+                            has_error = true;
+                        }
+                        out.push_str(&format!("  [{tag}] {} — {}\n", issue.key, issue.message));
+                    }
+                }
+            }
+            Err(e) => {
+                has_error = true;
+                out.push_str(&format!("⚠ {}: {}\n", id, e));
+            }
+        }
+    }
+    if has_error {
+        out.push_str("\nIssues found — run `agenthub config repair` to apply defaults.");
+    }
+    out
+}
+
+pub fn cmd_config_repair(base_dir: &Path, agent: &str) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    match manager.repair_config(agent) {
+        Ok(issues) if issues.is_empty() => format!("✅ {}: already valid\n", agent),
+        Ok(issues) => {
+            let mut out = format!("✅ Repaired {}:\n", agent);
+            for issue in &issues {
+                let tag = match issue.severity {
+                    agenthub_core::IssueSeverity::Error => "fixed",
+                    agenthub_core::IssueSeverity::Warning => "defaulted",
+                };
+                out.push_str(&format!("  [{tag}] {} — {}\n", issue.key, issue.message));
+            }
+            let config = match manager.load_config(agent) {
+                Ok(c) => c,
+                Err(e) => return format!("Error reloading repaired config: {}", e),
+            };
+            out.push_str(&format!("  → new version {}\n", config.version));
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_history(base_dir: &Path, agent: &str) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    match manager.list_history(agent) {
+        Ok(versions) if versions.is_empty() => {
+            format!("No change history for '{}'.", agent)
+        }
+        Ok(versions) => {
+            let mut out = format!(
+                "Change history for '{}' ({} versions):\n",
+                agent,
+                versions.len()
+            );
+            for version in &versions {
+                let settings: Vec<String> = version
+                    .settings
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect();
+                out.push_str(&format!(
+                    "  v{:<3} {} — {}\n",
+                    version.version,
+                    version.metadata.updated_at.format("%Y-%m-%d %H:%M:%S UTC"),
+                    if settings.is_empty() {
+                        "(empty)".to_string()
+                    } else {
+                        settings.join(", ")
+                    }
+                ));
+            }
+            let live = match manager.load_config(agent) {
+                Ok(c) => format!("v{}", c.version),
+                Err(_) => "?".to_string(),
+            };
+            out.push_str(&format!(
+                "\nCurrent: {} — roll back with `agenthub config rollback {} <version>`",
+                live, agent
+            ));
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_rollback(base_dir: &Path, agent: &str, version: u32) -> String {
+    let manager = ConfigManager::new(base_dir.to_path_buf());
+    match manager.rollback_config(agent, version) {
+        Ok(config) => {
+            let settings: Vec<String> = config
+                .settings
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            format!(
+                "✅ Rolled back '{}' to v{} (now v{}). Settings: {}\n",
+                agent,
+                version,
+                config.version,
+                if settings.is_empty() {
+                    "(empty)".to_string()
+                } else {
+                    settings.join(", ")
+                }
+            )
+        }
         Err(e) => format!("Error: {}", e),
     }
 }
@@ -2847,6 +2994,12 @@ fn main() {
                     agent.as_deref(),
                 ),
             },
+            ConfigCmd::Validate { agent } => cmd_config_validate(&data_dir(), agent.as_deref()),
+            ConfigCmd::Repair { agent } => cmd_config_repair(&data_dir(), &agent),
+            ConfigCmd::History { agent } => cmd_config_history(&data_dir(), &agent),
+            ConfigCmd::Rollback { agent, version } => {
+                cmd_config_rollback(&data_dir(), &agent, version)
+            }
         },
         Commands::Prompt(cmd) => match cmd {
             PromptArgs::Export { id, output } => {
@@ -3532,6 +3685,75 @@ mod tests {
         let out = cmd_config_secret_delete(base, "agent-a", "api_key");
         assert!(out.contains("✅"));
         assert!(cmd_config_secret_get(base, "agent-a", "api_key").contains("not found"));
+    }
+
+    #[test]
+    fn test_cmd_config_validate_repair() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let manager = ConfigManager::new(base.to_path_buf());
+        manager.create_config("agent-a").unwrap();
+        manager
+            .set_setting("agent-a", "model", ConfigValue::from("gpt-4o"))
+            .unwrap();
+        manager
+            .set_setting("agent-a", "temperature", ConfigValue::from(9.9f64))
+            .unwrap();
+
+        let out = cmd_config_validate(base, Some("agent-a"));
+        assert!(out.contains("[ERROR] settings.temperature"));
+        assert!(out.contains("config repair"));
+
+        // Repair applies defaults and bumps the version.
+        let out = cmd_config_repair(base, "agent-a");
+        assert!(out.contains("Repaired"));
+        assert!(out.contains("settings.temperature"));
+        assert!(out.contains("new version"));
+
+        let out = cmd_config_validate(base, Some("agent-a"));
+        assert!(out.contains("OK"));
+    }
+
+    #[test]
+    fn test_cmd_config_validate_all_agents() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let manager = ConfigManager::new(base.to_path_buf());
+        manager.create_config("agent-a").unwrap();
+        manager.create_config("agent-b").unwrap();
+        for agent in ["agent-a", "agent-b"] {
+            manager
+                .set_setting(agent, "model", ConfigValue::from("gpt-4o"))
+                .unwrap();
+        }
+
+        let out = cmd_config_validate(base, None);
+        assert!(out.contains("agent-a: OK"));
+        assert!(out.contains("agent-b: OK"));
+    }
+
+    #[test]
+    fn test_cmd_config_history_rollback() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let manager = ConfigManager::new(base.to_path_buf());
+        manager.create_config("agent-a").unwrap();
+        manager
+            .set_setting("agent-a", "model", ConfigValue::from("gpt-4o"))
+            .unwrap();
+        manager
+            .set_setting("agent-a", "model", ConfigValue::from("claude-3.5"))
+            .unwrap();
+
+        let out = cmd_config_history(base, "agent-a");
+        assert!(out.contains("2 versions"));
+        assert!(out.contains("model=gpt-4o"));
+        assert!(out.contains("rollback"));
+
+        let out = cmd_config_rollback(base, "agent-a", 2);
+        assert!(out.contains("Rolled back"));
+        assert!(out.contains("model=gpt-4o"));
+        assert!(out.contains("now v4"));
     }
 
     #[test]

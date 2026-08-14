@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Config validation & default-value fallback**: known setting keys
+  (`temperature`, `top_p`, `max_tokens`, `frequency_penalty`, `presence_penalty`,
+  `model`) are validated on load; missing/out-of-range numeric settings fall back
+  to safe defaults. New `agenthub config validate|repair`, Tauri
+  `validate_agent_config` / `repair_agent_config`, and `load_config_normalized`
+  for read-time fallback without persisting
+- **Config change history & rollback**: every settings/env/custom/secret/template/import
+  mutation snapshots the pre-change state under `config_dir/history/<agent>/v<N>.yaml`
+  with a monotonic version bump; inline secret values are redacted in snapshots.
+  New `agenthub config history|rollback`, Tauri `list_config_history` /
+  `rollback_agent_config`
+- **Lenient legacy parsing**: agent configs missing `version`, `settings`,
+  `metadata` or secret fields now parse with safe defaults instead of failing
+
 ### Changed
 - **Filesystem hardening**: validate every user-controlled identifier used as a
   persisted path component across config, prompts, sessions, workflows,

@@ -1005,6 +1005,67 @@ async fn set_config_value(
 }
 
 #[tauri::command]
+async fn validate_agent_config(
+    agent_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::ConfigIssue>, String> {
+    let manager = &state.config_manager;
+    let mut all = Vec::new();
+    match agent_id {
+        Some(id) => {
+            let config = manager.load_config(&id).map_err(|e| e.to_string())?;
+            all.extend(agenthub_core::validate_config(&config));
+        }
+        None => {
+            for id in manager.list_configs().map_err(|e| e.to_string())? {
+                if let Ok(config) = manager.load_config(&id) {
+                    let issues = agenthub_core::validate_config(&config);
+                    for mut issue in issues {
+                        issue.key = format!("{id}.{}", issue.key);
+                        all.push(issue);
+                    }
+                }
+            }
+        }
+    }
+    Ok(all)
+}
+
+#[tauri::command]
+async fn repair_agent_config(
+    agent_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::ConfigIssue>, String> {
+    state
+        .config_manager
+        .repair_config(&agent_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_config_history(
+    agent_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::AgentConfig>, String> {
+    state
+        .config_manager
+        .list_history(&agent_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn rollback_agent_config(
+    agent_id: String,
+    version: u32,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::AgentConfig, String> {
+    state
+        .config_manager
+        .rollback_config(&agent_id, version)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn delete_config(
     agent_id: String,
     state: tauri::State<'_, AppState>,
@@ -2807,6 +2868,10 @@ fn main() {
             get_native_config,
             save_native_config,
             set_config_value,
+            validate_agent_config,
+            repair_agent_config,
+            list_config_history,
+            rollback_agent_config,
             delete_config,
             create_config,
             list_installed_agents,

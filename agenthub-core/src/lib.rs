@@ -33,7 +33,10 @@ pub use command_builder::{
     RealCommandRunner,
 };
 pub use community::{CommunityManager, CommunityPrompt};
-pub use config::{AgentConfig, ConfigManager, ConfigTemplate, ConfigValue, Environment};
+pub use config::{
+    normalize_settings, validate_config, validate_settings, AgentConfig, ConfigIssue,
+    ConfigManager, ConfigTemplate, ConfigValue, Environment, IssueSeverity,
+};
 pub use diagnostic::{CheckStatus, DiagnosticCheck, DiagnosticManager, DiagnosticReport};
 pub use error::{AgentHubError, Result};
 pub use graph::{

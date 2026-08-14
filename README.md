@@ -40,6 +40,12 @@
 - **诊断工具** — `doctor` 命令检查环境依赖和清单完整性
 - **JSON Schema 校验** — 保证目录数据一致性
 - **桌面应用** — Tauri 2 + Vue 3 轻量桌面客户端
+- **配置管理** — 多环境配置、语义校验与默认回退、变更历史与回滚
+- **密钥安全** — 值永不进配置文件；OS keyring 后端 + 文件密钥链自动回退、轮换可回滚
+- **成本可观测** — 会话 API 调用次数、按日成本趋势与 JSON 导出
+- **技能作用域** — 项目级 / 用户级 / 全局级技能，同名项目优先
+- **交互式仪表盘** — `status --html` 生成自包含可交互 Web 仪表盘（窗口切换/图表/钻取）
+- **SMTP 直发** — email 告警通道可直接经 SMTP 发送，无需外部 MTA
 
 ---
 
@@ -243,12 +249,15 @@ agenthub <command> [options]
 | `install` | 安装 Agent | `agenthub install codex --dry-run` |
 | `uninstall` | 卸载 Agent | `agenthub uninstall codex --yes` |
 | `doctor` | 环境诊断 | `agenthub doctor` |
-| `status` | 工作区状态概览 | `agenthub status --trend 7` |
+| `status` | 工作区状态概览（`--trend`/`--html` 交互式仪表盘） | `agenthub status --html dashboard.html` |
 | `audit` | 查询审计日志 | `agenthub audit --action install --last-days 7` |
 | `backup` | 备份全部数据 | `agenthub backup --output ./backup.json` |
 | `restore` | 从备份恢复 | `agenthub restore ./backup.json` |
 | `monitor` | 健康/预算/兼容性监控（`--json`/`--watch`/`--notify`） | `agenthub monitor --notify` |
 | `config-template` | 配置模板管理 | `agenthub config-template apply codex llm-default` |
+| `config validate/repair` | 配置语义校验与默认值回退 | `agenthub config repair codex` |
+| `config history/rollback` | 配置变更历史与回滚 | `agenthub config rollback codex 3` |
+| `config secret` | 密钥存储（文件/OS keyring，轮换/迁移/后端切换） | `agenthub config secret backend --check` |
 | `config user` | 用户管理（角色） | `agenthub config user create alice "Alice" --roles viewer` |
 | `config perm` | 细粒度权限 | `agenthub config perm grant alice write --module config` |
 | `prompt publish` | 发布提示词到社区目录 | `agenthub prompt publish review --publisher alice` |
@@ -257,10 +266,12 @@ agenthub <command> [options]
 | `memory export/import` | 记忆导入导出 | `agenthub memory import memories.json --merge` |
 | `session budget` | 成本预算/告警 | `agenthub session budget set --daily 5 --monthly 50` |
 | `session fork` | 携带上下文创建新会话 | `agenthub session fork <id> --agent claude-code` |
+| `session usage/trend/export-usage` | API 调用次数、成本趋势与 JSON 导出 | `agenthub session export-usage usage.json` |
+| `skill list/install/uninstall/enable/disable` | 技能管理（`--scope project|user|global` 三级作用域） | `agenthub skill install rust --scope project` |
 | `skill check-compat` | 技能版本兼容检查 | `agenthub skill check-compat *` |
 | `skill market` | 技能市场（搜索/评分/安装统计） | `agenthub skill market search rust` |
 | `plugin` | 插件注册/钩子执行 | `agenthub plugin run on_monitor` |
-| `notify` | 告警推送通道（webhook/email/file，含分级/去重） | `agenthub notify add ops webhook https://… --min-severity warning` |
+| `notify` | 告警推送通道（webhook/email（SMTP 直发或 .eml 落盘）/file，含分级/去重） | `agenthub notify add ops email ops@x.com --smtp-host smtp.x.com` |
 | `prompt effects` | 提示词效果追踪（评分/成功率/成本） | `agenthub prompt effects` |
 | `memory reindex` | 重建向量索引 | `agenthub memory reindex` |
 
@@ -321,11 +332,13 @@ AgentHub 的 agent harness 负责统一管理 Agent 配置、原生配置入口�
 | `installer` | 安装/卸载命令生成与执行、超时处理 | ✅ |
 | `status` | 已安装状态检测、版本解析（npm/pip/winget/brew） | ✅ |
 | `diagnostic` | 环境健康检查、系统信息采集 | ✅ |
-| `config` | Agent 运行时配置、多环境、密钥管理 | ✅ |
+| `config` | Agent 运行时配置、多环境、密钥管理（文件/OS keyring）、校验/默认回退、变更历史/回滚 | ✅ |
 | `prompt` | 提示词模板 CRUD、变量插值、版本控制 | ✅ |
-| `session` | 会话记录、搜索、成本追踪 | ✅ |
-| `skill` | 技能清单解析、依赖检查、配置管理 | ✅ |
+| `session` | 会话记录、搜索、成本追踪、API 调用统计、趋势导出 | ✅ |
+| `skill` | 技能清单解析、依赖检查、配置管理、三级作用域 | ✅ |
 | `memory` | 记忆条目管理、作用域与类型分类 | ✅ |
+| `overview` | 状态/趋势/审计只读聚合 + 交互式 Web 仪表盘 | ✅ |
+| `notify` | 告警推送（webhook/email(SMTP 或 .eml 落盘)/file）、分级/去重 | ✅ |
 | `error` | 统一错误类型定义 | ✅ |
 
 ---
@@ -502,19 +515,31 @@ cd agenthub-ui && npm test
 
 ## 项目状态
 
-### 已完成
+### 已发布
 
-- ✅ **M0：基线确认** — 25 个 Agent 目录，平台安装映射
-- ✅ **M1：核心重构** — `agenthub-core` 共享库，统一数据源
-- ✅ **M2：可靠性与安全** — 49 个单元测试，状态检测，错误分类
+- ✅ **v1.0.0 → v1.4.0** — 9 平台产物 + SHA-256 校验和（2026-08-06 至 2026-08-10）
+- ✅ **M0–M4 全部完成** — 目录基线、核心重构、Beta 体验（M3 动效/取消重试/失败详情）、发布准备（CI/CD/安装包/签名策略）
 
-### 进行中
+### 已完成（安全与工程治理 P0/P1）
 
-- 🔄 **M3：Beta 体验** — GUI 异步任务、逐项进度、详情页
+- ✅ **安全加固** — 全模块 ID/路径穿越防护、危险 ID 回归测试、备份恢复复用统一校验
+- ✅ **Config 校验与历史** — 语义校验 + 默认值回退 + 变更快照/回滚（含密钥脱敏）
+- ✅ **负向测试** — 损坏文件/导入恢复/并发写入（写锁 + 原子落盘）
+- ✅ **覆盖率门禁** — `scripts/check-coverage.sh`：每核心文件 ≥80%（整体 87%），CI 独立 job
+
+### 已完成（产品能力 P2 部分）
+
+- ✅ **SMTP 直发** — email 告警通道可直接经 SMTP 发送（零依赖原生客户端）
+- ✅ **Session 成本统计** — API 调用次数、按日趋势、JSON 导出
+- ✅ **技能三级作用域** — 项目/用户/全局，同名项目优先
+- ✅ **OS keyring 后端** — `AGENTHUB_SECRET_BACKEND=auto|file|keyring`，自动回退文件密钥链
+- ✅ **交互式 Web 仪表盘** — `status --html`：窗口切换/图表/钻取，无服务器
 
 ### 计划中
 
-- 📋 **M4：发布准备** — CI/CD 完善、安装包、文档、v1.0.0
+- 📋 **在线技能市场 / 插件市场** — 需远端服务与信任模型设计
+- 📋 **Prompt 社区远程推送** — 需远程同步通道协议
+- 📋 **Beta 用户测试** — 3–5 名真实用户完成安装/查询/升级/卸载
 
 ### 长期愿景（六大业务模块 + Overview 概览 + 横切能力）
 

@@ -15,15 +15,15 @@
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | Package | ✅ 已实现 | `agenthub-core` crate + CLI + GUI，支持 25 个代理 |
-| Config | ✅ 基础实现 | AgentHub YAML 配置 + 部分 Agent 原生配置读写 + 密钥链 + 模板 + 用户权限 |
+| Config | ✅ 基础实现 | AgentHub YAML 配置 + 部分 Agent 原生配置读写 + 密钥链（文件+OS keyring，自动回退）+ 模板 + 用户权限 + 校验/默认回退 + 变更历史/回滚 |
 | Prompt | ✅ 基础实现 | YAML 模板 CRUD + 变量插值 + 版本控制 + 社区共享 |
-| Session | ✅ 基础实现 | YAML 会话记录、搜索、标签、评分、用量字段、成本追踪、回放、模板、预算告警、fork |
-| Skill | ✅ 基础实现 | `SKILL.md` 解析、安装、启停、依赖检查、工作流、技能市场、插件系统 |
+| Session | ✅ 基础实现 | YAML 会话记录、搜索、标签、评分、用量字段、成本追踪、回放、模板、预算告警、fork、API 调用次数、成本趋势与导出 |
+| Skill | ✅ 基础实现 | `SKILL.md` 解析、安装、启停、依赖检查、工作流、技能市场、插件系统、项目/用户/全局三级作用域 |
 | Memory | ✅ 基础实现 | Markdown 记忆、scope/type 分类、标签、BM25/向量/混合检索、记忆衰减、知识图谱 |
-| Overview | ✅ 完成 | 只读聚合各模块状态/成本/审计 → 仪表盘（`agenthub status`、GUI 概览视图、HTML 仪表盘、趋势） |
-| 横切能力 | ✅ 完成 | 审计日志（JSONL）、备份/恢复、监控与告警（webhook/email-spool/file 推送 + 分级/去重） |
+| Overview | ✅ 完成 | 只读聚合各模块状态/成本/审计 → 仪表盘（`agenthub status`、GUI 概览视图、交互式 Web 仪表盘、趋势、钻取） |
+| 横切能力 | ✅ 完成 | 审计日志（JSONL）、备份/恢复、监控与告警（webhook/email（SMTP 直发或 .eml 落盘）/file 推送 + 分级/去重） |
 
-仍属后续规划：OS keyring 后端、在线技能市场、SMTP 直发、项目级技能作用域。
+仍属后续规划：在线技能市场（需远端服务）、Prompt 社区远程推送、交互式仪表盘的浏览器常驻视图（当前为 `status --html` 静态导出）、Beta 用户测试。
 
 ---
 
@@ -298,18 +298,39 @@ metadata:
 
 ### 密钥管理
 
+密钥值永不写入 Agent 配置文件或模板，只存在于密钥存储中。后端由 `AGENTHUB_SECRET_BACKEND` 选择（`auto` 默认：探测 OS keyring，不可用时回退文件密钥链）：
+
 ```bash
-# 存储密钥（写入系统密钥链，不明文存储）
-agenthub config set-secret codex api_key "sk-..."
+# 查看当前后端 / 探测 OS keyring 可用性
+agenthub config secret backend
+agenthub config secret backend --check
 
-# 查看密钥引用（不显示实际值）
-agenthub config show-secrets codex
+# 存储密钥（值进入 OS keyring 或文件密钥链，取决于后端）
+AGENTHUB_SECRET_BACKEND=keyring agenthub config secret set codex api_key "sk-..."
 
-# 轮换密钥
-agenthub config rotate-secret codex api_key
+# 查看密钥引用（脱敏，不显示实际值）
+agenthub config secret list
+
+# 轮换密钥（旧值归档可回滚）
+agenthub config secret rotate codex api_key "sk-new" --notify
 
 # 删除密钥
-agenthub config delete-secret codex api_key
+agenthub config secret delete codex api_key
+
+# 迁移旧的内联明文密钥到密钥存储
+agenthub config secret migrate codex api_key
+```
+
+### 配置校验 / 变更历史
+
+```bash
+# 语义校验已知设置项（温度/采样/模型等），越界报错、缺省可回退
+agenthub config validate codex
+# 应用安全默认值修复配置（记入历史，版本递增）
+agenthub config repair codex
+# 查看变更历史并按版本回滚
+agenthub config history codex
+agenthub config rollback codex 3
 ```
 
 ### 多环境支持

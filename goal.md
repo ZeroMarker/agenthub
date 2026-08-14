@@ -58,7 +58,7 @@ AgentHub 从"AI 编程助手的安装管理器"演进为**全生命周期的 Age
 
 **职责**：管理 Agent 的运行时配置，包括模型选择、API Key、环境变量和服务端点。
 
-**当前状态**：✅ 基础实现（配置模板/密钥链/轮换/用户权限第四波完成）
+**当前状态**：✅ 基础实现（配置模板/密钥链（文件+OS keyring）/轮换/校验/历史/用户权限，2026-08-14 完成剩余项）
 
 **已实现能力**：
 - ✅ 每个 Agent 独立 YAML 配置（`agents/<agent-id>.yaml`）
@@ -67,13 +67,15 @@ AgentHub 从"AI 编程助手的安装管理器"演进为**全生命周期的 Age
 - ✅ 配置创建、读取、保存、删除、导入和导出
 - ✅ 桌面端读取和保存部分 Agent 原生配置文件
 - ✅ 配置模板（`ConfigTemplate` CRUD、从现有配置另存、应用到 Agent，secret 值永不落盘）
+- ✅ 配置校验与默认值回退（已知设置项语义校验 + 缺省/越界安全默认 + `config validate|repair` + 旧配置缺字段宽容解析）
+- ✅ 配置变更历史与回滚（每次变更前快照 `history/<agent>/v<N>.yaml`、版本单调递增、快照脱敏内联密钥；`config history|rollback`）
 
 **目标能力**：
 - 用户与权限（✅ 2026-08-07 第四波：`UserManager` 角色 + 按 module/agent 的细粒度权限）
-- API Key 安全存储（系统密钥链，不明文存储）✅（文件密钥链，2026-08-06 第三波）
+- API Key 安全存储（OS keyring + 文件回退，✅ 2026-08-14：`AGENTHUB_SECRET_BACKEND=auto|file|keyring`，auto 探测不可用自动回退文件密钥链；值永不落盘）
 - API Key 轮换 ✅（2026-08-06 第三波）
-- 配置校验与默认值回退
-- 配置变更历史与回滚
+- 配置校验与默认值回退 ✅（2026-08-14）
+- 配置变更历史与回滚 ✅（2026-08-14）
 
 **设计原则**：
 - 配置文件与代理清单分离
@@ -121,7 +123,7 @@ prompt:
 
 **职责**：记录、检索和管理与 Agent 的交互会话。
 
-**当前状态**：✅ 基础实现（成本预算/上下文传递第二波完成）
+**当前状态**：✅ 基础实现（成本预算/上下文传递/调用统计，2026-08-14 完成剩余项）
 
 **已实现能力**：
 - ✅ 会话 YAML 存储（`sessions/data/<session-id>.yaml`）
@@ -134,10 +136,12 @@ prompt:
 - ✅ 会话回放（Markdown 导出）与会话模板
 - ✅ 成本预算告警（daily/monthly USD 上限 + `check_budget`）
 - ✅ 跨 Agent 会话上下文传递（`fork_session` 携带消息/模型/标签）
+- ✅ API 调用次数（`SessionUsage.calls` 每次 `record_usage` 递增）
+- ✅ 成本趋势与导出（`session usage|trend|export-usage`：跨会话聚合、按日趋势、JSON 导出）
 
 **目标能力**：
-- 更完整的会话成本追踪（API 调用次数）
-- 会话成本趋势与导出
+- 更完整的会话成本追踪（API 调用次数）✅（2026-08-14）
+- 会话成本趋势与导出 ✅（2026-08-14）
 
 **数据模型**：
 ```yaml
@@ -158,7 +162,7 @@ session:
 
 **职责**：定义、安装和管理可复用的技能包，扩展 Agent 的能力边界。
 
-**当前状态**：✅ 基础实现（版本兼容检查第二波完成）
+**当前状态**：✅ 基础实现（版本兼容检查/作用域，2026-08-14 完成）
 
 **已实现能力**：
 - ✅ `SKILL.md` frontmatter 清单解析
@@ -167,12 +171,13 @@ session:
 - ✅ 依赖命令检查
 - ✅ 桌面端额外扫描 `~/.codex/skills`
 - ✅ 版本兼容性检查（`min_agenthub_version` vs 运行版本，单个/批量）
+- ✅ 项目级 / 用户级 / 全局级三级作用域（`SkillScope`：project > user > global 解析优先级，同名项目覆盖用户/全局；`skill list|install|uninstall --scope`，根目录可用 `AGENTHUB_PROJECT_SKILLS_DIR`/`AGENTHUB_GLOBAL_SKILLS_DIR` 注入）
 
 **目标能力**：
 - 技能市场（✅ 2026-08-07 第四波：本地注册表，搜索/评分/安装统计）
 - 技能组合（workflow 编排多个技能）✅（2026-08-06 第三波）
 - 插件系统（✅ 2026-08-07 第四波：`skills/plugins/` + 生命周期钩子）
-- 项目级 vs 用户级 vs 全局级技能
+- 项目级 vs 用户级 vs 全局级技能 ✅（2026-08-14）
 
 **技能定义格式**：
 ```markdown
@@ -227,15 +232,16 @@ sessions/   → 检查点、任务进度、临时笔记
 
 **职责**：只读聚合所有模块的状态、成本、审计与统计，提供统一的仪表盘视图。不拥有业务逻辑，不修改任何模块数据。
 
-**当前状态**：✅ 首波 + 第二波完成（2026-08-06）
+**当前状态**：✅ 首波 + 第二波 + 交互式仪表盘完成（2026-08-14）
 
 **已实现能力**：
 - ✅ 状态概览 `overview.rs`：`StatusOverview` 聚合目录/已安装/配置/提示词/会话/记忆/技能/审计
 - ✅ CLI `agenthub status`；Tauri `get_status_overview`；GUI 概览视图（仪表盘卡片 + 可过滤审计表 + 备份/恢复入口）
 - ✅ 时间维度趋势：`trend(days)` 按日分桶（会话/成本/记忆/审计），`status --trend`、`get_trend`、GUI 趋势柱状图
+- ✅ 交互式 Web 仪表盘（2026-08-14）：`status --html` 自包含单页，7/30/90 天窗口切换 + SVG 成本/令牌图 + 可排序趋势表 + 卡片钻取（Agent/技能/分 Agent 会话用量/最近审计），数据内嵌 JSON 无服务器
 
 **目标能力**：
-- `agenthub dashboard`：打开 Web 仪表盘（浏览器独立视图）
+- `agenthub dashboard`：打开 Web 仪表盘（浏览器独立视图）✅（`status --html` 已生成交互式仪表盘；浏览器打开生成文件即可）
 
 ---
 
@@ -245,7 +251,7 @@ sessions/   → 检查点、任务进度、临时笔记
 
 - **审计日志**：谁在什么时间对哪个 Agent 做了什么操作（`agenthub audit`，JSONL append-only）✅
 - **备份/恢复**：导出/导入所有配置、记忆、技能、会话与审计（`agenthub backup` / `agenthub restore`）✅（第四波纳入 users/permissions/community/notify 通道）
-- **监控与告警**（第一版 ✅）：`agenthub monitor` / `run_monitor` 聚合诊断结果、verified 未安装 Agent、预算告警与不兼容技能 → 健康状态；**告警推送渠道**（webhook/email-spool/file，✅ 2026-08-07 第四波）：`notify.yaml` 配置通道，`monitor --notify` 推送；**告警分级/去重**（✅ 2026-08-07 第五波）：`AlertSeverity` + 通道级 `min_severity` 过滤 + `dedup_minutes` 去重窗口；SMTP 直发仍在规划中
+- **监控与告警**（第一版 ✅）：`agenthub monitor` / `run_monitor` 聚合诊断结果、verified 未安装 Agent、预算告警与不兼容技能 → 健康状态；**告警推送渠道**（webhook/email-spool/file，✅ 2026-08-07 第四波）：`notify.yaml` 配置通道，`monitor --notify` 推送；**告警分级/去重**（✅ 2026-08-07 第五波）：`AlertSeverity` + 通道级 `min_severity` 过滤 + `dedup_minutes` 去重窗口；**SMTP 直发**（✅ 2026-08-14）：email 通道配置 `smtp`（host/port/username/password/tls）后经原生 RFC 5321 客户端直接发送，未配置时仍落盘 `.eml` 待 MTA 投递
 
 ---
 
@@ -275,12 +281,12 @@ overview（概览）──只读──→ 所有模块（聚合状态/成本/审
 | 阶段 | 模块 | 优先级 | 状态 | 预计时间 |
 |------|------|--------|------|----------|
 | Phase 1 | package（完善现有） | P0 | ✅ 已完成 | 2026-06-15 至 2026-06-27 |
-| Phase 2 | config | P0 | ✅ 基础实现 | 持续增强 |
+| Phase 2 | config | P0 | ✅ 基础实现（模板/密钥链（文件+OS keyring）/轮换/校验/历史/用户权限） | 持续增强 |
 | Phase 3 | memory | P1 | ✅ 基础实现 | 持续增强 |
-| Phase 4 | session | P1 | ✅ 基础实现 | 持续增强 |
+| Phase 4 | session | P1 | ✅ 基础实现（成本/预算/调用统计/趋势导出） | 持续增强 |
 | Phase 5 | prompt | P2 | ✅ 基础实现 | 持续增强 |
-| Phase 6 | skill | P2 | ✅ 基础实现（+ 技能市场/插件系统 2026-08-07 第四波） | 持续增强 |
-| Phase 7 | overview（概览，只读聚合） + 横切能力（审计、备份/恢复、监控、告警推送） | P3 | ✅ 首波+第二波+第四波完成（2026-08-07） | 持续增强 |
+| Phase 6 | skill | P2 | ✅ 基础实现（+ 技能市场/插件系统 2026-08-07 第四波；+ 三级作用域 2026-08-14） | 持续增强 |
+| Phase 7 | overview（概览，只读聚合） + 横切能力（审计、备份/恢复、监控、告警推送） | P3 | ✅ 首波+第二波+第四波+交互式仪表盘+SMTP 直发完成（2026-08-14） | 持续增强 |
 
 ---
 

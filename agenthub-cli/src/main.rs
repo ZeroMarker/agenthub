@@ -289,6 +289,15 @@ enum SecretCmd {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Show the secret backend in use, or probe OS-keyring availability
+    Backend {
+        /// Probe the OS keyring instead of printing the current backend
+        #[arg(long)]
+        check: bool,
+        /// Force a backend name (file | keyring | auto) for this invocation
+        #[arg(long)]
+        force: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1662,6 +1671,39 @@ pub fn cmd_config_secret_delete(base_dir: &Path, agent: &str, key: &str) -> Stri
         }
         Ok(false) => format!("Secret '{}' not found for '{}'", key, agent),
         Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_config_secret_backend(base_dir: &Path, check: bool, force: Option<&str>) -> String {
+    let _ = base_dir; // backend resolution is global (env / probe), not per-workspace
+    if check {
+        let available = agenthub_core::SecretBackend::keyring_available();
+        return format!(
+            "{} OS keyring {}\n",
+            if available { "✅" } else { "❌" },
+            if available {
+                "available — `AGENTHUB_SECRET_BACKEND=keyring` will use it"
+            } else {
+                "unavailable (headless/unsupported) — falling back to the file keystore"
+            }
+        );
+    }
+    // force wins over the environment variable.
+    let choice = force
+        .map(|c| c.to_string())
+        .or_else(|| std::env::var("AGENTHUB_SECRET_BACKEND").ok());
+    match agenthub_core::SecretBackend::resolve(choice.as_deref()) {
+        Ok(backend) => {
+            let source = if force.is_some() {
+                "--force"
+            } else if std::env::var("AGENTHUB_SECRET_BACKEND").is_ok() {
+                "AGENTHUB_SECRET_BACKEND"
+            } else {
+                "auto (default)"
+            };
+            format!("Secret backend: {} ({})\n", backend, source)
+        }
+        Err(e) => format!("❌ {}\n", e),
     }
 }
 
@@ -3233,6 +3275,9 @@ fn main() {
                     cmd_config_secret_delete(&data_dir(), &agent, &key)
                 }
                 SecretCmd::List { agent } => cmd_config_secret_list(&data_dir(), agent.as_deref()),
+                SecretCmd::Backend { check, force } => {
+                    cmd_config_secret_backend(&data_dir(), check, force.as_deref())
+                }
             },
             ConfigCmd::Rotate {
                 agent,

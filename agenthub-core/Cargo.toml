@@ -18,6 +18,8 @@ rand = "0.8"
 shell-words = "1.1"
 ureq = { version = "3.3", default-features = false, features = ["json", "rustls"] }
 
+keyring = { workspace = true }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"

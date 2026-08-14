@@ -62,7 +62,8 @@ pub use prompt::{
     PromptOutcome, PromptTemplate, PromptUsage, PromptVariable, PromptVersion,
 };
 pub use secrets::{
-    PreviousSecret, RotationResult as SecretRotationResult, SecretEntry, SecretInfo, SecretStore,
+    PreviousSecret, RotationResult as SecretRotationResult, SecretBackend, SecretEntry, SecretInfo,
+    SecretStore,
 };
 pub use session::{
     BudgetConfig, BudgetReport, ContextMessage, ModelPricing, PricingTable, Session,

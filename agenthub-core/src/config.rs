@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
-use crate::secrets::{RotationResult, SecretInfo, SecretStore};
+use crate::secrets::{RotationResult, SecretBackend, SecretInfo, SecretStore};
 use crate::storage::{atomic_write, is_safe_id};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -713,9 +713,15 @@ impl ConfigManager {
     // Secret keystore (values never stored in agent config files)
     // ---------------------------------------------------------------------
 
-    /// Open the file-backed secret keystore for this workspace.
+    /// Open the secret keystore for this workspace. The backend is chosen by
+    /// `AGENTHUB_SECRET_BACKEND` (`auto` | `file` | `keyring`); `auto` probes
+    /// the OS keyring and falls back to the file keystore when unavailable.
     pub fn secret_store(&self) -> SecretStore {
-        SecretStore::new(self.config_dir.clone())
+        let backend = std::env::var("AGENTHUB_SECRET_BACKEND")
+            .ok()
+            .and_then(|choice| SecretBackend::resolve(Some(&choice)).ok())
+            .unwrap_or(SecretBackend::File);
+        SecretStore::new_with_backend(self.config_dir.clone(), backend)
     }
 
     /// Store a secret in the keystore and remove any inline copy from the

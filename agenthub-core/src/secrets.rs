@@ -59,26 +59,94 @@ pub struct SecretInfo {
     pub redacted_value: String,
 }
 
-/// File-backed secret keystore.
+/// Where secret values are stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretBackend {
+    /// `<config_dir>/secrets.yaml` (0600 on Unix) — always available.
+    File,
+    /// The OS keychain/credential store (Secret Service / Keychain / DPAPI).
+    /// The whole keystore is one keyring entry under service `agenthub`, so
+    /// values never touch the filesystem.
+    Keyring,
+}
+
+impl SecretBackend {
+    pub const SERVICE: &'static str = "agenthub";
+    pub const KEYSTORE_ENTRY: &'static str = "keystore";
+
+    /// Parse a user-provided backend name (`auto` | `file` | `keyring`).
+    pub fn parse(choice: &str) -> Result<Self> {
+        match choice.trim().to_lowercase().as_str() {
+            "file" => Ok(SecretBackend::File),
+            "keyring" => Ok(SecretBackend::Keyring),
+            other => Err(AgentHubError::ConfigError(format!(
+                "Invalid secret backend '{}' (expected auto|file|keyring)",
+                other
+            ))),
+        }
+    }
+
+    /// Resolve an optional choice: `None`/`auto` probes the OS keyring and
+    /// falls back to the file keystore when unavailable (e.g. headless Linux).
+    pub fn resolve(choice: Option<&str>) -> Result<Self> {
+        match choice {
+            None | Some("auto") => Ok(if Self::keyring_available() {
+                SecretBackend::Keyring
+            } else {
+                SecretBackend::File
+            }),
+            Some(c) => Self::parse(c),
+        }
+    }
+
+    /// Probe the OS keyring by writing and deleting a throwaway entry.
+    pub fn keyring_available() -> bool {
+        let entry = keyring::Entry::new(Self::SERVICE, "availability-probe");
+        match entry {
+            Ok(entry) => match entry.set_password("probe") {
+                Ok(()) => entry.delete_credential().is_ok(),
+                Err(_) => false,
+            },
+            Err(_) => false,
+        }
+    }
+}
+
+impl std::fmt::Display for SecretBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SecretBackend::File => write!(f, "file"),
+            SecretBackend::Keyring => write!(f, "keyring"),
+        }
+    }
+}
+
+/// Secret keystore.
 ///
-/// Secrets live in `<config_dir>/secrets.yaml`, a single file that is created
-/// with restrictive permissions (`0600` on Unix) so values never sit inside the
-/// agent config YAML files. The OS keyring was evaluated but rejected for the
-/// core library because it drags in platform-specific system dependencies
-/// (libsecret/Keychain/DPAPI) and fails on headless Linux; the file keystore
-/// keeps the same "values never in config files or templates" property with
-/// zero external dependencies. A future `keyring` backend can be slotted in
-/// behind the same interface.
+/// Values never sit inside the agent config YAML files. The default backend
+/// stores them in `<config_dir>/secrets.yaml` (0600 on Unix); the `keyring`
+/// backend stores the whole keystore as one OS-keyring entry (service
+/// `agenthub`, user `keystore`) so values never touch the filesystem. The
+/// file keystore stays the default because the OS keyring drags in
+/// platform-specific system dependencies and is unavailable on headless
+/// Linux; `SecretBackend::resolve` probes and falls back automatically.
 #[derive(Debug, Clone)]
 pub struct SecretStore {
     dir: PathBuf,
+    backend: SecretBackend,
     secrets: HashMap<String, SecretEntry>,
 }
 
 impl SecretStore {
     pub fn new(config_dir: PathBuf) -> Self {
+        Self::new_with_backend(config_dir, SecretBackend::File)
+    }
+
+    /// Create a store with an explicit backend.
+    pub fn new_with_backend(config_dir: PathBuf, backend: SecretBackend) -> Self {
         let mut store = Self {
             dir: config_dir.join("secrets"),
+            backend,
             secrets: HashMap::new(),
         };
         store.load();
@@ -89,16 +157,24 @@ impl SecretStore {
         &self.dir
     }
 
+    pub fn backend(&self) -> SecretBackend {
+        self.backend
+    }
+
     fn path(&self) -> PathBuf {
         self.dir.join("secrets.yaml")
     }
 
     fn load(&mut self) {
-        let path = self.path();
-        if !path.exists() {
-            return;
-        }
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        let raw: Option<String> = match self.backend {
+            SecretBackend::File => std::fs::read_to_string(self.path()).ok(),
+            SecretBackend::Keyring => {
+                keyring::Entry::new(SecretBackend::SERVICE, SecretBackend::KEYSTORE_ENTRY)
+                    .ok()
+                    .and_then(|entry| entry.get_password().ok())
+            }
+        };
+        if let Some(content) = raw {
             if let Ok(parsed) = serde_yaml::from_str::<HashMap<String, SecretEntry>>(&content) {
                 self.secrets = parsed;
             }
@@ -106,20 +182,35 @@ impl SecretStore {
     }
 
     fn persist(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.dir).map_err(|e| {
-            AgentHubError::ConfigError(format!("Failed to create secrets dir: {}", e))
-        })?;
         let content = serde_yaml::to_string(&self.secrets).map_err(|e| {
             AgentHubError::ConfigError(format!("Failed to serialize secrets: {}", e))
         })?;
-        let path = self.path();
-        atomic_write(&path, &content)
-            .map_err(|e| AgentHubError::ConfigError(format!("Failed to write secrets: {}", e)))?;
-        // Restrictive permissions: owner read/write only (no-op on Windows).
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        match self.backend {
+            SecretBackend::File => {
+                std::fs::create_dir_all(&self.dir).map_err(|e| {
+                    AgentHubError::ConfigError(format!("Failed to create secrets dir: {}", e))
+                })?;
+                let path = self.path();
+                atomic_write(&path, &content).map_err(|e| {
+                    AgentHubError::ConfigError(format!("Failed to write secrets: {}", e))
+                })?;
+                // Restrictive permissions: owner read/write only (no-op on Windows).
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                }
+            }
+            SecretBackend::Keyring => {
+                let entry =
+                    keyring::Entry::new(SecretBackend::SERVICE, SecretBackend::KEYSTORE_ENTRY)
+                        .map_err(|e| {
+                            AgentHubError::ConfigError(format!("Failed to open OS keyring: {}", e))
+                        })?;
+                entry.set_password(&content).map_err(|e| {
+                    AgentHubError::ConfigError(format!("Failed to write OS keyring: {}", e))
+                })?;
+            }
         }
         Ok(())
     }
@@ -374,5 +465,72 @@ mod tests {
         let mut store = store;
         store.set("agent-a", "api_key", "sk-new").unwrap();
         assert_eq!(store.get("agent-a", "api_key").as_deref(), Some("sk-new"));
+    }
+
+    // ---- Backends ----
+
+    #[test]
+    fn test_backend_parse_and_display() {
+        assert_eq!(SecretBackend::parse("file").unwrap(), SecretBackend::File);
+        assert_eq!(
+            SecretBackend::parse("KEYRING").unwrap(),
+            SecretBackend::Keyring
+        );
+        assert!(SecretBackend::parse("cloud").is_err());
+        assert_eq!(SecretBackend::File.to_string(), "file");
+        assert_eq!(SecretBackend::Keyring.to_string(), "keyring");
+    }
+
+    #[test]
+    fn test_resolve_auto_falls_back_to_file_when_keyring_missing() {
+        // In CI/headless environments the OS keyring is unavailable, so `auto`
+        // must resolve to the file backend without error.
+        let resolved = SecretBackend::resolve(None).unwrap();
+        if !SecretBackend::keyring_available() {
+            assert_eq!(resolved, SecretBackend::File);
+        }
+        assert_eq!(
+            SecretBackend::resolve(Some("file")).unwrap(),
+            SecretBackend::File
+        );
+        assert_eq!(
+            SecretBackend::resolve(Some("auto")).unwrap(),
+            if SecretBackend::keyring_available() {
+                SecretBackend::Keyring
+            } else {
+                SecretBackend::File
+            }
+        );
+    }
+
+    #[test]
+    fn test_keyring_backend_roundtrip_when_available() {
+        if !SecretBackend::keyring_available() {
+            eprintln!("skipping: OS keyring unavailable on this host");
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let mut store =
+            SecretStore::new_with_backend(temp.path().to_path_buf(), SecretBackend::Keyring);
+        store.set("agent-a", "api_key", "sk-os-secret").unwrap();
+        assert_eq!(
+            store.get("agent-a", "api_key").as_deref(),
+            Some("sk-os-secret")
+        );
+
+        // No plaintext file is ever created.
+        assert!(!temp.path().join("secrets/secrets.yaml").exists());
+
+        // Reload from the OS keyring.
+        let reloaded =
+            SecretStore::new_with_backend(temp.path().to_path_buf(), SecretBackend::Keyring);
+        assert_eq!(
+            reloaded.get("agent-a", "api_key").as_deref(),
+            Some("sk-os-secret")
+        );
+
+        // Cleanup so the host keyring does not accumulate test entries.
+        let mut store = reloaded;
+        assert!(store.delete("agent-a", "api_key").unwrap());
     }
 }

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **OS keyring secret backend**: `SecretStore` supports `SecretBackend::Keyring`
+  (service `agenthub`, single `keystore` entry) so values never touch the
+  filesystem, while the 0600 file keystore remains the default and fallback.
+  `AGENTHUB_SECRET_BACKEND=auto|file|keyring` selects it; `auto` probes the
+  OS keyring (Secret Service / Keychain / DPAPI) and falls back to the file
+  keystore on headless hosts. CLI: `config secret backend [--check] [--force]`
+- **Interactive web dashboard**: `status --html` now emits a self-contained
+  interactive page (still no server): 7/30/90-day trend window switcher, SVG
+  cost/token bar charts, sortable trend table, and click-to-drilldown panels
+  for catalog agents, skills, per-agent session usage and recent audit events
+  (embedded as `window.__AGENTHUB_DASHBOARD__`)
 - **Skill scopes**: `SkillScope` (project > user > global) with precedence
   resolution — project copies shadow user/global; `install_skill_to_scope` /
   `uninstall_skill_from_scope` / `resolve_skill_scope`; `list_skills` merges

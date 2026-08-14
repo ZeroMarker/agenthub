@@ -471,6 +471,7 @@ mod tests {
             input_tokens: 500_000,
             output_tokens: 0,
             estimated_cost_usd: 1.0,
+            calls: 0,
         });
         sm.save_session(&old_session).unwrap();
 

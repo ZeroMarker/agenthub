@@ -452,6 +452,25 @@ enum SessionArgs {
         #[arg(long)]
         title: Option<String>,
     },
+    /// Show API call / token / cost usage (one session or all)
+    Usage {
+        /// Session id; shows the aggregate across all sessions when omitted
+        id: Option<String>,
+    },
+    /// Show the daily API-call / token / cost trend
+    Trend {
+        /// Number of days to look back
+        #[arg(long, default_value_t = 30)]
+        days: u32,
+    },
+    /// Export per-session usage + daily trend as JSON
+    ExportUsage {
+        /// Output JSON file path
+        file: PathBuf,
+        /// Number of days to include in the trend
+        #[arg(long, default_value_t = 30)]
+        days: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1284,6 +1303,81 @@ pub fn cmd_session_fork(
             session.messages.len()
         ),
         Err(e) => format!("❌ Failed: {}", e),
+    }
+}
+
+pub fn cmd_session_usage(base_dir: &Path, id: Option<&str>) -> String {
+    let manager = SessionManager::new(base_dir.join("sessions"));
+    match id {
+        Some(session_id) => {
+            match manager.get_session(session_id) {
+                Ok(session) => {
+                    let usage = session.usage.as_ref();
+                    format!(
+                        "{}
+  API calls:    {}
+  Input tokens: {}
+  Output tokens:{}
+  Total tokens: {}
+  Cost:         ${:.4}",
+                        session.title,
+                        usage.map(|u| u.calls).unwrap_or(0),
+                        usage.map(|u| u.input_tokens).unwrap_or(0),
+                        usage.map(|u| u.output_tokens).unwrap_or(0),
+                        usage.map(|u| u.total_tokens).unwrap_or(0),
+                        usage.map(|u| u.estimated_cost_usd).unwrap_or(0.0),
+                    )
+                }
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        None => match manager.usage_summary() {
+            Ok(agg) => format!(
+                "Aggregate usage ({} sessions with usage):\n  API calls:    {}\n  Input tokens: {}\n  Output tokens:{}\n  Total tokens: {}\n  Cost:         ${:.4}",
+                agg.sessions, agg.api_calls, agg.input_tokens, agg.output_tokens, agg.total_tokens, agg.cost_usd
+            ),
+            Err(e) => format!("Error: {}", e),
+        },
+    }
+}
+
+pub fn cmd_session_usage_trend(base_dir: &Path, days: u32) -> String {
+    let manager = SessionManager::new(base_dir.join("sessions"));
+    match manager.usage_trend(days as usize) {
+        Ok(trend) if trend.is_empty() => {
+            format!("No usage recorded in the last {} days.", days)
+        }
+        Ok(trend) => {
+            let mut out = format!(
+                "{:<12} {:>9} {:>12} {:>12}\n",
+                "Date", "API calls", "Tokens", "Cost (USD)"
+            );
+            for point in &trend {
+                out.push_str(&format!(
+                    "{:<12} {:>9} {:>12} {:>12.4}\n",
+                    point.date, point.api_calls, point.tokens, point.cost_usd
+                ));
+            }
+            let total: u32 = trend.iter().map(|p| p.api_calls).sum();
+            out.push_str(&format!(
+                "\n{} days · {} API calls total\n",
+                trend.len(),
+                total
+            ));
+            out
+        }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_session_export_usage(base_dir: &Path, file: &Path, days: u32) -> String {
+    let manager = SessionManager::new(base_dir.join("sessions"));
+    match manager.export_usage_json(days as usize) {
+        Ok(json) => match std::fs::write(file, &json) {
+            Ok(()) => format!("✅ Usage export written to {}", file.display()),
+            Err(e) => format!("Error writing export: {}", e),
+        },
+        Err(e) => format!("Error: {}", e),
     }
 }
 
@@ -3103,6 +3197,11 @@ fn main() {
             SessionArgs::Fork { id, agent, title } => {
                 cmd_session_fork(&data_dir(), &id, agent.as_deref(), title.as_deref())
             }
+            SessionArgs::Usage { id } => cmd_session_usage(&data_dir(), id.as_deref()),
+            SessionArgs::Trend { days } => cmd_session_usage_trend(&data_dir(), days),
+            SessionArgs::ExportUsage { file, days } => {
+                cmd_session_export_usage(&data_dir(), &file, days)
+            }
         },
         Commands::Skill(cmd) => match cmd {
             SkillArgs::CheckCompat { name } => cmd_skill_check_compat(&data_dir(), &name),
@@ -3602,6 +3701,7 @@ mod tests {
 
         // Budget set + show
         let output = cmd_session_budget_set(base, Some(10.0), Some(100.0));
+        assert!(output.contains("✅"));
         assert!(output.contains("Budget set"));
         assert!(output.contains("daily $10.00"));
 
@@ -3617,6 +3717,48 @@ mod tests {
 
         let sessions = agenthub_core::SessionManager::new(base.join("sessions"));
         assert_eq!(sessions.list_sessions().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_cmd_session_usage_trend_export() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let manager = agenthub_core::SessionManager::new(base.join("sessions"));
+        let session = manager.create_session("Usage", "codex").unwrap();
+        let pricing = agenthub_core::PricingTable::default();
+        manager
+            .record_usage(&session.id, 100, 50, &pricing)
+            .unwrap();
+        manager.record_usage(&session.id, 10, 5, &pricing).unwrap();
+
+        // Per-session usage.
+        let out = cmd_session_usage(base, Some(&session.id));
+        assert!(out.contains("API calls:    2"), "{out}");
+        assert!(out.contains("Total tokens: 165"));
+
+        // Aggregate.
+        let out = cmd_session_usage(base, None);
+        assert!(out.contains("API calls:    2"));
+        assert!(out.contains("Cost:"));
+
+        // Trend table.
+        let out = cmd_session_usage_trend(base, 7);
+        assert!(out.contains("Date"), "{out}");
+        assert!(out.contains("API calls"), "{out}");
+        assert!(out.contains("2 API calls total"));
+
+        // Empty trend for a window with no data.
+        let out = cmd_session_usage_trend(base, 0);
+        assert!(out.contains("No usage recorded"));
+
+        // JSON export.
+        let file = temp.path().join("usage.json");
+        let out = cmd_session_export_usage(base, &file, 7);
+        assert!(out.contains("✅"));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(parsed["total"]["api_calls"], 2);
+        assert_eq!(parsed["sessions"].as_array().unwrap().len(), 1);
     }
 
     #[test]

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Session usage tracking & export**: `SessionUsage.calls` counts API calls
+  (incremented by `record_usage`); new aggregate/trend/export APIs —
+  `usage_summary` (calls/tokens/cost across sessions), `usage_trend(days)`
+  (per-UTC-day calls/tokens/cost) and `export_usage_json` (per-session rows +
+  daily trend + totals). CLI: `session usage [id]`, `session trend --days N`,
+  `session export-usage <file>`; Tauri: `get_session_usage_summary` /
+  `get_session_usage_trend` / `export_session_usage_json`
 - **SMTP direct delivery** (notify): email channels accept `smtp` settings
   (`host`/`port`/`username`/`password`/`tls`) and send alerts directly over
   SMTP instead of spooling `.eml` files. Minimal zero-dependency RFC 5321

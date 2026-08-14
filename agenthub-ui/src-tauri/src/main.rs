@@ -2106,6 +2106,38 @@ async fn fork_session(
     Ok(session_to_detail(&session))
 }
 
+#[tauri::command]
+async fn get_session_usage_summary(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::SessionUsageAggregate, String> {
+    state
+        .session_manager
+        .usage_summary()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_session_usage_trend(
+    days: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<agenthub_core::UsageTrendPoint>, String> {
+    state
+        .session_manager
+        .usage_trend(days.unwrap_or(30) as usize)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn export_session_usage_json(
+    days: Option<u32>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    state
+        .session_manager
+        .export_usage_json(days.unwrap_or(30) as usize)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct SkillCompatibilityInfo {
     skill: String,
@@ -2936,6 +2968,9 @@ fn main() {
             import_memories_json,
             get_session_budget,
             set_session_budget,
+            get_session_usage_summary,
+            get_session_usage_trend,
+            export_session_usage_json,
             fork_session,
             check_skill_compatibility,
             get_trend,

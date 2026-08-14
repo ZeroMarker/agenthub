@@ -31,14 +31,14 @@
 - [ ] Skill：在线技能市场与插件市场
 - [ ] Skill：项目级 / 用户级 / 全局级技能作用域
 - [x] Notify：SMTP 直接发送（`--smtp-host/--smtp-port/--smtp-user/--smtp-password/--smtp-tls`；零依赖原生 SMTP 客户端：EHLO/AUTH PLAIN/MAIL/RCPT/DATA/QUIT；配置 SMTP 时直发，否则仍落盘 .eml）
-- [ ] Session：API 调用次数、成本趋势与导出
+- [x] Session：API 调用次数、成本趋势与导出（`SessionUsage.calls` 每次调用递增；`session usage|trend|export-usage` + 聚合汇总/按日趋势/JSON 导出）
 - [ ] Prompt：社区远程推送与同步渠道
 - [ ] Overview：交互式 Web 仪表盘与指标钻取（当前为静态 HTML 导出）
 - [ ] Beta：邀请 3–5 名真实用户完成安装、查询、升级和卸载任务测试
 
 ### 最近验证
 
-- [x] 2026-08-14 本机验证：cargo test --workspace 全绿（318 测试：257 core + 47 cli + 9 集成 + 5 tauri），fmt 干净，all-targets clippy 0 警告；覆盖率门禁通过（87.0%）；CLI `notify add` SMTP 通道冒烟通过；SMTP 直发经本地 fake SMTP 服务器端到端验证（无 lettre 依赖，原生客户端）
+- [x] 2026-08-14 本机验证：cargo test --workspace 全绿（323 测试：261 core + 48 cli + 9 集成 + 5 tauri），fmt 干净，all-targets clippy 0 警告；覆盖率门禁通过；CLI `session usage|trend|export-usage` 冒烟通过
 
 ## 发布记录（2026-08-10）— ✅ v1.4.0 已发布
 

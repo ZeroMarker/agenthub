@@ -66,7 +66,8 @@ pub use secrets::{
 };
 pub use session::{
     BudgetConfig, BudgetReport, ContextMessage, ModelPricing, PricingTable, Session,
-    SessionContext, SessionManager, SessionStats, SessionStatus, SessionTemplate, TemplateMessage,
+    SessionContext, SessionManager, SessionStats, SessionStatus, SessionTemplate, SessionUsage,
+    SessionUsageAggregate, SessionUsageRow, TemplateMessage, UsageExport, UsageTrendPoint,
 };
 pub use skill::{Skill, SkillCompatibility, SkillManager, SkillManifest};
 pub use status::{AgentStatus, StatusDetector};

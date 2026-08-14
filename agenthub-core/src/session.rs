@@ -45,6 +45,9 @@ pub struct SessionUsage {
     pub output_tokens: u32,
     #[serde(default)]
     pub estimated_cost_usd: f64,
+    /// Number of API calls recorded for this session.
+    #[serde(default)]
+    pub calls: u32,
 }
 
 /// Per-model pricing in USD per 1,000,000 tokens.
@@ -465,7 +468,7 @@ impl SessionManager {
     }
 
     /// Record model usage for a session and (re)compute the estimated cost using
-    /// the supplied pricing table. Tokens and cost accumulate across calls.
+    /// the supplied pricing table. Tokens, calls and cost accumulate across calls.
     pub fn record_usage(
         &self,
         id: &str,
@@ -482,11 +485,13 @@ impl SessionManager {
             input_tokens: 0,
             output_tokens: 0,
             estimated_cost_usd: 0.0,
+            calls: 0,
         });
         usage.input_tokens += input_tokens;
         usage.output_tokens += output_tokens;
         usage.total_tokens += input_tokens + output_tokens;
         usage.estimated_cost_usd += cost_added;
+        usage.calls += 1;
 
         self.save_session(&session)
     }
@@ -898,6 +903,113 @@ impl SessionManager {
             total_cost,
         })
     }
+
+    // -------------------------------------------------------------------
+    // API-call / cost aggregation & export
+    // -------------------------------------------------------------------
+
+    /// Aggregate API calls, tokens and cost across every session.
+    pub fn usage_summary(&self) -> Result<SessionUsageAggregate> {
+        let sessions = self.list_sessions()?;
+        let mut agg = SessionUsageAggregate::default();
+        for session in &sessions {
+            if let Some(usage) = &session.usage {
+                agg.sessions += 1;
+                agg.api_calls += usage.calls;
+                agg.total_tokens += usage.total_tokens;
+                agg.input_tokens += usage.input_tokens;
+                agg.output_tokens += usage.output_tokens;
+                agg.cost_usd += usage.estimated_cost_usd;
+            }
+        }
+        Ok(agg)
+    }
+
+    /// Bucket API calls / tokens / cost by UTC date over the last `days` days
+    /// (oldest first). Sessions without usage are skipped.
+    pub fn usage_trend(&self, days: usize) -> Result<Vec<UsageTrendPoint>> {
+        self.usage_trend_with_now(days, Utc::now())
+    }
+
+    pub fn usage_trend_with_now(
+        &self,
+        days: usize,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<UsageTrendPoint>> {
+        if days == 0 {
+            return Ok(Vec::new());
+        }
+        let sessions = self.list_sessions()?;
+        let mut buckets: HashMap<String, UsageTrendPoint> = HashMap::new();
+        for session in &sessions {
+            let Some(usage) = &session.usage else {
+                continue;
+            };
+            let date = session.started_at.format("%Y-%m-%d").to_string();
+            let bucket = buckets.entry(date.clone()).or_insert(UsageTrendPoint {
+                date,
+                api_calls: 0,
+                tokens: 0,
+                cost_usd: 0.0,
+            });
+            bucket.api_calls += usage.calls;
+            bucket.tokens += usage.total_tokens;
+            bucket.cost_usd += usage.estimated_cost_usd;
+        }
+
+        let mut trend: Vec<UsageTrendPoint> = buckets.into_values().collect();
+        trend.sort_by(|a, b| a.date.cmp(&b.date));
+        // Keep only buckets within the requested window relative to `now`.
+        let cutoff = (now - chrono::Duration::days(days as i64))
+            .format("%Y-%m-%d")
+            .to_string();
+        trend.retain(|point| point.date >= cutoff);
+        Ok(trend)
+    }
+
+    /// Per-session usage rows for export.
+    pub fn usage_rows(&self) -> Result<Vec<SessionUsageRow>> {
+        let sessions = self.list_sessions()?;
+        let mut rows = Vec::new();
+        for session in sessions {
+            let usage = session.usage.unwrap_or(SessionUsage {
+                total_tokens: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                estimated_cost_usd: 0.0,
+                calls: 0,
+            });
+            rows.push(SessionUsageRow {
+                session_id: session.id,
+                title: session.title,
+                agent: session.agent,
+                model: session.model,
+                status: session.status,
+                started_at: session.started_at,
+                calls: usage.calls,
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total_tokens,
+                cost_usd: usage.estimated_cost_usd,
+            });
+        }
+        rows.sort_by_key(|b| std::cmp::Reverse(b.started_at));
+        Ok(rows)
+    }
+
+    /// Serialize per-session usage plus the daily trend as pretty JSON.
+    pub fn export_usage_json(&self, days: usize) -> Result<String> {
+        let export = UsageExport {
+            generated_at: Utc::now(),
+            trend_days: days,
+            sessions: self.usage_rows()?,
+            daily: self.usage_trend(days)?,
+            total: self.usage_summary()?,
+        };
+        serde_json::to_string_pretty(&export).map_err(|e| {
+            AgentHubError::SessionError(format!("Failed to serialize usage export: {}", e))
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -908,6 +1020,54 @@ pub struct SessionStats {
     pub failed: usize,
     pub total_tokens: u32,
     pub total_cost: f64,
+}
+
+/// Aggregated API usage across every session.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct SessionUsageAggregate {
+    /// Sessions that recorded at least one usage entry.
+    pub sessions: usize,
+    pub api_calls: u32,
+    pub total_tokens: u32,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub cost_usd: f64,
+}
+
+/// Per-day usage bucket (UTC).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UsageTrendPoint {
+    /// UTC date `YYYY-MM-DD`.
+    pub date: String,
+    pub api_calls: u32,
+    pub tokens: u32,
+    pub cost_usd: f64,
+}
+
+/// Per-session usage row for export.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionUsageRow {
+    pub session_id: String,
+    pub title: String,
+    pub agent: String,
+    pub model: Option<String>,
+    pub status: SessionStatus,
+    pub started_at: DateTime<Utc>,
+    pub calls: u32,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub total_tokens: u32,
+    pub cost_usd: f64,
+}
+
+/// JSON export payload: per-session usage + daily trend + totals.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageExport {
+    pub generated_at: DateTime<Utc>,
+    pub trend_days: usize,
+    pub sessions: Vec<SessionUsageRow>,
+    pub daily: Vec<UsageTrendPoint>,
+    pub total: SessionUsageAggregate,
 }
 
 #[cfg(test)]
@@ -1247,6 +1407,7 @@ mod tests {
             input_tokens: 10_000_000,
             output_tokens: 0,
             estimated_cost_usd: 1.5,
+            calls: 0,
         });
         manager.save_session(&stale).unwrap();
 
@@ -1352,5 +1513,111 @@ mod tests {
         assert!(manager.get_session(&session.id).is_err());
         // Listing must skip corrupt sessions, not fail.
         assert!(manager.list_sessions().unwrap().is_empty());
+    }
+
+    // ---- API-call tracking, aggregation & export ----
+
+    fn session_with_usage(manager: &SessionManager, agent: &str, now: DateTime<Utc>) -> Session {
+        let mut session = manager.create_session(agent, agent).unwrap();
+        session.started_at = now;
+        session.usage.get_or_insert(SessionUsage {
+            total_tokens: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            estimated_cost_usd: 0.0,
+            calls: 0,
+        });
+        manager.save_session(&session).unwrap();
+        session
+    }
+
+    #[test]
+    fn test_record_usage_increments_calls() {
+        let (manager, _temp) = create_test_manager();
+        let session = manager.create_session("S1", "codex").unwrap();
+        let pricing = PricingTable::default();
+
+        manager
+            .record_usage(&session.id, 100, 50, &pricing)
+            .unwrap();
+        manager
+            .record_usage(&session.id, 200, 25, &pricing)
+            .unwrap();
+
+        let usage = manager.get_session(&session.id).unwrap().usage.unwrap();
+        assert_eq!(usage.calls, 2);
+        assert_eq!(usage.total_tokens, 375);
+        assert_eq!(usage.input_tokens, 300);
+        assert_eq!(usage.output_tokens, 75);
+        assert!(usage.estimated_cost_usd > 0.0);
+    }
+
+    #[test]
+    fn test_usage_summary_aggregates() {
+        let (manager, _temp) = create_test_manager();
+        let pricing = PricingTable::default();
+        let s1 = manager.create_session("S1", "codex").unwrap();
+        let s2 = manager.create_session("S2", "claude").unwrap();
+        manager.record_usage(&s1.id, 100, 50, &pricing).unwrap();
+        manager.record_usage(&s2.id, 10, 5, &pricing).unwrap();
+        manager.create_session("S3", "nousage").unwrap(); // no usage
+
+        let agg = manager.usage_summary().unwrap();
+        assert_eq!(agg.sessions, 2);
+        assert_eq!(agg.api_calls, 2);
+        assert_eq!(agg.total_tokens, 165);
+        assert_eq!(agg.input_tokens, 110);
+        assert_eq!(agg.output_tokens, 55);
+        assert!(agg.cost_usd > 0.0);
+    }
+
+    #[test]
+    fn test_usage_trend_buckets_by_day() {
+        let (manager, _temp) = create_test_manager();
+        let pricing = PricingTable::default();
+        let now = Utc::now();
+
+        // Two sessions today, one session three days ago.
+        let s1 = session_with_usage(&manager, "codex", now);
+        manager.record_usage(&s1.id, 100, 50, &pricing).unwrap();
+        let s2 = session_with_usage(&manager, "codex", now);
+        manager.record_usage(&s2.id, 10, 5, &pricing).unwrap();
+        let old = session_with_usage(&manager, "codex", now - chrono::Duration::days(3));
+        manager.record_usage(&old.id, 1, 1, &pricing).unwrap();
+
+        let trend = manager.usage_trend_with_now(7, now).unwrap();
+        assert_eq!(trend.len(), 2);
+        let today = trend.last().unwrap();
+        assert_eq!(today.api_calls, 2);
+        assert_eq!(today.tokens, 165);
+        let old_day = trend.first().unwrap();
+        assert_eq!(old_day.api_calls, 1);
+
+        // Window truncation: with days=1 only today survives.
+        let trend = manager.usage_trend_with_now(1, now).unwrap();
+        assert_eq!(trend.len(), 1);
+        assert_eq!(trend[0].api_calls, 2);
+    }
+
+    #[test]
+    fn test_export_usage_json_roundtrip() {
+        let (manager, _temp) = create_test_manager();
+        let pricing = PricingTable::default();
+        let session = manager.create_session("S1", "codex").unwrap();
+        manager.set_model(&session.id, "gpt-4o").unwrap();
+        manager
+            .record_usage(&session.id, 100, 50, &pricing)
+            .unwrap();
+
+        let json = manager.export_usage_json(30).unwrap();
+        let parsed: UsageExport = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.sessions.len(), 1);
+        assert_eq!(parsed.sessions[0].session_id, session.id);
+        assert_eq!(parsed.sessions[0].calls, 1);
+        assert_eq!(parsed.sessions[0].model.as_deref(), Some("gpt-4o"));
+        assert_eq!(parsed.total.api_calls, 1);
+        assert_eq!(parsed.daily.len(), 1);
+        assert_eq!(parsed.daily[0].api_calls, 1);
+        assert_eq!(parsed.total.sessions, 1);
     }
 }

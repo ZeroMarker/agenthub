@@ -2869,8 +2869,15 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".codex")
         .join("skills");
-    let skill_manager =
-        SkillManager::new(config_dir.join("skills")).with_extra_dir(codex_skills_dir);
+    let skill_manager = SkillManager::new(config_dir.join("skills"))
+        .with_extra_dir(codex_skills_dir)
+        .with_project_dir(
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(".agenthub")
+                .join("skills"),
+        )
+        .with_global_dir(PathBuf::from("/etc/agenthub/skills"));
 
     let prompt_manager = PromptManager::new(config_dir.join("prompts"));
     let session_manager = SessionManager::new(config_dir.join("sessions"));

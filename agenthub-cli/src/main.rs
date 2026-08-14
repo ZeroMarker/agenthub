@@ -488,6 +488,32 @@ enum BudgetCmd {
 
 #[derive(Subcommand)]
 enum SkillArgs {
+    /// List skills across scopes (project > user > global)
+    List {
+        /// Filter to one scope: project | user | global
+        #[arg(long)]
+        scope: Option<String>,
+    },
+    /// Install a skill from a local directory into a scope (default user)
+    Install {
+        name: String,
+        /// Source directory containing SKILL.md
+        dir: PathBuf,
+        /// Target scope: user (default) | project | global
+        #[arg(long, default_value = "user")]
+        scope: String,
+    },
+    /// Uninstall a skill from a scope (default: whichever scope holds it)
+    Uninstall {
+        name: String,
+        /// Restrict removal to one scope: project | user | global
+        #[arg(long)]
+        scope: Option<String>,
+    },
+    /// Enable a skill (resolved across scopes)
+    Enable { name: String },
+    /// Disable a skill (resolved across scopes)
+    Disable { name: String },
     /// Check version compatibility against the running AgentHub
     CheckCompat {
         /// Skill name, or "*" for all
@@ -1378,6 +1404,159 @@ pub fn cmd_session_export_usage(base_dir: &Path, file: &Path, days: u32) -> Stri
             Err(e) => format!("Error writing export: {}", e),
         },
         Err(e) => format!("Error: {}", e),
+    }
+}
+
+/// Build a skill manager covering all three scopes: the config-dir user
+/// scope, the current working directory's `.agenthub/skills` project scope
+/// (override with `AGENTHUB_PROJECT_SKILLS_DIR`) and (on Unix)
+/// `/etc/agenthub/skills` as the global scope (`AGENTHUB_GLOBAL_SKILLS_DIR`
+/// overrides it).
+fn cli_skill_manager(base_dir: &Path) -> SkillManager {
+    let project_dir = std::env::var_os("AGENTHUB_PROJECT_SKILLS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(".agenthub")
+                .join("skills")
+        });
+    let manager = SkillManager::new(base_dir.join("skills")).with_project_dir(project_dir);
+    if let Some(dir) = std::env::var_os("AGENTHUB_GLOBAL_SKILLS_DIR") {
+        manager.with_global_dir(PathBuf::from(dir))
+    } else {
+        #[cfg(unix)]
+        {
+            manager.with_global_dir(PathBuf::from("/etc/agenthub/skills"))
+        }
+        #[cfg(not(unix))]
+        {
+            manager
+        }
+    }
+}
+
+pub fn cmd_skill_list(base_dir: &Path, scope: Option<&str>) -> String {
+    let manager = cli_skill_manager(base_dir);
+    let scope = match scope {
+        Some(s) => match s.parse::<agenthub_core::SkillScope>() {
+            Ok(scope) => Some(scope),
+            Err(e) => return format!("❌ {}", e),
+        },
+        None => None,
+    };
+
+    // When a scope is requested, list only skills physically present there.
+    let skills = if let Some(scope) = scope {
+        let Some(installed) = manager.scope_installed_dir(scope) else {
+            return format!("No skills in the {} scope (not configured).", scope);
+        };
+        let mut skills = Vec::new();
+        if installed.exists() {
+            let entries = match std::fs::read_dir(&installed) {
+                Ok(entries) => entries,
+                Err(e) => return format!("Error: {}", e),
+            };
+            for entry in entries {
+                let path = match entry {
+                    Ok(entry) => entry.path(),
+                    Err(e) => return format!("Error: {}", e),
+                };
+                if path.is_dir() && path.join("SKILL.md").exists() {
+                    if let Ok(skill) = manager.get_skill_from_dir(&path) {
+                        skills.push(skill);
+                    }
+                }
+            }
+        }
+        skills.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
+        skills
+    } else {
+        match manager.list_skills() {
+            Ok(skills) => skills,
+            Err(e) => return format!("Error: {}", e),
+        }
+    };
+
+    let mut out = format!(
+        "{:<24} {:<10} {:<8} {}\n",
+        "Name", "Version", "Scope", "Description"
+    );
+    for skill in skills {
+        // With a scope filter, the column reflects the requested scope;
+        // otherwise show the resolved (highest-precedence) scope.
+        let found_scope = scope
+            .map(|s| s.to_string())
+            .or_else(|| {
+                manager
+                    .resolve_skill_scope(&skill.manifest.name)
+                    .ok()
+                    .flatten()
+                    .map(|(_, s)| s.to_string())
+            })
+            .unwrap_or_else(|| "?".to_string());
+        let desc: String = skill.manifest.description.chars().take(40).collect();
+        out.push_str(&format!(
+            "{:<24} {:<10} {:<8} {}\n",
+            skill.manifest.name, skill.manifest.version, found_scope, desc
+        ));
+    }
+    out
+}
+
+pub fn cmd_skill_install(base_dir: &Path, name: &str, dir: &Path, scope: &str) -> String {
+    let scope = match scope.parse::<agenthub_core::SkillScope>() {
+        Ok(scope) => scope,
+        Err(e) => return format!("❌ {}", e),
+    };
+    let manager = cli_skill_manager(base_dir);
+    match manager.install_skill_to_scope(name, dir, scope) {
+        Ok(skill) => format!(
+            "✅ Installed '{}' v{} into the {} scope",
+            skill.manifest.name, skill.manifest.version, scope
+        ),
+        Err(e) => format!("❌ {}", e),
+    }
+}
+
+pub fn cmd_skill_uninstall(base_dir: &Path, name: &str, scope: Option<&str>) -> String {
+    let manager = cli_skill_manager(base_dir);
+    let removed = match scope {
+        Some(s) => match s.parse::<agenthub_core::SkillScope>() {
+            Ok(scope) => manager.uninstall_skill_from_scope(name, scope),
+            Err(e) => return format!("❌ {}", e),
+        },
+        None => manager.uninstall_skill(name),
+    };
+    match removed {
+        Ok(true) => format!(
+            "✅ Uninstalled '{}'{}.",
+            name,
+            scope.map(|s| format!(" from {}", s)).unwrap_or_default()
+        ),
+        Ok(false) => format!(
+            "No skill '{}' found{}.",
+            name,
+            scope.map(|s| format!(" in {}", s)).unwrap_or_default()
+        ),
+        Err(e) => format!("❌ {}", e),
+    }
+}
+
+pub fn cmd_skill_set_enabled(base_dir: &Path, name: &str, enabled: bool) -> String {
+    let manager = cli_skill_manager(base_dir);
+    let result = if enabled {
+        manager.enable_skill(name)
+    } else {
+        manager.disable_skill(name)
+    };
+    match result {
+        Ok(()) => format!(
+            "✅ '{}' {}",
+            name,
+            if enabled { "enabled" } else { "disabled" }
+        ),
+        Err(e) => format!("❌ {}", e),
     }
 }
 
@@ -3204,6 +3383,15 @@ fn main() {
             }
         },
         Commands::Skill(cmd) => match cmd {
+            SkillArgs::List { scope } => cmd_skill_list(&data_dir(), scope.as_deref()),
+            SkillArgs::Install { name, dir, scope } => {
+                cmd_skill_install(&data_dir(), &name, &dir, &scope)
+            }
+            SkillArgs::Uninstall { name, scope } => {
+                cmd_skill_uninstall(&data_dir(), &name, scope.as_deref())
+            }
+            SkillArgs::Enable { name } => cmd_skill_set_enabled(&data_dir(), &name, true),
+            SkillArgs::Disable { name } => cmd_skill_set_enabled(&data_dir(), &name, false),
             SkillArgs::CheckCompat { name } => cmd_skill_check_compat(&data_dir(), &name),
             SkillArgs::Workflow(cmd) => match cmd {
                 WorkflowCmd::List => cmd_workflow_list(&data_dir()),
@@ -3781,6 +3969,65 @@ mod tests {
         // Unconstrained skills produce empty result
         let output = cmd_skill_check_compat(base, "does-not-exist");
         assert!(output.contains("Error:"));
+    }
+
+    #[test]
+    fn test_cmd_skill_scope_install_list_uninstall() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+        let src = temp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let write = |version: &str| {
+            std::fs::write(
+                src.join("SKILL.md"),
+                format!(
+                    "---\nname: demo\ndescription: \"demo skill\"\nversion: {version}\nauthor: \"\"\ntriggers: []\ntags: []\ncategory: general\n---\n# demo\n"
+                ),
+            )
+            .unwrap();
+        };
+
+        // User-scope install (default), then enable/disable.
+        write("1.0.0");
+        let out = cmd_skill_install(base, "demo", &src, "user");
+        assert!(out.contains("✅"), "{out}");
+        assert!(out.contains("user scope"));
+
+        let out = cmd_skill_set_enabled(base, "demo", false);
+        assert!(out.contains("disabled"));
+        let out = cmd_skill_set_enabled(base, "demo", true);
+        assert!(out.contains("enabled"));
+
+        // Invalid scope rejected.
+        let out = cmd_skill_install(base, "demo", &src, "system");
+        assert!(out.contains("Invalid skill scope"));
+
+        // Project scope install shadows user (project > user).
+        write("2.0.0");
+        std::env::set_var("AGENTHUB_PROJECT_SKILLS_DIR", temp.path().join("proj"));
+        let out = cmd_skill_install(base, "demo", &src, "project");
+        assert!(out.contains("✅"), "{out}");
+        assert!(out.contains("project scope"));
+
+        let out = cmd_skill_list(base, None);
+        assert!(out.contains("demo"), "{out}");
+        assert!(out.contains("project"), "{out}");
+
+        // Scope-filtered listing.
+        let out = cmd_skill_list(base, Some("user"));
+        assert!(out.contains("demo"));
+        assert!(out.contains("user"));
+
+        // Uninstall from the user scope only; project copy remains.
+        let out = cmd_skill_uninstall(base, "demo", Some("user"));
+        assert!(out.contains("✅"));
+        assert!(cmd_skill_list(base, Some("project")).contains("demo"));
+
+        // Uninstall from resolved scope (project).
+        let out = cmd_skill_uninstall(base, "demo", None);
+        assert!(out.contains("✅"));
+        assert!(!cmd_skill_list(base, None).contains("demo"));
+        std::env::remove_var("AGENTHUB_PROJECT_SKILLS_DIR");
     }
 
     #[test]

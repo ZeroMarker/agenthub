@@ -69,7 +69,7 @@ pub use session::{
     SessionContext, SessionManager, SessionStats, SessionStatus, SessionTemplate, SessionUsage,
     SessionUsageAggregate, SessionUsageRow, TemplateMessage, UsageExport, UsageTrendPoint,
 };
-pub use skill::{Skill, SkillCompatibility, SkillManager, SkillManifest};
+pub use skill::{Skill, SkillCompatibility, SkillManager, SkillManifest, SkillScope};
 pub use status::{AgentStatus, StatusDetector};
 pub use users::{Permission, User, UserManager, ROLE_ADMIN, ROLE_OPERATOR, ROLE_VIEWER};
 pub use workflow::{

@@ -37,6 +37,43 @@ fn default_version() -> String {
     "0.1.0".to_string()
 }
 
+/// Skill visibility scope. Resolution precedence (highest first):
+/// `Project` > `User` > `Global`. Extra directories load after the user
+/// scope but before the global one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillScope {
+    Project,
+    User,
+    Global,
+}
+
+impl std::fmt::Display for SkillScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SkillScope::Project => write!(f, "project"),
+            SkillScope::User => write!(f, "user"),
+            SkillScope::Global => write!(f, "global"),
+        }
+    }
+}
+
+impl std::str::FromStr for SkillScope {
+    type Err = AgentHubError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "project" => Ok(SkillScope::Project),
+            "user" => Ok(SkillScope::User),
+            "global" => Ok(SkillScope::Global),
+            other => Err(AgentHubError::SkillError(format!(
+                "Invalid skill scope '{}' (expected project|user|global)",
+                other
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillDependency {
     pub name: String,
@@ -74,6 +111,10 @@ pub struct Skill {
 pub struct SkillManager {
     skills_dir: PathBuf,
     extra_dirs: Vec<PathBuf>,
+    /// Project-scope skills root (e.g. `<repo>/.agenthub/skills`).
+    project_dir: Option<PathBuf>,
+    /// Global-scope skills root (e.g. `/etc/agenthub/skills`).
+    global_dir: Option<PathBuf>,
 }
 
 /// Result of a skill/AgentHub version compatibility check.
@@ -127,11 +168,25 @@ impl SkillManager {
         Self {
             skills_dir,
             extra_dirs: Vec::new(),
+            project_dir: None,
+            global_dir: None,
         }
     }
 
     pub fn with_extra_dir(mut self, dir: PathBuf) -> Self {
         self.extra_dirs.push(dir);
+        self
+    }
+
+    /// Configure the project-scope skills root (e.g. `<repo>/.agenthub/skills`).
+    pub fn with_project_dir(mut self, dir: PathBuf) -> Self {
+        self.project_dir = Some(dir);
+        self
+    }
+
+    /// Configure the global-scope skills root (e.g. `/etc/agenthub/skills`).
+    pub fn with_global_dir(mut self, dir: PathBuf) -> Self {
+        self.global_dir = Some(dir);
         self
     }
 
@@ -141,6 +196,35 @@ impl SkillManager {
 
     fn installed_dir(&self) -> PathBuf {
         self.skills_dir.join("installed")
+    }
+
+    /// Root directory for a scope, when configured.
+    pub fn scope_dir(&self, scope: SkillScope) -> Option<PathBuf> {
+        match scope {
+            SkillScope::User => Some(self.skills_dir.clone()),
+            SkillScope::Project => self.project_dir.clone(),
+            SkillScope::Global => self.global_dir.clone(),
+        }
+    }
+
+    /// Installed-dir for a scope (`<scope_root>/installed`).
+    pub fn scope_installed_dir(&self, scope: SkillScope) -> Option<PathBuf> {
+        self.scope_dir(scope).map(|root| root.join("installed"))
+    }
+
+    /// Ordered candidate skill directories across scopes, highest precedence
+    /// first: project, user (installed), extra dirs, global.
+    fn candidate_installed_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        if let Some(dir) = self.scope_installed_dir(SkillScope::Project) {
+            dirs.push(dir);
+        }
+        dirs.push(self.installed_dir());
+        dirs.extend(self.extra_dirs.iter().cloned());
+        if let Some(dir) = self.scope_installed_dir(SkillScope::Global) {
+            dirs.push(dir);
+        }
+        dirs
     }
 
     /// Parse a SKILL.md manifest (public: used by the marketplace module).
@@ -168,13 +252,16 @@ impl SkillManager {
     }
 
     pub fn list_skills(&self) -> Result<Vec<Skill>> {
+        // Load in precedence order (project > user > extra > global); the
+        // first occurrence of a name wins (project shadows user/global).
         let mut skills = Vec::new();
         let mut seen_names = std::collections::HashSet::new();
 
-        // Load from installed directory
-        let installed_dir = self.installed_dir();
-        if installed_dir.exists() {
-            for entry in std::fs::read_dir(&installed_dir).map_err(|e| {
+        for dir in self.candidate_installed_dirs() {
+            if !dir.exists() {
+                continue;
+            }
+            for entry in std::fs::read_dir(&dir).map_err(|e| {
                 AgentHubError::SkillError(format!("Failed to read skills dir: {}", e))
             })? {
                 let entry = entry.map_err(|e| {
@@ -187,43 +274,13 @@ impl SkillManager {
                     if manifest_path.exists() {
                         match self.load_skill_from_dir(&path) {
                             Ok(skill) => {
-                                seen_names.insert(skill.manifest.name.clone());
-                                skills.push(skill);
+                                if !seen_names.contains(&skill.manifest.name) {
+                                    seen_names.insert(skill.manifest.name.clone());
+                                    skills.push(skill);
+                                }
                             }
                             Err(e) => {
                                 eprintln!("Warning: Failed to load skill at {:?}: {}", path, e);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Load from extra directories (e.g., codex skills)
-        for extra_dir in &self.extra_dirs {
-            if extra_dir.exists() {
-                for entry in std::fs::read_dir(extra_dir).map_err(|e| {
-                    AgentHubError::SkillError(format!("Failed to read extra skills dir: {}", e))
-                })? {
-                    let entry = entry.map_err(|e| {
-                        AgentHubError::SkillError(format!("Failed to read entry: {}", e))
-                    })?;
-
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let manifest_path = path.join("SKILL.md");
-                        if manifest_path.exists() {
-                            match self.load_skill_from_dir(&path) {
-                                Ok(skill) => {
-                                    // Only add if not already seen
-                                    if !seen_names.contains(&skill.manifest.name) {
-                                        seen_names.insert(skill.manifest.name.clone());
-                                        skills.push(skill);
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Warning: Failed to load skill at {:?}: {}", path, e);
-                                }
                             }
                         }
                     }
@@ -258,20 +315,63 @@ impl SkillManager {
 
     pub fn get_skill(&self, skill_name: &str) -> Result<Skill> {
         Self::validate_name(skill_name)?;
-        let skill_dir = self.installed_dir().join(skill_name);
-        if !skill_dir.exists() {
-            return Err(AgentHubError::SkillError(format!(
-                "Skill not found: {}",
-                skill_name
-            )));
+        for dir in self.candidate_installed_dirs() {
+            let skill_dir = dir.join(skill_name);
+            if skill_dir.exists() {
+                return self.load_skill_from_dir(&skill_dir);
+            }
         }
-
-        self.load_skill_from_dir(&skill_dir)
+        Err(AgentHubError::SkillError(format!(
+            "Skill not found: {}",
+            skill_name
+        )))
     }
 
-    pub fn install_skill(&self, skill_name: &str, source_dir: &Path) -> Result<Skill> {
+    /// Load a skill directly from an installed directory path.
+    pub fn get_skill_from_dir(&self, skill_dir: &Path) -> Result<Skill> {
+        self.load_skill_from_dir(skill_dir)
+    }
+
+    /// Locate a skill and report which scope it came from.
+    pub fn resolve_skill_scope(&self, skill_name: &str) -> Result<Option<(Skill, SkillScope)>> {
         Self::validate_name(skill_name)?;
-        let dest_dir = self.installed_dir().join(skill_name);
+        let mut candidates = Vec::new();
+        if let Some(dir) = self.scope_installed_dir(SkillScope::Project) {
+            candidates.push((SkillScope::Project, dir.join(skill_name)));
+        }
+        candidates.push((SkillScope::User, self.installed_dir().join(skill_name)));
+        if let Some(dir) = self.scope_installed_dir(SkillScope::Global) {
+            candidates.push((SkillScope::Global, dir.join(skill_name)));
+        }
+        for (scope, skill_dir) in candidates {
+            if skill_dir.exists() {
+                return Ok(Some((self.load_skill_from_dir(&skill_dir)?, scope)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Install a skill into the user scope (default).
+    pub fn install_skill(&self, skill_name: &str, source_dir: &Path) -> Result<Skill> {
+        self.install_skill_to_scope(skill_name, source_dir, SkillScope::User)
+    }
+
+    /// Install a skill into a specific scope. The scope root must be
+    /// configured (user always is; project/global via the builder).
+    pub fn install_skill_to_scope(
+        &self,
+        skill_name: &str,
+        source_dir: &Path,
+        scope: SkillScope,
+    ) -> Result<Skill> {
+        Self::validate_name(skill_name)?;
+        let installed = self.scope_installed_dir(scope).ok_or_else(|| {
+            AgentHubError::SkillError(format!(
+                "Scope '{}' is not configured on this manager",
+                scope
+            ))
+        })?;
+        let dest_dir = installed.join(skill_name);
         if dest_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
                 "Skill already installed: {}",
@@ -293,53 +393,53 @@ impl SkillManager {
         self.get_skill(skill_name)
     }
 
+    /// Uninstall a skill from whichever scope it currently lives in.
     pub fn uninstall_skill(&self, skill_name: &str) -> Result<bool> {
         Self::validate_name(skill_name)?;
-        let skill_dir = self.installed_dir().join(skill_name);
+        for dir in self.candidate_installed_dirs() {
+            let skill_dir = dir.join(skill_name);
+            if skill_dir.exists() {
+                std::fs::remove_dir_all(&skill_dir).map_err(|e| {
+                    AgentHubError::SkillError(format!("Failed to uninstall skill: {}", e))
+                })?;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Uninstall a skill from one specific scope.
+    pub fn uninstall_skill_from_scope(&self, skill_name: &str, scope: SkillScope) -> Result<bool> {
+        Self::validate_name(skill_name)?;
+        let Some(installed) = self.scope_installed_dir(scope) else {
+            return Ok(false);
+        };
+        let skill_dir = installed.join(skill_name);
         if !skill_dir.exists() {
             return Ok(false);
         }
-
         std::fs::remove_dir_all(&skill_dir)
             .map_err(|e| AgentHubError::SkillError(format!("Failed to uninstall skill: {}", e)))?;
-
         Ok(true)
     }
 
     pub fn enable_skill(&self, skill_name: &str) -> Result<()> {
         Self::validate_name(skill_name)?;
-        let skill_dir = self.installed_dir().join(skill_name);
-        if !skill_dir.exists() {
-            return Err(AgentHubError::SkillError(format!(
-                "Skill not found: {}",
-                skill_name
-            )));
-        }
-
-        let enabled_path = skill_dir.join(".enabled");
-        std::fs::write(&enabled_path, "")
+        let skill = self.get_skill(skill_name)?;
+        std::fs::write(skill.skill_dir.join(".enabled"), "")
             .map_err(|e| AgentHubError::SkillError(format!("Failed to enable skill: {}", e)))?;
-
         Ok(())
     }
 
     pub fn disable_skill(&self, skill_name: &str) -> Result<()> {
         Self::validate_name(skill_name)?;
-        let skill_dir = self.installed_dir().join(skill_name);
-        if !skill_dir.exists() {
-            return Err(AgentHubError::SkillError(format!(
-                "Skill not found: {}",
-                skill_name
-            )));
-        }
-
-        let enabled_path = skill_dir.join(".enabled");
+        let skill = self.get_skill(skill_name)?;
+        let enabled_path = skill.skill_dir.join(".enabled");
         if enabled_path.exists() {
             std::fs::remove_file(&enabled_path).map_err(|e| {
                 AgentHubError::SkillError(format!("Failed to disable skill: {}", e))
             })?;
         }
-
         Ok(())
     }
 
@@ -771,5 +871,112 @@ Extra skill.
         assert!(names.contains(&"extra-skill"));
         assert!(!names.contains(&"corrupt"));
         assert!(!names.contains(&"empty"));
+    }
+
+    // ---- Scope resolution (project > user > global) ----
+
+    fn scoped_manager(temp: &TempDir) -> SkillManager {
+        SkillManager::new(temp.path().join("config").join("skills"))
+            .with_project_dir(temp.path().join("project").join(".agenthub").join("skills"))
+            .with_global_dir(temp.path().join("etc").join("agenthub").join("skills"))
+    }
+
+    #[test]
+    fn test_install_to_scope_and_resolve() {
+        let temp = TempDir::new().unwrap();
+        let manager = scoped_manager(&temp);
+
+        // Same skill name installed into three scopes with distinct versions.
+        let src = temp.path().join("src");
+        let write = |name: &str, version: &str| {
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(
+                src.join("SKILL.md"),
+                format!(
+                    "---\nname: {name}\ndescription: \"x\"\nversion: {version}\nauthor: \"\"\ntriggers: []\ntags: []\ncategory: general\n---\n# {name}\n"
+                ),
+            )
+            .unwrap();
+        };
+
+        write("demo", "1.0.0");
+        manager
+            .install_skill_to_scope("demo", &src, SkillScope::Global)
+            .unwrap();
+        write("demo", "2.0.0");
+        manager
+            .install_skill_to_scope("demo", &src, SkillScope::User)
+            .unwrap();
+        write("demo", "3.0.0");
+        manager
+            .install_skill_to_scope("demo", &src, SkillScope::Project)
+            .unwrap();
+
+        // Project wins.
+        let (skill, scope) = manager.resolve_skill_scope("demo").unwrap().unwrap();
+        assert_eq!(scope, SkillScope::Project);
+        assert_eq!(skill.manifest.version, "3.0.0");
+        assert_eq!(manager.get_skill("demo").unwrap().manifest.version, "3.0.0");
+
+        // Listing shows the project copy only (dedup by name).
+        let skills = manager.list_skills().unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].manifest.version, "3.0.0");
+
+        // Scoped removal surfaces the user copy next.
+        assert!(manager
+            .uninstall_skill_from_scope("demo", SkillScope::Project)
+            .unwrap());
+        let (_, scope) = manager.resolve_skill_scope("demo").unwrap().unwrap();
+        assert_eq!(scope, SkillScope::User);
+        assert_eq!(manager.get_skill("demo").unwrap().manifest.version, "2.0.0");
+
+        // enable/disable act on the resolved (user) copy.
+        manager.disable_skill("demo").unwrap();
+        assert!(!manager.get_skill("demo").unwrap().enabled);
+        manager.enable_skill("demo").unwrap();
+        assert!(manager.get_skill("demo").unwrap().enabled);
+
+        // uninstall removes from the resolved scope.
+        assert!(manager.uninstall_skill("demo").unwrap());
+        let (_, scope) = manager.resolve_skill_scope("demo").unwrap().unwrap();
+        assert_eq!(scope, SkillScope::Global);
+    }
+
+    #[test]
+    fn test_unconfigured_scope_rejected() {
+        let temp = TempDir::new().unwrap();
+        let manager = SkillManager::new(temp.path().join("skills"));
+        let src = temp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("SKILL.md"),
+            "---\nname: demo\ndescription: \"x\"\nversion: 1.0.0\n---\n# demo\n",
+        )
+        .unwrap();
+
+        // Project/global roots not configured -> explicit error.
+        assert!(manager
+            .install_skill_to_scope("demo", &src, SkillScope::Project)
+            .is_err());
+        assert!(manager
+            .install_skill_to_scope("demo", &src, SkillScope::Global)
+            .is_err());
+        // User scope always works.
+        assert!(manager
+            .install_skill_to_scope("demo", &src, SkillScope::User)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_scope_parsing() {
+        assert_eq!(
+            "project".parse::<SkillScope>().unwrap(),
+            SkillScope::Project
+        );
+        assert_eq!("user".parse::<SkillScope>().unwrap(), SkillScope::User);
+        assert_eq!("global".parse::<SkillScope>().unwrap(), SkillScope::Global);
+        assert!("system".parse::<SkillScope>().is_err());
+        assert_eq!(SkillScope::Project.to_string(), "project");
     }
 }

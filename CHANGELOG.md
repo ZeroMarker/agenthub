@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Skill scopes**: `SkillScope` (project > user > global) with precedence
+  resolution — project copies shadow user/global; `install_skill_to_scope` /
+  `uninstall_skill_from_scope` / `resolve_skill_scope`; `list_skills` merges
+  all configured scopes (project > user > extra dirs > global). CLI gains
+  `skill list --scope`, `skill install --scope`, `skill uninstall --scope`,
+  `skill enable|disable` (roots injectable via `AGENTHUB_PROJECT_SKILLS_DIR` /
+  `AGENTHUB_GLOBAL_SKILLS_DIR`); the desktop app wires `.agenthub/skills` and
+  `/etc/agenthub/skills`
 - **Session usage tracking & export**: `SessionUsage.calls` counts API calls
   (incremented by `record_usage`); new aggregate/trend/export APIs —
   `usage_summary` (calls/tokens/cost across sessions), `usage_trend(days)`

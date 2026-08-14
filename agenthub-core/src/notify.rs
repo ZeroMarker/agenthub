@@ -736,6 +736,100 @@ mod tests {
     }
 
     #[test]
+    fn test_add_channel_validation_errors() {
+        let temp = TempDir::new().unwrap();
+        let notifier = Notifier::new(temp.path().to_path_buf());
+
+        // Empty id rejected.
+        assert!(notifier
+            .add_channel_with_options(
+                "",
+                ChannelConfig::File {
+                    path: "a.log".to_string()
+                },
+                None,
+                None
+            )
+            .is_err());
+        // Invalid min_severity rejected.
+        assert!(notifier
+            .add_channel_with_options(
+                "x",
+                ChannelConfig::File {
+                    path: "a.log".to_string()
+                },
+                Some("urgent"),
+                None
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn test_channel_defaults_applied() {
+        let temp = TempDir::new().unwrap();
+        let notifier = Notifier::new(temp.path().join("config"));
+        notifier
+            .add_channel(
+                "d",
+                ChannelConfig::File {
+                    path: "a.log".to_string(),
+                },
+            )
+            .unwrap();
+        let channels = notifier.list_channels().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert!(channels[0].enabled);
+        assert_eq!(channels[0].min_severity, "info");
+        assert_eq!(channels[0].dedup_minutes, 15);
+    }
+
+    #[test]
+    fn test_send_to_single_channel() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("config");
+        let notifier = Notifier::new(base.clone());
+        notifier
+            .add_channel(
+                "log",
+                ChannelConfig::File {
+                    path: "alerts.log".to_string(),
+                },
+            )
+            .unwrap();
+
+        let report = sample_report();
+        let result = notifier.send_to("log", &report, false).unwrap();
+        assert!(result.ok);
+        assert_eq!(result.kind, "file");
+
+        // Unknown channel errors.
+        assert!(notifier.send_to("nope", &report, false).is_err());
+    }
+
+    #[test]
+    fn test_clear_dedup_state() {
+        let temp = TempDir::new().unwrap();
+        let notifier = Notifier::new(temp.path().join("config"));
+        // No state file yet -> no-op, no error.
+        notifier.clear_dedup_state().unwrap();
+        // After a forced send, the state file exists and can be cleared.
+        notifier
+            .add_channel(
+                "log",
+                ChannelConfig::File {
+                    path: "alerts.log".to_string(),
+                },
+            )
+            .unwrap();
+        let report = sample_report();
+        notifier.send(&report, true).unwrap();
+        let state = notifier.base_dir.join("notify_state.json");
+        assert!(state.exists());
+        notifier.clear_dedup_state().unwrap();
+        assert!(!state.exists());
+    }
+
+    #[test]
     fn test_send_to_email_spool() {
         let temp = TempDir::new().unwrap();
         let base = temp.path().join("config");

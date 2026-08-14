@@ -703,4 +703,73 @@ triggers: []
         std::fs::write(skill_dir.join("SKILL.md"), [0xff, 0x00, 0x01]).unwrap();
         assert!(manager.get_skill("demo").is_err());
     }
+
+    #[test]
+    fn test_skill_config_value_display() {
+        assert_eq!(format!("{}", SkillConfigValue::String("x".into())), "x");
+        assert_eq!(format!("{}", SkillConfigValue::Number(0.5)), "0.5");
+        assert_eq!(format!("{}", SkillConfigValue::Boolean(true)), "true");
+    }
+
+    #[test]
+    fn test_compare_versions_more_cases() {
+        assert!(compare_versions("1.0.0", "1.0.0") == 0);
+        assert!(compare_versions("1.2.0", "1.10.0") < 0);
+        assert!(compare_versions("2.0.0", "1.9.9") > 0);
+        assert!(compare_versions("1.0.1", "1.0.0") > 0);
+        assert!(compare_versions("garbage", "0.1.0") < 0); // unparseable -> 0.0.0
+    }
+
+    #[test]
+    fn test_parse_manifest_missing_frontmatter() {
+        assert!(SkillManager::parse_manifest_pub("no markers at all").is_err());
+        // Frontmatter exists but the YAML body is corrupt.
+        assert!(SkillManager::parse_manifest_pub("---\nname: [unterminated\n---\n").is_err());
+    }
+
+    #[test]
+    fn test_list_skills_with_extra_dir_and_corrupt_entries() {
+        let temp = TempDir::new().unwrap();
+        let manager = SkillManager::new(temp.path().to_path_buf());
+        create_test_skill(&manager, "installed-one");
+
+        // A corrupt skill directory must be skipped with a warning, not fatal.
+        let corrupt = manager.installed_dir().join("corrupt");
+        std::fs::create_dir_all(&corrupt).unwrap();
+        std::fs::write(corrupt.join("SKILL.md"), "# no frontmatter").unwrap();
+
+        // A directory without SKILL.md is ignored entirely.
+        let empty = manager.installed_dir().join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+
+        // Extra dir (e.g. codex skills) contributes skills, deduplicated.
+        let extra = temp.path().join("extra");
+        let extra_manager =
+            SkillManager::new(temp.path().to_path_buf()).with_extra_dir(extra.clone());
+        let extra_skill_dir = extra.join("extra-skill");
+        std::fs::create_dir_all(&extra_skill_dir).unwrap();
+        std::fs::write(
+            extra_skill_dir.join("SKILL.md"),
+            r#"---
+name: extra-skill
+description: "extra"
+version: 1.0.0
+author: ""
+triggers: []
+tags: []
+category: general
+---
+Extra skill.
+"#,
+        )
+        .unwrap();
+        std::fs::write(extra_skill_dir.join(".enabled"), "").unwrap();
+
+        let skills = extra_manager.list_skills().unwrap();
+        let names: Vec<&str> = skills.iter().map(|s| s.manifest.name.as_str()).collect();
+        assert!(names.contains(&"installed-one"));
+        assert!(names.contains(&"extra-skill"));
+        assert!(!names.contains(&"corrupt"));
+        assert!(!names.contains(&"empty"));
+    }
 }

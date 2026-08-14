@@ -522,4 +522,116 @@ mod tests {
         assert!(pm.load_plugin("../escape").is_err());
         assert!(pm.unregister_plugin("../escape").is_err());
     }
+
+    #[test]
+    fn test_load_plugin_error_paths() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("skills");
+        let pm = PluginManager::new(base.clone());
+
+        // Missing manifest.
+        assert!(pm.load_plugin("ghost").is_err());
+
+        // Corrupt manifest file.
+        let dir = pm.plugin_dir("broken");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.yaml"), "name: \"unterminated").unwrap();
+        assert!(pm.load_plugin("broken").is_err());
+        // Listing skips corrupt plugins, not fails.
+        assert!(pm.list_plugins().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_register_plugin_error_paths() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("skills");
+        let pm = PluginManager::new(base.clone());
+
+        // Source without plugin.yaml.
+        let empty_src = temp.path().join("empty");
+        std::fs::create_dir_all(&empty_src).unwrap();
+        assert!(pm.register_plugin("p", &empty_src).is_err());
+
+        // Corrupt source manifest.
+        let bad_src = temp.path().join("bad");
+        std::fs::create_dir_all(&bad_src).unwrap();
+        std::fs::write(bad_src.join("plugin.yaml"), "::::").unwrap();
+        assert!(pm.register_plugin("p", &bad_src).is_err());
+    }
+
+    #[test]
+    fn test_enable_disable_missing_plugin_errors() {
+        let temp = TempDir::new().unwrap();
+        let pm = PluginManager::new(temp.path().join("skills"));
+        assert!(pm.enable_plugin("nope").is_err());
+        assert!(pm.disable_plugin("nope").is_err());
+    }
+
+    #[test]
+    fn test_run_hook_with_entry_script_and_failing_spawn() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("skills");
+        let pm = PluginManager::new(base.clone());
+
+        // Hook with an entry script that exists -> entry path wins.
+        let dir = pm.plugin_dir("with-entry");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.yaml"),
+            "name: with-entry\nversion: 0.1.0\ndescription: \"x\"\nentry: run.sh\nhooks:\n- event: on_install\n  command: \"echo fallback\"\n  args: []\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("run.sh"), "#!/bin/sh\necho from-entry\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.join("run.sh"), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        std::fs::write(dir.join(".enabled"), "").unwrap();
+
+        let results = pm.run_hook(HOOK_INSTALL).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ok);
+        assert!(results[0].output.contains("from-entry"), "{:?}", results[0]);
+
+        // Hook whose entry is missing -> falls back to the plain command.
+        write_plugin(
+            &base,
+            "no-entry",
+            "- event: on_install\n  command: \"echo plain-command\"\n  args: []\n",
+        );
+        let results = pm.run_hook(HOOK_INSTALL).unwrap();
+        let no_entry = results
+            .iter()
+            .find(|r| r.plugin == "no-entry")
+            .expect("no-entry result");
+        assert!(no_entry.output.contains("plain-command"));
+
+        // Hook with stderr-only output merges stderr into the message.
+        write_plugin(
+            &base,
+            "stderr-only",
+            "- event: on_install\n  command: \"echo oops >&2\"\n  args: []\n",
+        );
+        let results = pm.run_hook(HOOK_INSTALL).unwrap();
+        let stderr_only = results
+            .iter()
+            .find(|r| r.plugin == "stderr-only")
+            .expect("stderr-only result");
+        assert!(stderr_only.output.contains("oops"));
+
+        // A command that cannot spawn reports a failure, not a panic.
+        write_plugin(
+            &base,
+            "spawn-fail",
+            "- event: on_install\n  command: \"definitely-not-a-real-binary-zzz\"\n  args: []\n",
+        );
+        let results = pm.run_hook(HOOK_INSTALL).unwrap();
+        let fail = results
+            .iter()
+            .find(|r| r.plugin == "spawn-fail")
+            .expect("spawn-fail result");
+        assert!(!fail.ok);
+    }
 }

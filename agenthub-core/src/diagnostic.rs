@@ -69,6 +69,8 @@ pub struct SystemInfo {
 pub struct DiagnosticManager {
     checks: Vec<DiagnosticCheck>,
     start_time: Instant,
+    /// Injectable tool probe so tests can simulate missing/failing tools.
+    tool_probe: Option<fn(&str, &[&str]) -> Option<String>>,
 }
 
 impl Default for DiagnosticManager {
@@ -82,6 +84,14 @@ impl DiagnosticManager {
         Self {
             checks: Vec::new(),
             start_time: Instant::now(),
+            tool_probe: None,
+        }
+    }
+
+    fn probe_tool(&self, cmd: &str, args: &[&str]) -> Option<String> {
+        match self.tool_probe {
+            Some(probe) => probe(cmd, args),
+            None => Self::get_tool_version(cmd, args),
         }
     }
 
@@ -143,129 +153,115 @@ impl DiagnosticManager {
 
     fn check_package_managers(&mut self) {
         // npm
-        self.run_check("npm", "package_manager", || {
-            match Self::get_tool_version("npm", &["--version"]) {
-                Some(version) => (CheckStatus::Passed, version, None),
-                None => (
-                    CheckStatus::Failed,
-                    "npm not found".to_string(),
-                    Some("Install Node.js from https://nodejs.org".to_string()),
-                ),
-            }
+        let npm = self.probe_tool("npm", &["--version"]);
+        self.run_check("npm", "package_manager", move || match npm {
+            Some(version) => (CheckStatus::Passed, version, None),
+            None => (
+                CheckStatus::Failed,
+                "npm not found".to_string(),
+                Some("Install Node.js from https://nodejs.org".to_string()),
+            ),
         });
 
         // pip
-        self.run_check("pip", "package_manager", || {
-            match Self::get_tool_version("pip", &["--version"]) {
-                Some(version) => (CheckStatus::Passed, version, None),
-                None => (
-                    CheckStatus::Warning,
-                    "pip not found".to_string(),
-                    Some("Install Python from https://python.org".to_string()),
-                ),
-            }
+        let pip = self.probe_tool("pip", &["--version"]);
+        self.run_check("pip", "package_manager", move || match pip {
+            Some(version) => (CheckStatus::Passed, version, None),
+            None => (
+                CheckStatus::Warning,
+                "pip not found".to_string(),
+                Some("Install Python from https://python.org".to_string()),
+            ),
         });
 
         // winget (Windows only)
         if cfg!(target_os = "windows") {
-            self.run_check(
-                "winget",
-                "package_manager",
-                || match Self::get_tool_version("cmd", &["/C", "winget", "--version"]) {
-                    Some(version) => (CheckStatus::Passed, version, None),
-                    None => (
-                        CheckStatus::Warning,
-                        "winget not found".to_string(),
-                        Some("Install App Installer from Microsoft Store".to_string()),
-                    ),
-                },
-            );
+            let winget = self.probe_tool("cmd", &["/C", "winget", "--version"]);
+            self.run_check("winget", "package_manager", move || match winget {
+                Some(version) => (CheckStatus::Passed, version, None),
+                None => (
+                    CheckStatus::Warning,
+                    "winget not found".to_string(),
+                    Some("Install App Installer from Microsoft Store".to_string()),
+                ),
+            });
         }
 
         // brew (macOS only)
         if cfg!(target_os = "macos") {
-            self.run_check("brew", "package_manager", || {
-                match Self::get_tool_version("brew", &["--version"]) {
-                    Some(version) => (CheckStatus::Passed, version, None),
-                    None => (
-                        CheckStatus::Warning,
-                        "brew not found".to_string(),
-                        Some("Install from https://brew.sh".to_string()),
-                    ),
-                }
+            let brew = self.probe_tool("brew", &["--version"]);
+            self.run_check("brew", "package_manager", move || match brew {
+                Some(version) => (CheckStatus::Passed, version, None),
+                None => (
+                    CheckStatus::Warning,
+                    "brew not found".to_string(),
+                    Some("Install from https://brew.sh".to_string()),
+                ),
             });
         }
     }
 
     fn check_rust_toolchain(&mut self) {
-        self.run_check(
-            "Rust Compiler",
-            "toolchain",
-            || match Self::get_tool_version("rustc", &["--version"]) {
-                Some(version) => (CheckStatus::Passed, version, None),
-                None => (
-                    CheckStatus::Warning,
-                    "rustc not found".to_string(),
-                    Some("Install from https://rustup.rs".to_string()),
-                ),
-            },
-        );
-
-        self.run_check("Cargo", "toolchain", || {
-            match Self::get_tool_version("cargo", &["--version"]) {
-                Some(version) => (CheckStatus::Passed, version, None),
-                None => (
-                    CheckStatus::Warning,
-                    "cargo not found".to_string(),
-                    Some("Install Rust from https://rustup.rs".to_string()),
-                ),
-            }
+        let rustc = self.probe_tool("rustc", &["--version"]);
+        self.run_check("Rust Compiler", "toolchain", move || match rustc {
+            Some(version) => (CheckStatus::Passed, version, None),
+            None => (
+                CheckStatus::Warning,
+                "rustc not found".to_string(),
+                Some("Install from https://rustup.rs".to_string()),
+            ),
         });
 
-        self.run_check("Clippy", "toolchain", || {
-            match Self::get_tool_version("cargo", &["clippy", "--version"]) {
-                Some(version) => (CheckStatus::Passed, version, None),
-                None => (
-                    CheckStatus::Warning,
-                    "clippy not found".to_string(),
-                    Some("Run: rustup component add clippy".to_string()),
-                ),
-            }
+        let cargo = self.probe_tool("cargo", &["--version"]);
+        self.run_check("Cargo", "toolchain", move || match cargo {
+            Some(version) => (CheckStatus::Passed, version, None),
+            None => (
+                CheckStatus::Warning,
+                "cargo not found".to_string(),
+                Some("Install Rust from https://rustup.rs".to_string()),
+            ),
         });
 
-        self.run_check("rustfmt", "toolchain", || {
-            match Self::get_tool_version("rustfmt", &["--version"]) {
-                Some(version) => (CheckStatus::Passed, version, None),
-                None => (
-                    CheckStatus::Warning,
-                    "rustfmt not found".to_string(),
-                    Some("Run: rustup component add rustfmt".to_string()),
-                ),
-            }
+        let clippy = self.probe_tool("cargo", &["clippy", "--version"]);
+        self.run_check("Clippy", "toolchain", move || match clippy {
+            Some(version) => (CheckStatus::Passed, version, None),
+            None => (
+                CheckStatus::Warning,
+                "clippy not found".to_string(),
+                Some("Run: rustup component add clippy".to_string()),
+            ),
+        });
+
+        let rustfmt = self.probe_tool("rustfmt", &["--version"]);
+        self.run_check("rustfmt", "toolchain", move || match rustfmt {
+            Some(version) => (CheckStatus::Passed, version, None),
+            None => (
+                CheckStatus::Warning,
+                "rustfmt not found".to_string(),
+                Some("Run: rustup component add rustfmt".to_string()),
+            ),
         });
     }
 
     fn check_node_toolchain(&mut self) {
-        self.run_check("Node.js", "toolchain", || {
-            match Self::get_tool_version("node", &["--version"]) {
-                Some(version) => (CheckStatus::Passed, version, None),
-                None => (
-                    CheckStatus::Failed,
-                    "node not found".to_string(),
-                    Some("Install from https://nodejs.org".to_string()),
-                ),
-            }
+        let node = self.probe_tool("node", &["--version"]);
+        self.run_check("Node.js", "toolchain", move || match node {
+            Some(version) => (CheckStatus::Passed, version, None),
+            None => (
+                CheckStatus::Failed,
+                "node not found".to_string(),
+                Some("Install from https://nodejs.org".to_string()),
+            ),
         });
 
-        self.run_check("TypeScript", "toolchain", || {
-            match Self::get_tool_version("npx", &["tsc", "--version"]) {
-                Some(version) => (CheckStatus::Passed, version, None),
-                None => (
-                    CheckStatus::Warning,
-                    "TypeScript not found".to_string(),
-                    Some("Run: npm install -g typescript".to_string()),
-                ),
-            }
+        let tsc = self.probe_tool("npx", &["tsc", "--version"]);
+        self.run_check("TypeScript", "toolchain", move || match tsc {
+            Some(version) => (CheckStatus::Passed, version, None),
+            None => (
+                CheckStatus::Warning,
+                "TypeScript not found".to_string(),
+                Some("Run: npm install -g typescript".to_string()),
+            ),
         });
     }
 
@@ -461,21 +457,21 @@ impl DiagnosticManager {
                 skipped,
                 duration_ms: self.start_time.elapsed().as_millis() as u64,
             },
-            system_info: Self::gather_system_info(),
+            system_info: self.gather_system_info(),
         }
     }
 
-    fn gather_system_info() -> SystemInfo {
+    fn gather_system_info(&self) -> SystemInfo {
         SystemInfo {
             os: std::env::consts::OS.to_string(),
             arch: std::env::consts::ARCH.to_string(),
             hostname: hostname::get()
                 .map(|h| h.to_string_lossy().to_string())
                 .unwrap_or_else(|_| "unknown".to_string()),
-            rust_version: Self::get_tool_version("rustc", &["--version"]),
-            node_version: Self::get_tool_version("node", &["--version"]),
-            npm_version: Self::get_tool_version("npm", &["--version"]),
-            cargo_version: Self::get_tool_version("cargo", &["--version"]),
+            rust_version: self.probe_tool("rustc", &["--version"]),
+            node_version: self.probe_tool("node", &["--version"]),
+            npm_version: self.probe_tool("npm", &["--version"]),
+            cargo_version: self.probe_tool("cargo", &["--version"]),
         }
     }
 
@@ -652,5 +648,160 @@ mod tests {
         let formatted = DiagnosticManager::format_report(&report);
         assert!(formatted.contains("Diagnostic Report"));
         assert!(formatted.contains("Test"));
+    }
+
+    #[test]
+    fn test_run_all_checks_smoke() {
+        // Runs every check including real tool probes (rustc/cargo/node/npm),
+        // catalog lookup, config/skills dirs, disk and network. Must never
+        // panic and must produce a coherent report.
+        let mut manager = DiagnosticManager::new();
+        let report = manager.run_all_checks();
+
+        assert!(!report.checks.is_empty());
+        assert!(!report.platform.is_empty());
+        assert!(!report.system_info.os.is_empty());
+        assert!(!report.system_info.arch.is_empty());
+        assert_eq!(report.summary.total, report.checks.len());
+        assert_eq!(
+            report.summary.passed + report.summary.warnings + report.summary.failed,
+            report.summary.total - report.summary.skipped
+        );
+        // Every check carries a status and a message.
+        for check in &report.checks {
+            assert!(!check.name.is_empty());
+            assert!(!check.message.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_run_all_checks_covers_all_categories() {
+        let mut manager = DiagnosticManager::new();
+        let report = manager.run_all_checks();
+        let categories: Vec<&str> = report.checks.iter().map(|c| c.category.as_str()).collect();
+        for wanted in [
+            "system",
+            "package_manager",
+            "toolchain",
+            "catalog",
+            "storage",
+        ] {
+            assert!(
+                categories.contains(&wanted),
+                "missing category {wanted} in {:?}",
+                categories
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_tool_version_missing_tool_returns_none() {
+        assert_eq!(
+            DiagnosticManager::get_tool_version("agenthub-no-such-tool-xyz", &["--version"]),
+            None
+        );
+    }
+
+    #[test]
+    fn test_get_tool_version_failing_command_returns_none() {
+        // `cargo` exists but the bogus flag makes the command fail.
+        assert_eq!(
+            DiagnosticManager::get_tool_version("cargo", &["--definitely-not-a-flag"]),
+            None
+        );
+    }
+
+    #[test]
+    fn test_run_all_checks_with_no_tools_degrades() {
+        // Simulate every tool probe failing: npm/node must fail, pip/rust
+        // family must warn, and the report must stay coherent.
+        let mut manager = DiagnosticManager::new();
+        manager.tool_probe = Some(|_, _| None);
+        let report = manager.run_all_checks();
+
+        assert_eq!(report.summary.total, report.checks.len());
+        let npm = report
+            .checks
+            .iter()
+            .find(|c| c.name == "npm")
+            .expect("npm check");
+        assert_eq!(npm.status, CheckStatus::Failed);
+        assert!(npm.message.contains("not found"));
+        let rustc = report
+            .checks
+            .iter()
+            .find(|c| c.name == "Rust Compiler")
+            .expect("rustc check");
+        assert_eq!(rustc.status, CheckStatus::Warning);
+        // System-info probes degrade to None, never panic.
+        assert!(report.system_info.rust_version.is_none());
+    }
+
+    #[test]
+    fn test_default_constructs_empty_manager() {
+        let manager = DiagnosticManager::default();
+        assert!(manager.checks.is_empty());
+    }
+
+    #[test]
+    fn test_export_report_writes_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut manager = DiagnosticManager::new();
+        manager.run_check("Test", "system", || {
+            (
+                CheckStatus::Passed,
+                "OK".to_string(),
+                Some("detail".to_string()),
+            )
+        });
+        let report = manager.build_report();
+
+        let out = temp.path().join("report.json");
+        DiagnosticManager::export_report(&report, &out).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(parsed["summary"]["total"], 1);
+    }
+
+    #[test]
+    fn test_format_report_summary_variants() {
+        let mut manager = DiagnosticManager::new();
+        manager.run_check("A", "catalog", || {
+            (
+                CheckStatus::Failed,
+                "bad".to_string(),
+                Some("fix it".to_string()),
+            )
+        });
+        manager.run_check("B", "connectivity", || {
+            (CheckStatus::Warning, "warn".to_string(), None)
+        });
+        manager.run_check("C", "storage", || {
+            (CheckStatus::Skipped, "skip".to_string(), None)
+        });
+        let report = manager.build_report();
+
+        let formatted = DiagnosticManager::format_report(&report);
+        assert!(formatted.contains("📋 Catalog"));
+        assert!(formatted.contains("🌐 Connectivity"));
+        assert!(formatted.contains("💾 Storage"));
+        assert!(formatted.contains("💡 fix it"));
+        assert!(formatted.contains("Some checks failed"));
+
+        // All-passed variant.
+        let mut manager = DiagnosticManager::new();
+        manager.run_check("A", "system", || {
+            (CheckStatus::Passed, "ok".to_string(), None)
+        });
+        let report = manager.build_report();
+        assert!(DiagnosticManager::format_report(&report).contains("All checks passed"));
+
+        // Warning-only variant.
+        let mut manager = DiagnosticManager::new();
+        manager.run_check("A", "system", || {
+            (CheckStatus::Warning, "warn".to_string(), None)
+        });
+        let report = manager.build_report();
+        assert!(DiagnosticManager::format_report(&report).contains("warnings detected"));
     }
 }

@@ -359,6 +359,8 @@ impl StatusDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::{AgentKind, InstallerConfig, SupportStatus};
+    use std::collections::HashMap;
 
     #[test]
     fn test_parse_npm_version() {
@@ -382,5 +384,144 @@ mod tests {
             detector.parse_pip_version_from_list(output, "nonexistent"),
             None
         );
+    }
+
+    fn agent_with_installer(manager: PackageManager, package: &str) -> Agent {
+        let mut installers = HashMap::new();
+        installers.insert(
+            Platform::Linux,
+            InstallerConfig {
+                manager: manager.clone(),
+                package: Some(package.to_string()),
+            },
+        );
+        installers.insert(
+            Platform::Windows,
+            InstallerConfig {
+                manager: manager.clone(),
+                package: Some(package.to_string()),
+            },
+        );
+        Agent {
+            id: format!("agent-{}", package),
+            name: package.to_string(),
+            kind: AgentKind::CLI,
+            provider: "test".to_string(),
+            description: "".to_string(),
+            homepage: "".to_string(),
+            installers,
+            status: SupportStatus::Verified,
+            catalog_verified_at: None,
+            installer_verified_at: None,
+        }
+    }
+
+    fn agent_without_installer() -> Agent {
+        Agent {
+            id: "agent-none".to_string(),
+            name: "none".to_string(),
+            kind: AgentKind::CLI,
+            provider: "test".to_string(),
+            description: "".to_string(),
+            homepage: "".to_string(),
+            installers: HashMap::new(),
+            status: SupportStatus::Verified,
+            catalog_verified_at: None,
+            installer_verified_at: None,
+        }
+    }
+
+    #[test]
+    fn test_check_npm_from_cache_detects_and_parses() {
+        let detector = StatusDetector::new(Platform::Linux);
+        let agent = agent_with_installer(PackageManager::Npm, "@openai/codex");
+        let list = "└── @openai/codex@0.137.0\n";
+
+        let status = detector.check_npm_from_cache(&agent, Some("@openai/codex"), list);
+        assert!(status.installed);
+        assert_eq!(status.version.as_deref(), Some("0.137.0"));
+        assert_eq!(status.detection_method, "npm");
+
+        // Missing package
+        let status =
+            detector.check_npm_from_cache(&agent, Some("@openai/codex"), "└── other@1.0.0");
+        assert!(!status.installed);
+        assert_eq!(status.version, None);
+
+        // No package configured
+        let status = detector.check_npm_from_cache(&agent, None, "");
+        assert!(!status.installed);
+        assert_eq!(status.detection_method, "npm");
+    }
+
+    #[test]
+    fn test_check_pip_from_cache_detects_and_parses() {
+        let detector = StatusDetector::new(Platform::Linux);
+        let agent = agent_with_installer(PackageManager::Pip, "aider-chat");
+        let list = "Package    Version\n---------- -------\naider-chat 0.25.0\n";
+
+        let status = detector.check_pip_from_cache(&agent, Some("aider-chat"), list);
+        assert!(status.installed);
+        assert_eq!(status.version.as_deref(), Some("0.25.0"));
+
+        let status = detector.check_pip_from_cache(&agent, None, "");
+        assert!(!status.installed);
+    }
+
+    #[test]
+    fn test_check_winget_from_cache_detects_and_parses() {
+        let detector = StatusDetector::new(Platform::Windows);
+        let agent = agent_with_installer(PackageManager::Winget, "OpenAI.Codex");
+        let list = "Name           Id            Version\nOpenAI Codex   OpenAI.Codex   0.137.0\n";
+
+        let status = detector.check_winget_from_cache(&agent, Some("OpenAI.Codex"), list);
+        assert!(status.installed);
+        assert_eq!(status.version.as_deref(), Some("0.137.0"));
+
+        let status = detector.check_winget_from_cache(&agent, Some("OpenAI.Codex"), "nothing");
+        assert!(!status.installed);
+    }
+
+    #[test]
+    fn test_check_brew_from_cache_without_brew_installed() {
+        // On Linux, `brew` does not exist: the version lookup must degrade to
+        // None instead of failing (covers the command-error path).
+        let detector = StatusDetector::new(Platform::Linux);
+        let agent = agent_with_installer(PackageManager::BrewCask, "openai-codex");
+        let list = "openai-codex\n";
+
+        let status = detector.check_brew_from_cache(&agent, Some("openai-codex"), list);
+        assert!(status.installed);
+        assert_eq!(status.detection_method, "brew");
+
+        let status = detector.check_brew_from_cache(&agent, None, "");
+        assert!(!status.installed);
+    }
+
+    #[test]
+    fn test_check_agents_covers_all_manager_branches() {
+        let detector = StatusDetector::new(Platform::Linux);
+        let npm = agent_with_installer(PackageManager::Npm, "@openai/codex");
+        let pip = agent_with_installer(PackageManager::Pip, "aider-chat");
+        let manual = agent_with_installer(PackageManager::Manual, "manual-tool");
+        let none = agent_without_installer();
+
+        let results = detector.check_agents(&[npm, pip, manual, none]);
+        assert_eq!(results.len(), 4);
+        assert_eq!(results[0].detection_method, "npm");
+        assert_eq!(results[1].detection_method, "pip");
+        assert_eq!(results[2].detection_method, "manual");
+        assert!(!results[2].installed);
+        assert_eq!(results[3].detection_method, "none");
+        assert!(!results[3].installed);
+    }
+
+    #[test]
+    fn test_check_agent_single() {
+        let detector = StatusDetector::new(Platform::Linux);
+        let none = agent_without_installer();
+        let status = detector.check_agent(&none).unwrap();
+        assert_eq!(status.agent_id, "agent-none");
+        assert!(!status.installed);
     }
 }

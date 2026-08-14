@@ -20,6 +20,13 @@ All notable changes to this project will be documented in this file.
   `metadata` or secret fields now parse with safe defaults instead of failing
 
 ### Changed
+- **Coverage gate**: `scripts/check-coverage.sh` enforces ≥80% line coverage on
+  every `agenthub-core` source file and the package as a whole; wired into CI
+  as a dedicated `coverage` job using `cargo-llvm-cov`. Core modules lifted to
+  87.2% aggregate (all files ≥80%) with new tests for `status` (33%→87%),
+  `diagnostic` (39%→84%, with an injectable tool probe), `notify`,
+  `plugin` (entry-script, spawn-failure, stderr-merge hook paths) and
+  `skill` (extra-dir loading, frontmatter failures, version compare)
 - **Negative test coverage**: corrupt-file, import/restore, and concurrent-write
   suites across config, prompts, sessions, skills, notify channels, users,
   marketplace, secrets and backup — corrupt data errors (or degrades) instead

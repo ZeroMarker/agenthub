@@ -61,12 +61,12 @@ const isCancelled = (r: InstallResult) =>
           <th class="chk">
             <input type="checkbox" :checked="selectedAgents.size === agents.length && agents.length > 0" @change="emit('selectAll')" />
           </th>
-          <th class="sortable" @click="emit('toggleSort', 'name')">Name {{ getSortIcon('name') }}</th>
-          <th class="sortable" @click="emit('toggleSort', 'type')">Type {{ getSortIcon('type') }}</th>
+          <th class="sortable" role="button" tabindex="0" aria-label="Sort by name" @click="emit('toggleSort', 'name')" @keydown.enter="emit('toggleSort', 'name')">Name {{ getSortIcon('name') }}</th>
+          <th class="sortable" role="button" tabindex="0" aria-label="Sort by type" @click="emit('toggleSort', 'type')" @keydown.enter="emit('toggleSort', 'type')">Type {{ getSortIcon('type') }}</th>
           <th>Description</th>
           <th>Provider</th>
           <th>Installers</th>
-          <th class="sortable" @click="emit('toggleSort', 'status')">Status {{ getSortIcon('status') }}</th>
+          <th class="sortable" role="button" tabindex="0" aria-label="Sort by status" @click="emit('toggleSort', 'status')" @keydown.enter="emit('toggleSort', 'status')">Status {{ getSortIcon('status') }}</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -130,6 +130,10 @@ $ {{ results[agent.id]!.command }}</template><template v-if="results[agent.id]!.
   position: sticky; top: 0;
 }
 .m3-table th.sortable { cursor: pointer; user-select: none; }
+.m3-table th.sortable:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: -2px;
+}
 .m3-table th.sortable:hover { background: color-mix(in srgb, var(--md-sys-color-surface-variant) 80%, var(--md-sys-color-on-surface)); }
 .m3-table tbody tr:hover { background: color-mix(in srgb, var(--md-sys-color-surface) 95%, var(--md-sys-color-primary)); }
 .chk { width: 48px; text-align: center; }

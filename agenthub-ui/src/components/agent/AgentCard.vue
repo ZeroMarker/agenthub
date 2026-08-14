@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import CardProgress from './CardProgress.vue'
+import StatusBadge from '../common/StatusBadge.vue'
 
 interface InstallerInfo {
   platform: string; manager: string; package: string | null
@@ -64,7 +65,10 @@ const isCancelled = (r: InstallResult) =>
         @change="emit('toggleSelect', agent.id)"
         @click.stop
       />
-      <span :class="['kind-chip', agent.kind.toLowerCase()]">{{ agent.kind }}</span>
+      <div class="card-chips">
+        <StatusBadge :status="agent.status" />
+        <span :class="['kind-chip', agent.kind.toLowerCase()]">{{ agent.kind }}</span>
+      </div>
     </div>
     <h3 class="card-title">{{ agent.name }}</h3>
     <p class="card-desc">{{ agent.description }}</p>
@@ -145,6 +149,7 @@ stdout:
   outline: 2px solid var(--md-sys-color-primary);
 }
 .card-top { display: flex; justify-content: space-between; align-items: center; }
+.card-chips { display: flex; gap: 0.375rem; align-items: center; }
 .card-top input { width: 18px; height: 18px; accent-color: var(--md-sys-color-primary); }
 .card-title { font: var(--md-sys-typescale-title-medium); color: var(--md-sys-color-on-surface); }
 .card-desc { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

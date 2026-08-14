@@ -69,6 +69,13 @@
   --md-sys-color-inverse-surface: var(--md-ref-palette-inverse-surface);
   --md-sys-color-inverse-on-surface: var(--md-ref-palette-inverse-on-surface);
 
+  /* Surface container ramp (M3 tonal surfaces for cards/inputs) */
+  --md-sys-color-surface-container-lowest: #FFFFFF;
+  --md-sys-color-surface-container-low: #F7F2FA;
+  --md-sys-color-surface-container: #F3EDF7;
+  --md-sys-color-surface-container-high: #ECE6F0;
+  --md-sys-color-surface-container-highest: #E6E0E9;
+
   /* --- Elevation --- */
   --md-sys-elevation-0: none;
   --md-sys-elevation-1: 0 1px 3px 1px rgba(0,0,0,0.12), 0 1px 2px 0 rgba(0,0,0,0.08);
@@ -159,6 +166,13 @@
     --md-sys-color-outline-variant: #49454F;
     --md-sys-color-inverse-surface: #E6E1E5;
     --md-sys-color-inverse-on-surface: #1C1B1F;
+
+    /* Surface container ramp (dark) */
+    --md-sys-color-surface-container-lowest: #0F0D13;
+    --md-sys-color-surface-container-low: #1D1B20;
+    --md-sys-color-surface-container: #211F26;
+    --md-sys-color-surface-container-high: #2B2930;
+    --md-sys-color-surface-container-highest: #36343B;
   }
 }
 
@@ -203,6 +217,13 @@ code {
   background: var(--md-sys-color-surface);
   border-radius: var(--md-sys-shape-md);
   box-shadow: var(--md-sys-elevation-1);
+}
+
+.m3-card {
+  background: var(--md-sys-color-surface);
+  border-radius: var(--md-sys-shape-expressive-md);
+  box-shadow: var(--md-sys-elevation-1);
+  padding: 1.25rem;
 }
 
 .m3-surface-variant {
@@ -338,33 +359,44 @@ code {
   cursor: not-allowed;
 }
 
-/* --- M3 Primary Tabs (bottom indicator style) --- */
+/* --- M3 Secondary Tabs (segmented control) --- */
 .m3-tabs {
-  display: flex;
+  display: inline-flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface-variant);
+  border-radius: var(--md-sys-shape-sm);
+  padding: 0.25rem;
   margin-bottom: 1.5rem;
+  width: fit-content;
+  max-width: 100%;
 }
 .m3-tab {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1.25rem;
+  padding: 0.5rem 1.25rem;
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: var(--md-sys-shape-xs);
   color: var(--md-sys-color-on-surface-variant);
   font: var(--md-sys-typescale-label-large);
   cursor: pointer;
-  transition: color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized),
-              border-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized);
+  transition: background var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized),
+              color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized);
 }
 .m3-tab:hover {
+  background: var(--md-sys-state-hover-surface);
   color: var(--md-sys-color-on-surface);
 }
+.m3-tab:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: -1px;
+}
 .m3-tab.active {
-  color: var(--md-sys-color-primary);
-  border-bottom-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-sys-color-secondary) 35%, transparent);
 }
 
 /* --- Stat chips (tonal pills) --- */

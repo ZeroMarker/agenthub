@@ -721,20 +721,11 @@ onMounted(loadMarket)
 <style scoped>
 .extensions-view { padding: 2rem; }
 
-.m3-tabs { display: flex; gap: 0.25rem; background: var(--md-sys-color-surface-variant); border-radius: var(--md-sys-shape-sm); padding: 0.25rem; margin-bottom: 1.5rem; width: fit-content; }
-.m3-tab { padding: 0.5rem 1.25rem; border: none; background: transparent; border-radius: var(--md-sys-shape-xs); color: var(--md-sys-color-on-surface-variant); font: var(--md-sys-typescale-label-large); cursor: pointer; }
-.m3-tab.active { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
-
 .panel { display: flex; flex-direction: column; gap: 1rem; }
 .toolbar { display: flex; gap: 0.75rem; align-items: center; }
 .search-box { flex: 1; max-width: 360px; padding: 0.6rem 1rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-sm); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
 .stat-chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
-.m3-card { background: var(--md-sys-color-surface); border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); padding: 1.25rem; }
-.m3-btn-filled, .m3-btn-tonal, .m3-btn-outlined { padding: 0.5rem 1.1rem; border-radius: var(--md-sys-shape-xs); border: none; cursor: pointer; font: var(--md-sys-typescale-label-large); }
-.m3-btn-filled { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
-.m3-btn-tonal { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
-.m3-btn-outlined { background: transparent; color: var(--md-sys-color-primary); border: 1px solid var(--md-sys-color-outline); }
 .m3-btn-outlined.danger { color: var(--md-sys-color-error); border-color: var(--md-sys-color-error); }
 
 .market-item { display: flex; flex-direction: column; gap: 0.75rem; }

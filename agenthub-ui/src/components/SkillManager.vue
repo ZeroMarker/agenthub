@@ -341,12 +341,12 @@ onMounted(loadSkills)
 
 .toggle-btn.disable {
   background: var(--md-sys-color-tertiary);
-  color: var(--md-sys-color-on-primary);
+  color: var(--md-sys-color-on-tertiary);
 }
 
 .delete-btn {
   background: var(--md-sys-color-error);
-  color: var(--md-sys-color-on-primary);
+  color: var(--md-sys-color-on-error);
 }
 
 .toggle-btn:disabled, .delete-btn:disabled {

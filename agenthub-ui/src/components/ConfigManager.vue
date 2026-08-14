@@ -499,7 +499,7 @@ onMounted(loadAgents)
 
 .badge.installed {
   background: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-secondary-container);
 }
 
 .config-path {

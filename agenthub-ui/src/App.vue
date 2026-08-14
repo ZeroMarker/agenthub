@@ -11,6 +11,7 @@ import ManagementView from './components/ManagementView.vue'
 import ExtensionsView from './components/ExtensionsView.vue'
 
 const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' | 'memory' | 'diagnostic' | 'management' | 'extensions'>('agents')
+const railExpanded = ref(false)
 </script>
 
 <template>
@@ -18,7 +19,7 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
     <!-- M3 Navigation Rail -->
-    <nav class="nav-rail" role="navigation" aria-label="Main navigation">
+    <nav :class="['nav-rail', { expanded: railExpanded }]" role="navigation" aria-label="Main navigation">
       <div class="nav-rail-brand">
         <span class="brand-icon">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -45,14 +46,27 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
           @click="activeView = item.id as typeof activeView"
           @keydown.enter="activeView = item.id as typeof activeView"
           :aria-label="`${item.label} view`"
+          :title="item.label"
         >
           <span class="nav-rail-icon">{{ item.icon }}</span>
           <span class="nav-rail-label">{{ item.label }}</span>
         </button>
       </div>
+      <button
+        class="rail-toggle"
+        :aria-expanded="railExpanded"
+        :aria-label="railExpanded ? 'Collapse navigation labels' : 'Expand navigation labels'"
+        @click="railExpanded = !railExpanded"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline v-if="railExpanded" points="15 6 9 12 15 18"/>
+          <polyline v-else points="9 6 15 12 9 18"/>
+        </svg>
+        <span class="rail-toggle-label">{{ railExpanded ? 'Collapse' : 'Expand' }}</span>
+      </button>
     </nav>
 
-    <main id="main-content" class="main-content">
+    <main id="main-content" :class="['main-content', { 'rail-expanded': railExpanded }]">
       <AgentList v-if="activeView === 'agents'" />
       <ConfigManager v-else-if="activeView === 'config'" />
       <SkillManager v-else-if="activeView === 'skills'" />
@@ -112,7 +126,7 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
   transition: width var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
 }
 
-.nav-rail:hover { width: 240px; }
+.nav-rail.expanded { width: 240px; }
 
 .nav-rail-brand {
   display: flex;
@@ -139,7 +153,7 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
   transition: opacity var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
 }
 
-.nav-rail:hover .brand-label { opacity: 1; }
+.nav-rail.expanded .brand-label { opacity: 1; }
 
 .nav-rail-items {
   display: flex;
@@ -221,7 +235,37 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
   transition: opacity var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
 }
 
-.nav-rail:hover .nav-rail-label { opacity: 1; }
+.nav-rail.expanded .nav-rail-label { opacity: 1; }
+
+/* --- Rail expand/collapse toggle --- */
+.rail-toggle {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: calc(100% - 1rem);
+  padding: 0.625rem 0.75rem;
+  border: none;
+  border-radius: var(--md-sys-shape-expressive-md);
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-medium);
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: background var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized),
+              color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing-emphasized);
+}
+.rail-toggle:hover {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+.rail-toggle svg { flex-shrink: 0; }
+.rail-toggle-label {
+  opacity: 0;
+  transition: opacity var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
+}
+.nav-rail.expanded .rail-toggle-label { opacity: 1; }
 
 /* --- Main content --- */
 .main-content {
@@ -229,7 +273,9 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
   flex: 1;
   min-height: 100vh;
   overflow-y: auto;
+  transition: margin-left var(--md-sys-motion-duration-emphasized) var(--md-sys-motion-easing-emphasized);
 }
+.main-content.rail-expanded { margin-left: 240px; }
 
 /* --- Reduced motion --- */
 @media (prefers-reduced-motion: reduce) {
@@ -241,21 +287,22 @@ const activeView = ref<'agents' | 'config' | 'skills' | 'prompts' | 'sessions' |
   }
   .nav-rail,
   .nav-rail-label,
-  .brand-label { transition-duration: 0s !important; }
-  .nav-rail:hover { width: 80px; }
-  .nav-rail:hover .nav-rail-label,
-  .nav-rail:hover .brand-label { opacity: 0; }
+  .brand-label,
+  .main-content { transition-duration: 0s !important; }
 }
 
 /* --- Responsive: collapse rail --- */
 @media (max-width: 900px) {
   .nav-rail { width: 60px; }
-  .nav-rail:hover { width: 60px; }
+  .nav-rail.expanded { width: 60px; }
   .nav-rail-brand { justify-content: center; padding: 0.5rem; }
   .brand-label { display: none; }
   .nav-rail-btn { justify-content: center; padding: 0.625rem; }
   .nav-rail-label { display: none; }
+  .rail-toggle { justify-content: center; width: auto; }
+  .rail-toggle-label { display: none; }
   .main-content { margin-left: 60px; }
+  .main-content.rail-expanded { margin-left: 60px; }
 }
 
 @media (max-width: 600px) {

@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, useId } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   show: boolean
   title?: string
 }>()
@@ -11,6 +11,7 @@ const emit = defineEmits<{
 }>()
 
 const modalRef = ref<HTMLElement | null>(null)
+const titleId = useId()
 let previousActiveElement: HTMLElement | null = null
 
 function getFocusableElements(el: HTMLElement): HTMLElement[] {
@@ -44,19 +45,36 @@ watch(() => modalRef.value, (el) => {
   }
 })
 
+// Restore focus to the previously focused element when the dialog closes.
+watch(() => props.show, (visible) => {
+  if (visible) return
+  const prev = previousActiveElement
+  previousActiveElement = null
+  if (prev && prev.isConnected) prev.focus()
+})
+
 onMounted(() => document.addEventListener('keydown', handleKeydown))
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown)
-  previousActiveElement?.focus()
+  const prev = previousActiveElement
+  previousActiveElement = null
+  if (prev && prev.isConnected) prev.focus()
 })
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="modal-overlay" @click.self="emit('close')" role="dialog" aria-modal="true">
+    <div
+      v-if="show"
+      class="modal-overlay"
+      @click.self="emit('close')"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="title ? titleId : undefined"
+    >
       <div ref="modalRef" class="modal-content">
         <div v-if="title" class="modal-header">
-          <h2>{{ title }}</h2>
+          <h2 :id="titleId">{{ title }}</h2>
           <button class="modal-close" @click="emit('close')" aria-label="Close dialog">&times;</button>
         </div>
         <div class="modal-body">

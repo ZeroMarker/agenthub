@@ -479,13 +479,10 @@ onMounted(loadPrompts)
 .template-preview h3, .render-section h3 { margin-bottom: 0.75rem; color: var(--md-sys-color-on-surface); }
 .template-preview pre, .render-result { background: var(--md-sys-color-surface-variant); padding: 1rem; border-radius: var(--md-sys-shape-sm); overflow-x: auto; font-size: 0.9rem; line-height: 1.5; }
 .render-section button { padding: 0.5rem 1rem; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; margin-bottom: 1rem; }
-.delete-btn { padding: 0.5rem 1rem; background: var(--md-sys-color-error); color: var(--md-sys-color-on-primary); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; }
+.delete-btn { padding: 0.5rem 1rem; background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); border: none; border-radius: var(--md-sys-shape-xs); cursor: pointer; }
 .list-items { max-height: calc(100vh - 350px); overflow-y: auto; }
 
 /* Community tab */
-.m3-tabs { display: flex; gap: 0.25rem; background: var(--md-sys-color-surface-variant); border-radius: var(--md-sys-shape-sm); padding: 0.25rem; margin-bottom: 1.5rem; width: fit-content; }
-.m3-tab { padding: 0.5rem 1.25rem; border: none; background: transparent; border-radius: var(--md-sys-shape-xs); color: var(--md-sys-color-on-surface-variant); font: var(--md-sys-typescale-label-large); cursor: pointer; }
-.m3-tab.active { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
 .hint { color: var(--md-sys-color-on-surface-variant); font-size: 0.9rem; }
 .hint code { background: var(--md-sys-color-surface-variant); padding: 0.1rem 0.35rem; border-radius: var(--md-sys-shape-xs); }
 .publish-box, .install-box { display: flex; align-items: center; gap: 0.75rem; border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: 1rem; margin-top: 1rem; }
@@ -494,7 +491,7 @@ onMounted(loadPrompts)
 .publish-box input, .install-box input { flex: 1; padding: 0.5rem 0.9rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-sm); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
 
 /* Effects tab */
-.m3-card { background: var(--md-sys-color-surface); border-radius: var(--md-sys-shape-md); box-shadow: var(--md-sys-elevation-1); padding: 1.25rem; margin-bottom: 1rem; }
+.m3-card { margin-bottom: 1rem; }
 .record-box h3 { margin-bottom: 0.75rem; color: var(--md-sys-color-on-surface); font-size: 0.95rem; }
 .record-row { display: flex; gap: 0.6rem; align-items: center; }
 .record-row input { flex: 1; max-width: 320px; padding: 0.5rem 0.9rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-sm); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }

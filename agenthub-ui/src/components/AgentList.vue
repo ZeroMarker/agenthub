@@ -591,13 +591,13 @@ onErrorCaptured((err, _instance, info) => {
   height: 1.25rem;
   padding: 0 0.375rem;
   border-radius: var(--md-sys-shape-full);
-  background: var(--md-sys-color-surface-variant);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 12%, transparent);
   color: var(--md-sys-color-on-surface-variant);
   font: var(--md-sys-typescale-label-small);
 }
 .m3-tab.active .m3-tab-badge {
-  background: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
 }
 
 .agents-grid {
@@ -636,8 +636,8 @@ button:disabled { opacity: 0.38; cursor: not-allowed; }
 @media (max-width: 992px) {
   .container { padding: 1.5rem; }
   .agent-stats { justify-content: center; }
-  .m3-tabs { flex-wrap: wrap; }
-  .m3-tab { flex: 1 1 calc(50% - 0.25rem); }
+  .m3-tabs { display: flex; width: 100%; }
+  .m3-tab { flex: 1 1 calc(50% - 0.25rem); justify-content: center; }
 }
 @media (max-width: 768px) {
   .agents-grid { grid-template-columns: 1fr; }

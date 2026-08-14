@@ -585,4 +585,12 @@ mod tests {
             .grant_permission("admin", "delete", None, None, None)
             .is_err());
     }
+
+    #[test]
+    fn test_list_users_corrupt_file_errors() {
+        let temp = TempDir::new().unwrap();
+        let manager = UserManager::new(temp.path().to_path_buf());
+        std::fs::write(temp.path().join("users.yaml"), "users: \"unterminated").unwrap();
+        assert!(manager.list_users().is_err());
+    }
 }

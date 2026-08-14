@@ -20,6 +20,14 @@ All notable changes to this project will be documented in this file.
   `metadata` or secret fields now parse with safe defaults instead of failing
 
 ### Changed
+- **Negative test coverage**: corrupt-file, import/restore, and concurrent-write
+  suites across config, prompts, sessions, skills, notify channels, users,
+  marketplace, secrets and backup — corrupt data errors (or degrades) instead
+  of panicking, and listings skip corrupt entries
+- **Concurrent-write safety**: `ConfigManager` mutations are serialized by a
+  write lock (no lost updates); agent configs, secrets, prompts and memories
+  are persisted atomically (temp-file + rename) so a racing or crashing writer
+  never leaves a torn file
 - **Filesystem hardening**: validate every user-controlled identifier used as a
   persisted path component across config, prompts, sessions, workflows,
   community prompts, marketplace ratings, skills, plugins and memories;

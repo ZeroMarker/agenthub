@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
-use crate::storage::is_safe_id;
+use crate::storage::{atomic_write, is_safe_id};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptVariable {
@@ -510,7 +510,7 @@ impl PromptManager {
             AgentHubError::PromptError(format!("Failed to serialize prompt: {}", e))
         })?;
 
-        std::fs::write(&path, content)
+        atomic_write(&path, &content)
             .map_err(|e| AgentHubError::PromptError(format!("Failed to write prompt: {}", e)))?;
 
         Ok(())
@@ -1574,5 +1574,56 @@ mod tests {
         assert_eq!(outcome.success, Some(true));
         assert!(outcome.tokens > 0);
         assert!(outcome.cost_usd > 0.0);
+    }
+
+    // ---- Negative & concurrency tests ----
+
+    #[test]
+    fn test_get_prompt_corrupt_file_errors_and_list_skips() {
+        let temp = TempDir::new().unwrap();
+        let manager = PromptManager::new(temp.path().join("prompts"));
+        manager.create_prompt("p1", "P1", "", "Say hi").unwrap();
+
+        // Corrupt the file in place.
+        std::fs::write(manager.prompt_path("p1"), "id: \"unterminated").unwrap();
+
+        assert!(manager.get_prompt("p1").is_err());
+        // Listing must skip the corrupt entry, not fail.
+        assert!(manager.list_prompts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_import_prompts_corrupt_json_errors() {
+        let temp = TempDir::new().unwrap();
+        let manager = PromptManager::new(temp.path().join("prompts"));
+        assert!(manager
+            .import_prompts("{ not valid json !!", false)
+            .is_err());
+        assert!(manager.import_prompts("[]", false).is_err());
+    }
+
+    #[test]
+    fn test_concurrent_prompt_creates_distinct_files() {
+        let temp = TempDir::new().unwrap();
+        let manager = std::sync::Arc::new(PromptManager::new(temp.path().join("prompts")));
+
+        let mut handles = Vec::new();
+        for i in 0..8 {
+            let manager = manager.clone();
+            handles.push(std::thread::spawn(move || {
+                manager
+                    .create_prompt(&format!("p{}", i), "Concurrent", "", "template")
+                    .unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let ids = manager.list_prompts().unwrap();
+        assert_eq!(ids.len(), 8);
+        for i in 0..8 {
+            assert!(manager.get_prompt(&format!("p{}", i)).is_ok());
+        }
     }
 }

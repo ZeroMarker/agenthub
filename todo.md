@@ -21,7 +21,7 @@
 - [x] CI Clippy 扩展为 `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] 升级 `actions/checkout` 与 `actions/setup-node` 到 v5，消除 Node.js 20 action runtime 弃用警告
 - [ ] 建立覆盖率采集与门禁，落实核心模块不低于 80% 的验收目标
-- [ ] 补充导入/恢复、损坏文件、并发写入等负向测试
+- [x] 补充导入/恢复、损坏文件、并发写入等负向测试（19 个新测试：全模块损坏文件优雅报错/降级、导入恢复拒绝恶意与损坏数据、并发写入锁防丢失更新）
 - [x] 建立 ADR，记录清单格式、安装器接口和平台策略
 - [x] 将 `PROJECT_PLAN.md` 标记为 v1.0 历史计划，并清理已完成但仍未勾选的发布任务
 
@@ -38,7 +38,7 @@
 
 ### 最近验证
 
-- [x] 2026-08-14 本机验证：cargo test --workspace 全绿（271 测试：210 core + 47 cli + 9 集成 + 5 tauri），fmt 干净，all-targets clippy 0 警告；CLI `config validate|repair|history|rollback` 端到端冒烟通过；tauri cargo check 通过
+- [x] 2026-08-14 本机验证：cargo test --workspace 全绿（290 测试：229 core + 47 cli + 9 集成 + 5 tauri），fmt 干净，all-targets clippy 0 警告；tauri cargo check 通过；并发测试已在无锁状态下验证可稳定捕获丢失更新（8 线程×25 写 Barrier）
 
 ## 发布记录（2026-08-10）— ✅ v1.4.0 已发布
 

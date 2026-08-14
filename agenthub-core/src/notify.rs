@@ -949,4 +949,12 @@ mod tests {
             monthly_usd: None,
         };
     }
+
+    #[test]
+    fn test_list_channels_corrupt_config_errors() {
+        let temp = TempDir::new().unwrap();
+        let notifier = Notifier::new(temp.path().to_path_buf());
+        std::fs::write(temp.path().join("notify.yaml"), "channels: [unterminated").unwrap();
+        assert!(notifier.list_channels().is_err());
+    }
 }

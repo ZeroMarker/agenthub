@@ -687,4 +687,20 @@ triggers: []
         assert!(manager.get_skill("../escape").is_err());
         assert!(manager.uninstall_skill("../escape").is_err());
     }
+
+    #[test]
+    fn test_get_skill_corrupt_manifest_errors() {
+        let temp = TempDir::new().unwrap();
+        let manager = SkillManager::new(temp.path().to_path_buf());
+        let skill_dir = manager.installed_dir().join("demo");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        // No frontmatter at all -> manifest parse error.
+        std::fs::write(skill_dir.join("SKILL.md"), "# no frontmatter\n").unwrap();
+        assert!(manager.get_skill("demo").is_err());
+
+        // Binary garbage -> same, no panic.
+        std::fs::write(skill_dir.join("SKILL.md"), [0xff, 0x00, 0x01]).unwrap();
+        assert!(manager.get_skill("demo").is_err());
+    }
 }

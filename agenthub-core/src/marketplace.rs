@@ -571,4 +571,14 @@ mod tests {
         assert!(mm.rate("../escape", 5, None).is_err());
         assert!(!temp.path().join("escape.json").exists());
     }
+
+    #[test]
+    fn test_search_corrupt_index_errors() {
+        let temp = TempDir::new().unwrap();
+        let mm = MarketplaceManager::new(temp.path().join("skills"));
+        std::fs::create_dir_all(mm.marketplace_dir()).unwrap();
+        std::fs::write(mm.marketplace_dir().join("index.json"), "{ bad json !!").unwrap();
+        // `info` reads the index directly, so a corrupt index must error.
+        assert!(mm.info("anything").is_err());
+    }
 }

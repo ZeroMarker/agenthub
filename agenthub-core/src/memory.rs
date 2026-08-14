@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
-use crate::storage::{is_safe_id, is_safe_relative_path};
+use crate::storage::{atomic_write, is_safe_id, is_safe_relative_path};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -372,7 +372,7 @@ impl MemoryManager {
         output.push_str("---\n\n");
         output.push_str(&entry.content);
 
-        std::fs::write(&path, output)
+        atomic_write(&path, &output)
             .map_err(|e| AgentHubError::MemoryError(format!("Failed to write memory: {}", e)))?;
 
         Ok(())
@@ -1516,5 +1516,60 @@ mod tests {
                 MemoryType::Free,
             )
             .is_err());
+    }
+
+    // ---- Negative & concurrency tests ----
+
+    #[test]
+    fn test_corrupt_entry_file_degrades_gracefully() {
+        let temp = TempDir::new().unwrap();
+        let manager = MemoryManager::new(temp.path().join("memory"));
+        manager
+            .create_entry(MemoryScope::Global, None, "note", "hello", MemoryType::Free)
+            .unwrap();
+
+        // Corrupt the stored file; listing must not panic or fail.
+        std::fs::write(
+            manager.memory_dir().join("global/note.md"),
+            "\x00\x01\x02garbage",
+        )
+        .unwrap();
+        let entries = manager.list_entries(Some(MemoryScope::Global)).unwrap();
+        assert!(!entries.is_empty()); // falls back to raw-content entry
+    }
+
+    #[test]
+    fn test_import_memories_corrupt_json_errors() {
+        let temp = TempDir::new().unwrap();
+        let manager = MemoryManager::new(temp.path().join("memory"));
+        assert!(manager.import_memories("{ nope !!", true).is_err());
+    }
+
+    #[test]
+    fn test_concurrent_memory_creates_distinct_paths() {
+        let temp = TempDir::new().unwrap();
+        let manager = std::sync::Arc::new(MemoryManager::new(temp.path().join("memory")));
+
+        let mut handles = Vec::new();
+        for i in 0..8 {
+            let manager = manager.clone();
+            handles.push(std::thread::spawn(move || {
+                manager
+                    .create_entry(
+                        MemoryScope::Global,
+                        None,
+                        &format!("note-{}", i),
+                        "content",
+                        MemoryType::Free,
+                    )
+                    .unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let entries = manager.list_entries(Some(MemoryScope::Global)).unwrap();
+        assert_eq!(entries.len(), 8);
     }
 }

@@ -1,3 +1,35 @@
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Counter for unique temporary file names (per-process).
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Write `content` to `path` atomically: the data is written to a unique
+/// temporary file in the same directory and renamed over the target, so a
+/// concurrent or crashing writer never leaves a torn/partial file behind.
+pub(crate) fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "out".to_string());
+    let tmp = dir.join(format!(
+        ".{name}.tmp-{}-{}",
+        std::process::id(),
+        TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&tmp, content)?;
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Best-effort cleanup of the temporary file.
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
 /// Returns whether a user-controlled identifier is safe to use as one path
 /// component on every supported platform.
 pub(crate) fn is_safe_id(id: &str) -> bool {

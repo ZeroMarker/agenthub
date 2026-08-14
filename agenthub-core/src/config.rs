@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
 use crate::secrets::{RotationResult, SecretInfo, SecretStore};
-use crate::storage::is_safe_id;
+use crate::storage::{atomic_write, is_safe_id};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -343,6 +343,9 @@ pub fn validate_config(config: &AgentConfig) -> Vec<ConfigIssue> {
 pub struct ConfigManager {
     config_dir: PathBuf,
     current_environment: Environment,
+    /// Serializes read-modify-write mutations so concurrent callers cannot
+    /// overwrite each other's in-flight changes (lost updates).
+    write_lock: std::sync::Mutex<()>,
 }
 
 /// A reusable configuration template. Secrets are never stored in templates;
@@ -378,6 +381,7 @@ impl ConfigManager {
         Self {
             config_dir,
             current_environment: Environment::Development,
+            write_lock: std::sync::Mutex::new(()),
         }
     }
 
@@ -456,7 +460,7 @@ impl ConfigManager {
             AgentHubError::ConfigError(format!("Failed to serialize config: {}", e))
         })?;
 
-        std::fs::write(&path, content)
+        atomic_write(&path, &content)
             .map_err(|e| AgentHubError::ConfigError(format!("Failed to write config: {}", e)))?;
 
         Ok(())
@@ -489,6 +493,7 @@ impl ConfigManager {
     }
 
     pub fn set_setting(&self, agent_id: &str, key: &str, value: ConfigValue) -> Result<()> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut config = self
             .load_config(agent_id)
             .or_else(|_| self.create_config(agent_id))?;
@@ -502,6 +507,7 @@ impl ConfigManager {
     }
 
     pub fn unset_setting(&self, agent_id: &str, key: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut config = self.load_config(agent_id)?;
         if !config.settings.contains_key(key) {
             return Ok(false);
@@ -518,6 +524,7 @@ impl ConfigManager {
     }
 
     pub fn set_custom(&self, agent_id: &str, key: &str, value: ConfigValue) -> Result<()> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut config = self
             .load_config(agent_id)
             .or_else(|_| self.create_config(agent_id))?;
@@ -531,6 +538,7 @@ impl ConfigManager {
     }
 
     pub fn set_env_var(&self, agent_id: &str, key: &str, value: &str) -> Result<()> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut config = self
             .load_config(agent_id)
             .or_else(|_| self.create_config(agent_id))?;
@@ -566,6 +574,7 @@ impl ConfigManager {
     /// fallbacks, bump the version and record the change in history. Returns
     /// the corrections applied (empty when the config was already valid).
     pub fn repair_config(&self, agent_id: &str) -> Result<Vec<ConfigIssue>> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut config = self.load_config(agent_id)?;
         let pre_repair = config.clone();
         let issues = normalize_settings(&mut config.settings);
@@ -608,7 +617,7 @@ impl ConfigManager {
             AgentHubError::ConfigError(format!("Failed to serialize history version: {}", e))
         })?;
 
-        std::fs::write(&path, content)
+        atomic_write(&path, &content)
             .map_err(|e| AgentHubError::ConfigError(format!("Failed to write history: {}", e)))?;
 
         Ok(())
@@ -676,6 +685,7 @@ impl ConfigManager {
     /// increasing. Live secret values are carried over because history
     /// snapshots redact them.
     pub fn rollback_config(&self, agent_id: &str, version: u32) -> Result<AgentConfig> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         let current = self.load_config(agent_id)?;
         let historical = self.get_history(agent_id, version)?;
 
@@ -712,6 +722,7 @@ impl ConfigManager {
     /// agent config file (values live only in `secrets.yaml`, never in the
     /// agent YAML).
     pub fn set_secret(&self, agent_id: &str, key: &str, value: &str) -> Result<()> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         self.secret_store().set(agent_id, key, value)?;
         // Drop any inline plaintext copy from the config file.
         if self.agent_config_path(agent_id).exists() {
@@ -750,6 +761,7 @@ impl ConfigManager {
     }
 
     pub fn delete_secret(&self, agent_id: &str, key: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         self.secret_store().delete(agent_id, key)
     }
 
@@ -765,12 +777,14 @@ impl ConfigManager {
         key: &str,
         new_value: &str,
     ) -> Result<RotationResult> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         self.secret_store().rotate(agent_id, key, new_value)
     }
 
     /// Move a legacy inline secret value from the agent config file into the
     /// keystore, then blank it in the file. Returns true when a value moved.
     pub fn migrate_secret(&self, agent_id: &str, key: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         if !self.agent_config_path(agent_id).exists() {
             return Ok(false);
         }
@@ -801,6 +815,7 @@ impl ConfigManager {
     }
 
     pub fn reset_config(&self, agent_id: &str) -> Result<AgentConfig> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         self.delete_config(agent_id)?;
         self.create_config(agent_id)
     }
@@ -818,6 +833,7 @@ impl ConfigManager {
     }
 
     pub fn import_config(&self, input_path: &Path, agent_id: Option<&str>) -> Result<AgentConfig> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         let content = std::fs::read_to_string(input_path)
             .map_err(|e| AgentHubError::ConfigError(format!("Failed to read import: {}", e)))?;
 
@@ -927,7 +943,7 @@ impl ConfigManager {
             AgentHubError::ConfigError(format!("Failed to serialize template: {}", e))
         })?;
 
-        std::fs::write(&path, content)
+        atomic_write(&path, &content)
             .map_err(|e| AgentHubError::ConfigError(format!("Failed to write template: {}", e)))?;
 
         Ok(())
@@ -1021,6 +1037,7 @@ impl ConfigManager {
     /// values win over existing ones; secret keys keep existing values or are
     /// reserved as empty placeholders.
     pub fn apply_template(&self, agent_id: &str, template_id: &str) -> Result<AgentConfig> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         let template = self.get_template(template_id)?;
         let mut config = self
             .load_config(agent_id)
@@ -1657,5 +1674,139 @@ mod tests {
             .settings
             .get("model")
             .is_some_and(|m| m.as_str() == Some("gpt-4o"))));
+    }
+
+    // ---- Negative & concurrency tests ----
+
+    #[test]
+    fn test_load_config_corrupt_yaml_errors() {
+        let (manager, _temp) = create_test_manager();
+        manager.create_config("agent-a").unwrap();
+        // Unclosed YAML quote -> parse error, never a panic.
+        std::fs::write(
+            manager.agent_config_path("agent-a"),
+            "agent_id: \"unterminated",
+        )
+        .unwrap();
+        assert!(manager.load_config("agent-a").is_err());
+
+        // Invalid UTF-8 bytes -> read error.
+        std::fs::write(
+            manager.agent_config_path("agent-a"),
+            [0xff, 0xfe, 0x00, 0x01],
+        )
+        .unwrap();
+        assert!(manager.load_config("agent-a").is_err());
+
+        // Corrupt configs must not crash directory listing.
+        assert_eq!(manager.list_configs().unwrap(), vec!["agent-a".to_string()]);
+    }
+
+    #[test]
+    fn test_import_config_corrupt_file_errors() {
+        let (manager, temp) = create_test_manager();
+        let bad = temp.path().join("bad.yaml");
+        std::fs::write(&bad, "settings: [unterminated").unwrap();
+        assert!(manager.import_config(&bad, None).is_err());
+    }
+
+    #[test]
+    fn test_corrupt_history_entry_skipped_not_fatal() {
+        let (manager, _temp) = create_test_manager();
+        manager.create_config("agent-a").unwrap();
+        manager
+            .set_setting("agent-a", "model", ConfigValue::from("gpt-4o"))
+            .unwrap();
+        manager
+            .set_setting("agent-a", "temperature", ConfigValue::from(0.3f64))
+            .unwrap();
+        assert_eq!(manager.list_history("agent-a").unwrap().len(), 2);
+
+        // Corrupt one history file in place; listing must skip it, not fail.
+        std::fs::write(
+            manager.history_path("agent-a", 1),
+            "agent_id: \"unterminated",
+        )
+        .unwrap();
+        let history = manager.list_history("agent-a").unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].version, 2);
+    }
+
+    #[test]
+    fn test_concurrent_distinct_key_writes_no_lost_update() {
+        use std::sync::{Arc, Barrier};
+        let (manager, _temp) = create_test_manager();
+        manager.create_config("agent-a").unwrap();
+        let manager = Arc::new(manager);
+
+        // 8 threads × 25 distinct keys each, released simultaneously so the
+        // read-modify-write cycles genuinely interleave.
+        const THREADS: usize = 8;
+        const WRITES: usize = 25;
+        let barrier = Arc::new(Barrier::new(THREADS));
+        let mut handles = Vec::new();
+        for t in 0..THREADS {
+            let manager = manager.clone();
+            let barrier = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                for i in 0..WRITES {
+                    let key = format!("k{}_{}", t, i);
+                    let value = format!("v{}_{}", t, i);
+                    manager
+                        .set_setting("agent-a", &key, ConfigValue::from(value))
+                        .unwrap();
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Every write survived (no lost updates) and the file parses cleanly.
+        let config = manager.load_config("agent-a").unwrap();
+        for t in 0..THREADS {
+            for i in 0..WRITES {
+                let key = format!("k{}_{}", t, i);
+                assert_eq!(
+                    config.settings.get(&key).and_then(|v| v.as_str()),
+                    Some(format!("v{}_{}", t, i).as_str()),
+                    "lost update for {}",
+                    key
+                );
+            }
+        }
+        assert_eq!(config.version, 1 + (THREADS * WRITES) as u32);
+    }
+
+    #[test]
+    fn test_concurrent_secret_sets_no_lost_update() {
+        let (manager, _temp) = create_test_manager();
+        manager.create_config("agent-a").unwrap();
+        let manager = std::sync::Arc::new(manager);
+
+        let mut handles = Vec::new();
+        for i in 0..8 {
+            let manager = manager.clone();
+            handles.push(std::thread::spawn(move || {
+                manager
+                    .set_secret("agent-a", &format!("k{}", i), &format!("secret-{}", i))
+                    .unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        for i in 0..8 {
+            assert_eq!(
+                manager
+                    .get_secret("agent-a", &format!("k{}", i))
+                    .unwrap()
+                    .as_deref(),
+                Some(format!("secret-{}", i).as_str())
+            );
+        }
     }
 }

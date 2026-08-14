@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::storage::atomic_write;
 
 /// One previously active value for a secret, kept during the rotation grace
 /// period so a failed rollout can be rolled back.
@@ -112,7 +113,7 @@ impl SecretStore {
             AgentHubError::ConfigError(format!("Failed to serialize secrets: {}", e))
         })?;
         let path = self.path();
-        std::fs::write(&path, content)
+        atomic_write(&path, &content)
             .map_err(|e| AgentHubError::ConfigError(format!("Failed to write secrets: {}", e)))?;
         // Restrictive permissions: owner read/write only (no-op on Windows).
         #[cfg(unix)]
@@ -357,5 +358,21 @@ mod tests {
     fn test_redact_short_and_long() {
         assert_eq!(SecretStore::redact("abcdef"), "••••");
         assert_eq!(SecretStore::redact("sk-abcdefghijklmnop"), "sk-a…mnop");
+    }
+
+    #[test]
+    fn test_corrupt_keystore_file_degrades_gracefully() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("secrets.yaml"), "secrets: [unterminated").unwrap();
+
+        // A corrupt keystore must degrade to empty, never panic.
+        let store = SecretStore::new(temp.path().to_path_buf());
+        assert_eq!(store.get("agent-a", "api_key"), None);
+        assert!(store.list(None).is_empty());
+
+        // And a fresh write must recover the file.
+        let mut store = store;
+        store.set("agent-a", "api_key", "sk-new").unwrap();
+        assert_eq!(store.get("agent-a", "api_key").as_deref(), Some("sk-new"));
     }
 }

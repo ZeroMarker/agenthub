@@ -1334,4 +1334,23 @@ mod tests {
         };
         assert!(manager.save_template(&template).is_err());
     }
+
+    #[test]
+    fn test_get_session_corrupt_file_errors() {
+        let temp = TempDir::new().unwrap();
+        let manager = SessionManager::new(temp.path().join("sessions"));
+        let session = manager.create_session("S1", "codex").unwrap();
+
+        std::fs::write(
+            manager
+                .sessions_dir()
+                .join("data")
+                .join(format!("{}.yaml", session.id)),
+            "id: \"unterminated",
+        )
+        .unwrap();
+        assert!(manager.get_session(&session.id).is_err());
+        // Listing must skip corrupt sessions, not fail.
+        assert!(manager.list_sessions().unwrap().is_empty());
+    }
 }

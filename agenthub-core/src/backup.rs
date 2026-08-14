@@ -501,4 +501,42 @@ mod tests {
             .restore_backup(&temp.path().join("nope.json"))
             .is_err());
     }
+
+    #[test]
+    fn test_restore_corrupt_backup_errors() {
+        let temp = TempDir::new().unwrap();
+        let manager = BackupManager::new(temp.path().to_path_buf());
+        let bad = temp.path().join("bad.json");
+        std::fs::write(&bad, "{ not valid json !!").unwrap();
+        assert!(manager.restore_backup(&bad).is_err());
+    }
+
+    #[test]
+    fn test_restore_backup_rejects_unsafe_config_id() {
+        let temp = TempDir::new().unwrap();
+        let manager = BackupManager::new(temp.path().to_path_buf());
+        let evil = temp.path().join("evil.json");
+        let json = r#"{
+            "manifest": {
+                "format_version": 1,
+                "created_at": "2026-01-01T00:00:00Z",
+                "agenthub_version": "1.4.0",
+                "counts": {"configs":1,"prompts":0,"sessions":0,"memories":0,"audit_events":0}
+            },
+            "configs": [{
+                "agent_id": "../escape",
+                "version": 1,
+                "environment": "development",
+                "settings": {},
+                "metadata": {"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}
+            }],
+            "prompts": [],
+            "sessions": [],
+            "memories": []
+        }"#;
+        std::fs::write(&evil, json).unwrap();
+        assert!(manager.restore_backup(&evil).is_err());
+        // Nothing escaped the config directory.
+        assert!(!temp.path().join("escape.yaml").exists());
+    }
 }

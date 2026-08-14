@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **SMTP direct delivery** (notify): email channels accept `smtp` settings
+  (`host`/`port`/`username`/`password`/`tls`) and send alerts directly over
+  SMTP instead of spooling `.eml` files. Minimal zero-dependency RFC 5321
+  client (EHLO, AUTH PLAIN, MAIL FROM, RCPT TO, DATA, QUIT) with 15s
+  timeouts; plaintext (`tls: none`) supported, STARTTLS documented as
+  follow-up. CLI: `notify add ... --smtp-host ...`; Tauri `add_notify_channel`
+  gained the same options. Existing spool behavior is unchanged when `smtp`
+  is absent; verified end-to-end against a local fake SMTP server
 - **Config validation & default-value fallback**: known setting keys
   (`temperature`, `top_p`, `max_tokens`, `frequency_penalty`, `presence_penalty`,
   `model`) are validated on load; missing/out-of-range numeric settings fall back

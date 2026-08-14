@@ -535,6 +535,7 @@ enum PluginArgs {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum NotifyArgs {
     /// List notification channels
     List,
@@ -557,6 +558,22 @@ enum NotifyArgs {
         /// Deduplicate identical alerts within this many minutes (0 disables)
         #[arg(long, default_value_t = 15)]
         dedup_minutes: u64,
+        /// SMTP host for direct email delivery (email channels; when omitted the
+        /// message is spooled as .eml for an external MTA)
+        #[arg(long)]
+        smtp_host: Option<String>,
+        /// SMTP port (default 587)
+        #[arg(long, default_value_t = 587)]
+        smtp_port: u16,
+        /// SMTP username (optional)
+        #[arg(long)]
+        smtp_user: Option<String>,
+        /// SMTP password/token (optional)
+        #[arg(long)]
+        smtp_password: Option<String>,
+        /// SMTP TLS mode: starttls (default) | none
+        #[arg(long, default_value = "starttls")]
+        smtp_tls: String,
     },
     /// Remove a channel
     Remove { id: String },
@@ -2679,6 +2696,7 @@ pub fn cmd_notify_list(base_dir: &Path) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_notify_add(
     base_dir: &Path,
     id: &str,
@@ -2688,6 +2706,11 @@ pub fn cmd_notify_add(
     subject_prefix: Option<&str>,
     min_severity: &str,
     dedup_minutes: u64,
+    smtp_host: Option<&str>,
+    smtp_port: u16,
+    smtp_user: Option<&str>,
+    smtp_password: Option<&str>,
+    smtp_tls: &str,
 ) -> String {
     let notifier = Notifier::new(base_dir.to_path_buf());
     let config = match kind {
@@ -2699,6 +2722,13 @@ pub fn cmd_notify_add(
             to: target.to_string(),
             from: from.unwrap_or("agenthub@localhost").to_string(),
             subject_prefix: subject_prefix.map(|s| s.to_string()),
+            smtp: smtp_host.map(|host| agenthub_core::SmtpConfig {
+                host: host.to_string(),
+                port: smtp_port,
+                username: smtp_user.map(|s| s.to_string()),
+                password: smtp_password.map(|s| s.to_string()),
+                tls: smtp_tls.to_string(),
+            }),
         },
         "file" => ChannelConfig::File {
             path: target.to_string(),
@@ -3123,6 +3153,11 @@ fn main() {
                 subject_prefix,
                 min_severity,
                 dedup_minutes,
+                smtp_host,
+                smtp_port,
+                smtp_user,
+                smtp_password,
+                smtp_tls,
             } => cmd_notify_add(
                 &data_dir(),
                 &id,
@@ -3132,6 +3167,11 @@ fn main() {
                 subject_prefix.as_deref(),
                 &min_severity,
                 dedup_minutes,
+                smtp_host.as_deref(),
+                smtp_port,
+                smtp_user.as_deref(),
+                smtp_password.as_deref(),
+                &smtp_tls,
             ),
             NotifyArgs::Remove { id } => cmd_notify_remove(&data_dir(), &id),
             NotifyArgs::Enable { id } => cmd_notify_set_enabled(&data_dir(), &id, true),
@@ -3645,6 +3685,11 @@ mod tests {
             None,
             "info",
             15,
+            None,
+            587,
+            None,
+            None,
+            "starttls",
         );
         let output = cmd_monitor(temp.path(), &catalog, false, None, true, false);
         assert!(output.contains("notify:"));
@@ -4020,7 +4065,21 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let base = temp.path();
 
-        let out = cmd_notify_add(base, "log", "file", "alerts.log", None, None, "info", 15);
+        let out = cmd_notify_add(
+            base,
+            "log",
+            "file",
+            "alerts.log",
+            None,
+            None,
+            "info",
+            15,
+            None,
+            587,
+            None,
+            None,
+            "starttls",
+        );
         assert!(out.contains("✅"));
         let out = cmd_notify_add(
             base,
@@ -4031,12 +4090,29 @@ mod tests {
             None,
             "info",
             15,
+            None,
+            587,
+            None,
+            None,
+            "starttls",
         );
         assert!(out.contains("✅"));
-        assert!(
-            cmd_notify_add(base, "bad", "webhook", "not-a-url", None, None, "info", 15)
-                .contains("Error:")
-        );
+        assert!(cmd_notify_add(
+            base,
+            "bad",
+            "webhook",
+            "not-a-url",
+            None,
+            None,
+            "info",
+            15,
+            None,
+            587,
+            None,
+            None,
+            "starttls"
+        )
+        .contains("Error:"));
         assert!(cmd_notify_add(
             base,
             "team",
@@ -4045,13 +4121,30 @@ mod tests {
             Some("a@x.com"),
             Some("[AH] "),
             "info",
-            15
+            15,
+            None,
+            587,
+            None,
+            None,
+            "starttls",
         )
         .contains("✅"));
-        assert!(
-            cmd_notify_add(base, "nope", "carrier-pigeon", "x", None, None, "info", 15)
-                .contains("Invalid channel kind")
-        );
+        assert!(cmd_notify_add(
+            base,
+            "nope",
+            "carrier-pigeon",
+            "x",
+            None,
+            None,
+            "info",
+            15,
+            None,
+            587,
+            None,
+            None,
+            "starttls"
+        )
+        .contains("Invalid channel kind"));
 
         let out = cmd_notify_list(base);
         assert!(out.contains("log"));
@@ -4154,7 +4247,21 @@ mod tests {
         cmd_config_secret_set(base, "agent-a", "api_key", "sk-old");
 
         // Add a file channel so --notify delivers
-        cmd_notify_add(base, "log", "file", "events.log", None, None, "info", 15);
+        cmd_notify_add(
+            base,
+            "log",
+            "file",
+            "events.log",
+            None,
+            None,
+            "info",
+            15,
+            None,
+            587,
+            None,
+            None,
+            "starttls",
+        );
 
         let out = cmd_config_secret_rotate(base, "agent-a", "api_key", "sk-new", true);
         assert!(out.contains("✅ Rotated"));
@@ -4174,14 +4281,17 @@ mod tests {
         let base = temp.path();
 
         // Channel that only accepts warning+ alerts
-        let out = cmd_notify_add(base, "warn", "file", "warn.log", None, None, "warning", 5);
+        let out = cmd_notify_add(
+            base, "warn", "file", "warn.log", None, None, "warning", 5, None, 587, None, None,
+            "starttls",
+        );
         assert!(out.contains("min-severity warning"));
 
         // Invalid severity rejected
-        assert!(
-            cmd_notify_add(base, "bad", "file", "x.log", None, None, "loud", 5)
-                .contains("Invalid --min-severity")
-        );
+        assert!(cmd_notify_add(
+            base, "bad", "file", "x.log", None, None, "loud", 5, None, 587, None, None, "starttls"
+        )
+        .contains("Invalid --min-severity"));
 
         // The monitor report is critical (many verified agents missing), so it passes.
         let catalog = Catalog::from_json(MANUAL_AGENTS_JSON).unwrap();

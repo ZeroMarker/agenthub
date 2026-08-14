@@ -49,7 +49,9 @@ pub use memory::{
     MemoryStats, MemoryType, VectorIndex, VectorIndexEntry, VectorIndexSummary, EMBEDDING_DIM,
 };
 pub use monitor::{AlertSeverity, Monitor, MonitorReport};
-pub use notify::{ChannelConfig, ChannelResult, NotificationPayload, Notifier, NotifyChannel};
+pub use notify::{
+    ChannelConfig, ChannelResult, NotificationPayload, Notifier, NotifyChannel, SmtpConfig,
+};
 pub use overview::{CatalogOverview, OverviewReport, StatusOverview, TrendPoint};
 pub use plugin::{
     Plugin, PluginHook, PluginManager, PluginManifest, PluginRunResult, HOOK_BACKUP, HOOK_INSTALL,

@@ -2687,6 +2687,7 @@ async fn list_notify_channels(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn add_notify_channel(
     id: String,
     kind: String,
@@ -2695,6 +2696,11 @@ async fn add_notify_channel(
     subject_prefix: Option<String>,
     min_severity: Option<String>,
     dedup_minutes: Option<u64>,
+    smtp_host: Option<String>,
+    smtp_port: Option<u16>,
+    smtp_user: Option<String>,
+    smtp_password: Option<String>,
+    smtp_tls: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<agenthub_core::NotifyChannel, String> {
     let config = match kind.as_str() {
@@ -2706,6 +2712,13 @@ async fn add_notify_channel(
             to: target,
             from: from.unwrap_or_else(|| "agenthub@localhost".to_string()),
             subject_prefix,
+            smtp: smtp_host.map(|host| agenthub_core::SmtpConfig {
+                host,
+                port: smtp_port.unwrap_or(587),
+                username: smtp_user,
+                password: smtp_password,
+                tls: smtp_tls.unwrap_or_else(|| "starttls".to_string()),
+            }),
         },
         "file" => agenthub_core::ChannelConfig::File { path: target },
         other => return Err(format!("Invalid channel kind '{}'", other)),

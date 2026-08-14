@@ -1,9 +1,10 @@
-//! Cross-cutting alert notification channels (webhook / email spool / file).
+//! Cross-cutting alert notification channels (webhook / email / file).
 //!
 //! Channels are configured in `<config-dir>/notify.yaml` and consumed by the
 //! monitor (`MonitorReport`) and any other alert producer. Webhook channels
 //! POST a JSON payload to an HTTP(S) endpoint (via `ureq`); email channels
-//! write RFC-2822 `.eml` messages to a local outbox spool (delivery to an MTA
+//! either send directly over SMTP (when `smtp` is configured on the channel)
+//! or write RFC-2822 `.eml` messages to a local outbox spool (delivery to an MTA
 //! is out of scope — the spool can be picked up by `msmtp`/`sendmail` or a
 //! mail client); file channels append to a log file.
 
@@ -25,15 +26,44 @@ pub enum ChannelConfig {
         #[serde(default)]
         headers: Vec<String>,
     },
-    /// Write an RFC-2822 message to the local outbox spool.
+    /// Send via SMTP (when `smtp` is set) or write an RFC-2822 message to
+    /// the local outbox spool (when it is not).
     Email {
         to: String,
         from: String,
         #[serde(default)]
         subject_prefix: Option<String>,
+        /// Direct SMTP delivery settings. When `None`, alerts are spooled as
+        /// `.eml` files under `notifications/outbox` for an external MTA.
+        #[serde(default)]
+        smtp: Option<SmtpConfig>,
     },
     /// Append alert lines to a file.
     File { path: String },
+}
+
+/// SMTP delivery settings for an email channel.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SmtpConfig {
+    pub host: String,
+    #[serde(default = "default_smtp_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub username: Option<String>,
+    /// Password/token. Stored in `notify.yaml` like webhook headers.
+    #[serde(default)]
+    pub password: Option<String>,
+    /// "none" (plaintext) or "starttls" (default).
+    #[serde(default = "default_smtp_tls")]
+    pub tls: String,
+}
+
+fn default_smtp_port() -> u16 {
+    587
+}
+
+fn default_smtp_tls() -> String {
+    "starttls".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -323,21 +353,47 @@ impl Notifier {
                 to,
                 from,
                 subject_prefix,
+                smtp,
             } => {
-                match self.write_email_spool(channel, to, from, subject_prefix.as_deref(), payload)
-                {
-                    Ok(path) => ChannelResult {
-                        channel: channel.id.clone(),
-                        kind: "email".to_string(),
-                        ok: true,
-                        message: format!("spooled to {}", path.display()),
+                let subject = email_subject(subject_prefix.as_deref(), payload);
+                let body = email_body(payload);
+                match smtp {
+                    Some(smtp) => match send_email_smtp(smtp, from, to, &subject, &body) {
+                        Ok(message) => ChannelResult {
+                            channel: channel.id.clone(),
+                            kind: "email".to_string(),
+                            ok: true,
+                            message,
+                        },
+                        Err(message) => ChannelResult {
+                            channel: channel.id.clone(),
+                            kind: "email".to_string(),
+                            ok: false,
+                            message,
+                        },
                     },
-                    Err(e) => ChannelResult {
-                        channel: channel.id.clone(),
-                        kind: "email".to_string(),
-                        ok: false,
-                        message: e.to_string(),
-                    },
+                    None => {
+                        match self.write_email_spool(
+                            channel,
+                            to,
+                            from,
+                            subject_prefix.as_deref(),
+                            payload,
+                        ) {
+                            Ok(path) => ChannelResult {
+                                channel: channel.id.clone(),
+                                kind: "email".to_string(),
+                                ok: true,
+                                message: format!("spooled to {}", path.display()),
+                            },
+                            Err(e) => ChannelResult {
+                                channel: channel.id.clone(),
+                                kind: "email".to_string(),
+                                ok: false,
+                                message: e.to_string(),
+                            },
+                        }
+                    }
                 }
             }
             ChannelConfig::File { path } => {
@@ -458,18 +514,8 @@ impl Notifier {
         );
         let path = dir.join(filename);
 
-        let subject = format!(
-            "{}AgentHub alert [{}] — {}",
-            subject_prefix.unwrap_or_default(),
-            payload.severity,
-            payload.summary
-        );
-        let payload_json =
-            serde_json::to_string_pretty(payload).unwrap_or_else(|_| "{}".to_string());
-        let body = format!(
-            "AgentHub alert notification\n\nSeverity: {}\nSummary: {}\nHealthy: {}\n\nPayload:\n{}\n",
-            payload.severity, payload.summary, payload.healthy, payload_json
-        );
+        let subject = email_subject(subject_prefix, payload);
+        let body = email_body(payload);
         let message = format!(
             "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{}",
             from,
@@ -483,6 +529,165 @@ impl Notifier {
         })?;
         Ok(path)
     }
+}
+
+fn email_subject(subject_prefix: Option<&str>, payload: &NotificationPayload) -> String {
+    format!(
+        "{}AgentHub alert [{}] — {}",
+        subject_prefix.unwrap_or_default(),
+        payload.severity,
+        payload.summary
+    )
+}
+
+fn email_body(payload: &NotificationPayload) -> String {
+    let payload_json = serde_json::to_string_pretty(payload).unwrap_or_else(|_| "{}".to_string());
+    format!(
+        "AgentHub alert notification\n\nSeverity: {}\nSummary: {}\nHealthy: {}\n\nPayload:\n{}\n",
+        payload.severity, payload.summary, payload.healthy, payload_json
+    )
+}
+
+/// Send an email directly over SMTP using a minimal RFC 5321 client
+/// (connect, EHLO, optional AUTH PLAIN, MAIL FROM, RCPT TO, DATA, QUIT).
+/// Only plaintext (`tls = "none"`) is supported in this delivery path; for
+/// encrypted delivery point the channel at a local relay (e.g. `msmtp`).
+fn send_email_smtp(
+    smtp: &SmtpConfig,
+    from: &str,
+    to: &str,
+    subject: &str,
+    body: &str,
+) -> std::result::Result<String, String> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    if smtp.tls != "none" {
+        return Err(format!(
+            "SMTP TLS mode '{}' is not supported yet; use --smtp-tls none or a local relay",
+            smtp.tls
+        ));
+    }
+
+    let timeout = Duration::from_secs(15);
+    let mut stream = TcpStream::connect((smtp.host.as_str(), smtp.port))
+        .map_err(|e| format!("SMTP connect {}:{} failed: {}", smtp.host, smtp.port, e))?;
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
+    let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
+
+    // Server greeting.
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|e| format!("SMTP read failed: {}", e))?;
+    if !line.starts_with("220") {
+        return Err(format!("SMTP server rejected connection: {}", line.trim()));
+    }
+
+    let expect = |stream: &mut TcpStream,
+                  reader: &mut BufReader<TcpStream>,
+                  send: &str,
+                  prefix: &str,
+                  what: &str|
+     -> std::result::Result<(), String> {
+        if !send.is_empty() {
+            writeln!(stream, "{}", send).map_err(|e| format!("SMTP write failed: {}", e))?;
+        }
+        let mut reply = String::new();
+        loop {
+            let mut l = String::new();
+            reader
+                .read_line(&mut l)
+                .map_err(|e| format!("SMTP read failed: {}", e))?;
+            if l.is_empty() {
+                return Err(format!("SMTP connection closed during {}", what));
+            }
+            reply.push_str(&l);
+            // Multiline replies: "250-..." continues until "250 ...".
+            let bytes = l.as_bytes();
+            if bytes.len() < 4 || bytes[3] != b'-' {
+                break;
+            }
+        }
+        if !reply.trim_start().starts_with(prefix) {
+            let last = reply.trim().lines().last().unwrap_or("").trim();
+            return Err(format!("SMTP {} failed: {}", what, last));
+        }
+        Ok(())
+    };
+
+    expect(&mut stream, &mut reader, "EHLO localhost", "250", "EHLO")?;
+    if let (Some(user), Some(pass)) = (&smtp.username, &smtp.password) {
+        let auth = format!("\0{}\0{}", user, pass);
+        expect(
+            &mut stream,
+            &mut reader,
+            &format!("AUTH PLAIN {}", base64_encode(auth.as_bytes())),
+            "235",
+            "authentication",
+        )?;
+    }
+    expect(
+        &mut stream,
+        &mut reader,
+        &format!("MAIL FROM:<{}>", from),
+        "250",
+        "MAIL FROM",
+    )?;
+    expect(
+        &mut stream,
+        &mut reader,
+        &format!("RCPT TO:<{}>", to),
+        "250",
+        "RCPT TO",
+    )?;
+    expect(&mut stream, &mut reader, "DATA", "354", "DATA")?;
+
+    let message = format!(
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{}\r\n.\r\n",
+        from,
+        to,
+        subject,
+        Utc::now().to_rfc3339(),
+        body
+    );
+    stream
+        .write_all(message.as_bytes())
+        .map_err(|e| format!("SMTP write failed: {}", e))?;
+    stream.flush().ok();
+
+    expect(&mut stream, &mut reader, "", "250", "message delivery")?;
+    let _ = expect(&mut stream, &mut reader, "QUIT", "221", "QUIT");
+    Ok(format!("sent via SMTP {}:{}", smtp.host, smtp.port))
+}
+
+/// RFC 4648 base64 encoding (used for SMTP AUTH PLAIN).
+fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 fn channel_kind(config: &ChannelConfig) -> String {
@@ -662,6 +867,7 @@ mod tests {
                     to: "team@example.com".to_string(),
                     from: "agenthub@example.com".to_string(),
                     subject_prefix: Some("[AGENTHUB] ".to_string()),
+                    smtp: None,
                 },
             )
             .unwrap();
@@ -733,6 +939,126 @@ mod tests {
         // Disabled channels are skipped
         notifier.set_channel_enabled("log", false).unwrap();
         assert!(notifier.send(&report, true).unwrap().is_empty());
+    }
+
+    /// A minimal SMTP server that captures the DATA payload, so the direct
+    /// SMTP delivery path can be exercised without an external MTA.
+    fn fake_smtp_server() -> (u16, std::sync::mpsc::Receiver<String>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut data = String::new();
+            let mut in_data = false;
+            writeln!(stream, "220 localhost ESMTP test").unwrap();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                let line = line.trim_end();
+                if in_data {
+                    if line == "." {
+                        in_data = false;
+                        writeln!(stream, "250 queued").unwrap();
+                    } else {
+                        data.push_str(line);
+                        data.push('\n');
+                    }
+                    continue;
+                }
+                if line.starts_with("EHLO") || line.starts_with("HELO") {
+                    writeln!(stream, "250-localhost").unwrap();
+                    writeln!(stream, "250 AUTH PLAIN LOGIN").unwrap();
+                } else if line.starts_with("AUTH") {
+                    writeln!(stream, "235 2.7.0 ok").unwrap();
+                } else if line.starts_with("MAIL FROM") || line.starts_with("RCPT TO") {
+                    writeln!(stream, "250 ok").unwrap();
+                } else if line == "DATA" {
+                    in_data = true;
+                    writeln!(stream, "354 end with <CR><LF>.<CR><LF>").unwrap();
+                } else if line == "QUIT" {
+                    writeln!(stream, "221 bye").unwrap();
+                    break;
+                } else if !line.is_empty() {
+                    writeln!(stream, "250 ok").unwrap();
+                }
+            }
+            let _ = tx.send(data);
+        });
+        (port, rx)
+    }
+
+    #[test]
+    fn test_email_smtp_direct_delivery() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("config");
+        let notifier = Notifier::new(base.clone());
+        let (port, rx) = fake_smtp_server();
+        notifier
+            .add_channel(
+                "smtp-mail",
+                ChannelConfig::Email {
+                    to: "ops@example.com".to_string(),
+                    from: "agenthub@example.com".to_string(),
+                    subject_prefix: Some("[ALERT] ".to_string()),
+                    smtp: Some(SmtpConfig {
+                        host: "127.0.0.1".to_string(),
+                        port,
+                        username: None,
+                        password: None,
+                        tls: "none".to_string(),
+                    }),
+                },
+            )
+            .unwrap();
+
+        let report = sample_report();
+        let results = notifier.send(&report, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ok, "{:?}", results[0]);
+        assert!(results[0].message.contains("SMTP"), "{:?}", results[0]);
+        // Nothing was spooled to the outbox.
+        assert!(!notifier.outbox_dir().exists());
+
+        // The fake server captured the message body.
+        let delivered = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(delivered.contains("AgentHub alert notification"));
+        assert!(delivered.contains("ops@example.com"));
+        assert!(delivered.contains("WARN"), "delivered: {delivered}");
+    }
+
+    #[test]
+    fn test_email_smtp_bad_server_reports_failure() {
+        let temp = TempDir::new().unwrap();
+        let notifier = Notifier::new(temp.path().join("config"));
+        // Nothing listens on this port: the send must fail gracefully.
+        notifier
+            .add_channel(
+                "dead",
+                ChannelConfig::Email {
+                    to: "x@example.com".to_string(),
+                    from: "y@example.com".to_string(),
+                    subject_prefix: None,
+                    smtp: Some(SmtpConfig {
+                        host: "127.0.0.1".to_string(),
+                        port: 1,
+                        username: None,
+                        password: None,
+                        tls: "none".to_string(),
+                    }),
+                },
+            )
+            .unwrap();
+
+        let report = sample_report();
+        let results = notifier.send(&report, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].ok, "{:?}", results[0]);
+        assert!(results[0].message.contains("SMTP"));
     }
 
     #[test]
@@ -841,6 +1167,7 @@ mod tests {
                     to: "team@example.com".to_string(),
                     from: "agenthub@example.com".to_string(),
                     subject_prefix: Some("[AGENTHUB] ".to_string()),
+                    smtp: None,
                 },
             )
             .unwrap();

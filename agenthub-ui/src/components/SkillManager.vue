@@ -71,6 +71,7 @@ async function toggleSkill(skill: SkillInfo) {
 }
 
 async function deleteSkill(name: string) {
+  if (!confirm(`Delete skill '${name}'? This cannot be undone.`)) return
   loading.value = true
   try {
     await invoke('delete_skill', { name })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import PageHeader from './common/PageHeader.vue'
 import { useTauriApi } from '../composables/useTauriApi'
 import type { StatusOverview, AuditInfo, TrendPoint, BudgetReport, MonitorReport } from '../types'
@@ -38,7 +38,12 @@ const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 
+let auditTimer: ReturnType<typeof setTimeout> | null = null
+
 onMounted(loadAll)
+onUnmounted(() => {
+  if (auditTimer) clearTimeout(auditTimer)
+})
 
 async function loadAll() {
   await Promise.all([loadOverview(), loadAudit(), loadBudget(), loadTrend()])
@@ -82,12 +87,21 @@ async function loadBudget() {
 }
 
 async function saveBudget() {
+  // v-model.number yields '' for cleared inputs; normalize to null so the
+  // backend's Option<f64> receives a valid value instead of a string.
+  const daily = typeof budgetDaily.value === 'number' && !Number.isNaN(budgetDaily.value) ? budgetDaily.value : null
+  const monthly = typeof budgetMonthly.value === 'number' && !Number.isNaN(budgetMonthly.value) ? budgetMonthly.value : null
   try {
-    budget.value = await api.setSessionBudget(budgetDaily.value, budgetMonthly.value)
+    budget.value = await api.setSessionBudget(daily, monthly)
     notice.value = 'Budget updated'
   } catch (err) {
     error.value = `Failed to save budget: ${err}`
   }
+}
+
+function scheduleAuditReload() {
+  if (auditTimer) clearTimeout(auditTimer)
+  auditTimer = setTimeout(loadAudit, 300)
 }
 
 async function loadTrend() {
@@ -360,14 +374,14 @@ function fmtTime(ts: string): string {
           class="filter-input"
           placeholder="Action filter (e.g. install)"
           aria-label="Filter by action"
-          @input="loadAudit"
+          @input="scheduleAuditReload"
         />
         <input
           v-model="auditTarget"
           class="filter-input"
           placeholder="Target filter (e.g. agent id)"
           aria-label="Filter by target"
-          @input="loadAudit"
+          @input="scheduleAuditReload"
         />
         <select v-model.number="auditDays" class="filter-select" aria-label="Time range" @change="loadAudit">
           <option :value="null">Any time</option>

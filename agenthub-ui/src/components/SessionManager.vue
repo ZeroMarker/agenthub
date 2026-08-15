@@ -57,7 +57,8 @@ async function createSession() {
   }
 }
 
-async function deleteSession(id: string) {
+async function deleteSession(id: string, title?: string) {
+  if (!confirm(`Delete session${title ? ` '${title}'` : ''}? This cannot be undone.`)) return
   loading.value = true
   try {
     await invoke('delete_session', { id })
@@ -124,7 +125,12 @@ onMounted(loadSessions)
             v-for="session in sessions"
             :key="session.id"
             :class="['session-item', { active: selectedSession?.id === session.id }]"
+            role="button"
+            tabindex="0"
+            :aria-label="`View session ${session.title}`"
             @click="selectSession(session)"
+            @keydown.enter.prevent="selectSession(session)"
+            @keydown.space.prevent="selectSession(session)"
           >
             <div class="session-info">
               <span class="session-title">{{ session.title }}</span>
@@ -162,7 +168,7 @@ onMounted(loadSessions)
         </div>
 
         <div class="actions">
-          <button class="delete-btn" @click="deleteSession(selectedSession.id)" :disabled="loading">
+          <button class="delete-btn" @click="deleteSession(selectedSession.id, selectedSession.title)" :disabled="loading">
             Delete Session
           </button>
         </div>

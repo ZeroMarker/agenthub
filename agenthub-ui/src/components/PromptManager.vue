@@ -130,7 +130,8 @@ async function createPrompt() {
   }
 }
 
-async function deletePrompt(id: string) {
+async function deletePrompt(id: string, name?: string) {
+  if (!confirm(`Delete prompt${name ? ` '${name}'` : ''}? This cannot be undone.`)) return
   loading.value = true
   try {
     await invoke('delete_prompt', { id })
@@ -214,6 +215,7 @@ async function installCommunity(prompt: CommunityPromptInfo) {
 }
 
 async function deleteCommunity(prompt: CommunityPromptInfo) {
+  if (!confirm(`Delete community prompt '${prompt.id}'? This cannot be undone.`)) return
   communityLoading.value = true
   try {
     await invoke('delete_community_prompt', { id: prompt.id })
@@ -295,7 +297,12 @@ onMounted(loadPrompts)
             v-for="prompt in prompts"
             :key="prompt.id"
             :class="['prompt-item', { active: selectedPrompt?.id === prompt.id }]"
+            role="button"
+            tabindex="0"
+            :aria-label="`View prompt ${prompt.name}`"
             @click="selectPrompt(prompt)"
+            @keydown.enter.prevent="selectPrompt(prompt)"
+            @keydown.space.prevent="selectPrompt(prompt)"
           >
             <div class="prompt-info">
               <span class="prompt-name">{{ prompt.name }}</span>
@@ -327,7 +334,7 @@ onMounted(loadPrompts)
         </div>
 
         <div class="actions">
-          <button class="delete-btn" @click="deletePrompt(selectedPrompt.id)" :disabled="loading">
+          <button class="delete-btn" @click="deletePrompt(selectedPrompt.id, selectedPrompt.name)" :disabled="loading">
             Delete
           </button>
         </div>
@@ -348,8 +355,9 @@ onMounted(loadPrompts)
     <!-- ============ Community ============ -->
     <template v-else-if="view === 'community'">
       <div class="actions">
-        <span class="hint">Community prompts are local snapshots you can publish and install — share the
-        <code>prompts/community</code> directory (e.g. via git) to collaborate offline.</span>
+        <span class="hint">Community prompts are local snapshots you can publish and install, or sync with a
+        remote registry via <code>agenthub prompt community pull|push &lt;url&gt;</code> (see
+        <code>docs/remote-registry.md</code>).</span>
       </div>
       <div class="content-layout">
         <div class="prompt-list">

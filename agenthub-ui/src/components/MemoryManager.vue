@@ -107,7 +107,8 @@ async function createMemory() {
   }
 }
 
-async function deleteMemory(path: string) {
+async function deleteMemory(path: string, title?: string) {
+  if (!confirm(`Delete memory${title ? ` '${title}'` : ''}? This cannot be undone.`)) return
   loading.value = true
   try {
     await invoke('delete_memory', { path })
@@ -127,6 +128,7 @@ function selectMemory(memory: MemoryInfo) {
 
 function setScope(scope: string) {
   activeScope.value = scope
+  searchQuery.value = ''
   loadMemories(scope)
 }
 
@@ -265,7 +267,12 @@ onMounted(() => loadMemories('all'))
             v-for="memory in memories"
             :key="memory.path"
             :class="['memory-item', { active: selectedMemory?.path === memory.path }]"
+            role="button"
+            tabindex="0"
+            :aria-label="`View memory ${memory.title}`"
             @click="selectMemory(memory)"
+            @keydown.enter.prevent="selectMemory(memory)"
+            @keydown.space.prevent="selectMemory(memory)"
           >
             <div class="memory-info">
               <span class="memory-title">
@@ -304,7 +311,7 @@ onMounted(() => loadMemories('all'))
         </div>
 
         <div class="actions">
-          <button class="delete-btn" @click="deleteMemory(selectedMemory.path)" :disabled="loading">
+          <button class="delete-btn" @click="deleteMemory(selectedMemory.path, selectedMemory.title)" :disabled="loading">
             Delete
           </button>
         </div>

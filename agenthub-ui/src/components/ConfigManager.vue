@@ -196,7 +196,12 @@ onMounted(loadAgents)
               v-for="agent in filteredAgents"
               :key="agent.id"
               :class="{ active: selectedAgent?.id === agent.id, installed: isInstalled(agent.id) }"
+              role="button"
+              tabindex="0"
+              :aria-label="`View config for ${agent.name}`"
               @click="selectAgent(agent)"
+              @keydown.enter.prevent="selectAgent(agent)"
+              @keydown.space.prevent="selectAgent(agent)"
             >
               <div class="agent-info">
                 <span class="agent-name">

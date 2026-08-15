@@ -150,11 +150,12 @@ async function marketInstall(name: string) {
 }
 
 async function marketRate(name: string) {
+  const rating = Math.min(5, Math.max(1, Math.round(rateValue.value || 5)))
   marketLoading.value = true
   try {
-    await invoke('market_rate', { name, rating: rateValue.value, rater: 'gui' })
+    await invoke('market_rate', { name, rating, rater: 'gui' })
     await loadMarket()
-    showMessage(`Rated ${name} ${rateValue.value}★`, 'success')
+    showMessage(`Rated ${name} ${rating}★`, 'success')
   } catch (error) {
     showMessage(`Failed to rate: ${error}`, 'error')
   } finally {
@@ -204,6 +205,7 @@ async function togglePlugin(plugin: PluginInfo) {
 }
 
 async function unregisterPlugin(name: string) {
+  if (!confirm(`Unregister plugin '${name}'? Its hooks will no longer run.`)) return
   pluginLoading.value = true
   try {
     await invoke('unregister_plugin', { name })
@@ -286,6 +288,7 @@ async function toggleChannel(channel: NotifyChannel) {
 }
 
 async function removeChannel(id: string) {
+  if (!confirm(`Remove notification channel '${id}'?`)) return
   notifyLoading.value = true
   try {
     await invoke('remove_notify_channel', { id })
@@ -369,6 +372,7 @@ async function createUser() {
 }
 
 async function deleteUser(id: string) {
+  if (!confirm(`Delete user '${id}'? Their permissions will be removed too.`)) return
   usersLoading.value = true
   try {
     await invoke('delete_user', { id })

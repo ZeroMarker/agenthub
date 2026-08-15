@@ -46,6 +46,7 @@ const railExpanded = ref(false)
           @click="activeView = item.id as typeof activeView"
           @keydown.enter="activeView = item.id as typeof activeView"
           :aria-label="`${item.label} view`"
+          :aria-current="activeView === item.id ? 'page' : undefined"
           :title="item.label"
         >
           <span class="nav-rail-icon">{{ item.icon }}</span>

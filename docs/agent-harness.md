@@ -249,12 +249,12 @@ updated_at: 2026-07-07T10:00:00Z
 | `feedback` | 用户反馈 |
 | `free` | 默认自由文本 |
 
-搜索会匹配标题、正文和标签。当前实现是文件扫描和字符串匹配，语义检索和向量索引仍属于后续规划。
+搜索支持文件扫描/BM25、向量和混合检索；向量索引持久化于 `memory/vector_index.json`，知识图谱持久化于 `memory/graph.json`。
 
 ## 安全和隐私约定
 
 - 不要把 API Key、令牌、Cookie 或私钥直接写入 `settings`、`memory`、`session` 或 `SKILL.md`。
-- 统一配置里的 `secrets` 当前只是序列化字段，生产级密钥应使用环境变量或系统密钥链。
+- 统一配置里的 `secrets` 仅保留兼容字段；生产级密钥应使用 `SecretStore` 的文件密钥链或 OS keyring 后端。
 - 原生配置保存会覆盖第三方 Agent 文件，修改前应提示用户确认。
 - `sessions` 和 `memory` 可能包含用户输入、项目路径和业务上下文，导出或同步前应做脱敏。
 - 第三方 skill 的依赖检查命令会被执行，安装前应确认来源可信。
@@ -269,3 +269,4 @@ updated_at: 2026-07-07T10:00:00Z
 | Skills | `agenthub-core/src/skill.rs` |
 | Memory | `agenthub-core/src/memory.rs` |
 | Prompt 模板 | `agenthub-core/src/prompt.rs` |
+| 远程 registry | `agenthub-core/src/remote.rs`、`docs/remote-registry.md` |

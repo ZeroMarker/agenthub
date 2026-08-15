@@ -385,6 +385,23 @@ enum CommunityCmd {
     },
     /// Delete a community prompt
     Delete { id: String },
+    /// Pull prompt snapshots from a remote JSON registry
+    Pull {
+        url: String,
+        /// Bearer token (prefer an environment variable in shell history)
+        #[arg(long, env = "AGENTHUB_REMOTE_TOKEN")]
+        token: Option<String>,
+        /// Overwrite local snapshots even when their version is newer/equal
+        #[arg(long)]
+        force: bool,
+    },
+    /// Push local prompt snapshots to a remote JSON registry
+    Push {
+        url: String,
+        /// Bearer token (prefer an environment variable in shell history)
+        #[arg(long, env = "AGENTHUB_REMOTE_TOKEN")]
+        token: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -563,6 +580,23 @@ enum MarketCmd {
         /// Path to the directory containing SKILL.md
         dir: PathBuf,
     },
+    /// Pull UTF-8 skill packages from a remote JSON registry
+    Pull {
+        url: String,
+        /// Bearer token (prefer an environment variable in shell history)
+        #[arg(long, env = "AGENTHUB_REMOTE_TOKEN")]
+        token: Option<String>,
+        /// Replace packages with the same name/version
+        #[arg(long)]
+        force: bool,
+    },
+    /// Push local UTF-8 skill packages to a remote JSON registry
+    Push {
+        url: String,
+        /// Bearer token (prefer an environment variable in shell history)
+        #[arg(long, env = "AGENTHUB_REMOTE_TOKEN")]
+        token: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -586,6 +620,23 @@ enum PluginArgs {
     /// Run all hooks registered for an event (on_install, on_uninstall,
     /// on_session_end, on_monitor, on_backup)
     Run { event: String },
+    /// Pull UTF-8 plugin packages from a remote JSON registry (installed disabled)
+    Pull {
+        url: String,
+        /// Bearer token (prefer an environment variable in shell history)
+        #[arg(long, env = "AGENTHUB_REMOTE_TOKEN")]
+        token: Option<String>,
+        /// Replace packages with the same name/version
+        #[arg(long)]
+        force: bool,
+    },
+    /// Push local UTF-8 plugin packages to a remote JSON registry
+    Push {
+        url: String,
+        /// Bearer token (prefer an environment variable in shell history)
+        #[arg(long, env = "AGENTHUB_REMOTE_TOKEN")]
+        token: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2750,6 +2801,25 @@ pub fn cmd_community_delete(base_dir: &Path, id: &str) -> String {
     }
 }
 
+pub fn cmd_community_pull(base_dir: &Path, url: &str, token: Option<&str>, force: bool) -> String {
+    let community = CommunityManager::new(base_dir.join("prompts"));
+    match community.pull_remote(url, token, force) {
+        Ok(report) => format!(
+            "✅ Pulled community prompts: {} added, {} updated, {} skipped",
+            report.added, report.updated, report.skipped
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_community_push(base_dir: &Path, url: &str, token: Option<&str>) -> String {
+    let community = CommunityManager::new(base_dir.join("prompts"));
+    match community.push_remote(url, token) {
+        Ok(report) => format!("✅ Pushed {} community prompt(s)", report.uploaded),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
 pub fn cmd_market_refresh(base_dir: &Path) -> String {
     let manager = MarketplaceManager::new(base_dir.join("skills"));
     match manager.refresh() {
@@ -2757,6 +2827,25 @@ pub fn cmd_market_refresh(base_dir: &Path) -> String {
             "✅ Marketplace index refreshed: {} package(s), {} install(s), {} rated",
             stats.package_count, stats.total_installs, stats.rated_count
         ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_pull(base_dir: &Path, url: &str, token: Option<&str>, force: bool) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    match manager.pull_remote(url, token, force) {
+        Ok(report) => format!(
+            "✅ Pulled skill packages: {} added, {} updated, {} skipped",
+            report.added, report.updated, report.skipped
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_market_push(base_dir: &Path, url: &str, token: Option<&str>) -> String {
+    let manager = MarketplaceManager::new(base_dir.join("skills"));
+    match manager.push_remote(url, token) {
+        Ok(report) => format!("✅ Pushed {} skill package(s)", report.uploaded),
         Err(e) => format!("Error: {}", e),
     }
 }
@@ -2974,6 +3063,25 @@ pub fn cmd_plugin_run(base_dir: &Path, event: &str) -> String {
             }
             out
         }
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_plugin_pull(base_dir: &Path, url: &str, token: Option<&str>, force: bool) -> String {
+    let manager = PluginManager::new(base_dir.join("skills"));
+    match manager.pull_remote(url, token, force) {
+        Ok(report) => format!(
+            "✅ Pulled plugin packages: {} added, {} updated, {} skipped — new plugins are installed disabled; run `plugin enable <name>` to opt in to executing their hooks",
+            report.added, report.updated, report.skipped
+        ),
+        Err(e) => format!("Error: {}", e),
+    }
+}
+
+pub fn cmd_plugin_push(base_dir: &Path, url: &str, token: Option<&str>) -> String {
+    let manager = PluginManager::new(base_dir.join("skills"));
+    match manager.push_remote(url, token) {
+        Ok(report) => format!("✅ Pushed {} plugin package(s)", report.uploaded),
         Err(e) => format!("Error: {}", e),
     }
 }
@@ -3388,6 +3496,12 @@ fn main() {
                     cmd_community_install(&data_dir(), &id, new_id.as_deref(), force)
                 }
                 CommunityCmd::Delete { id } => cmd_community_delete(&data_dir(), &id),
+                CommunityCmd::Pull { url, token, force } => {
+                    cmd_community_pull(&data_dir(), &url, token.as_deref(), force)
+                }
+                CommunityCmd::Push { url, token } => {
+                    cmd_community_push(&data_dir(), &url, token.as_deref())
+                }
             },
         },
         Commands::Memory(cmd) => match cmd {
@@ -3464,6 +3578,12 @@ fn main() {
                 MarketCmd::AddPackage { name, dir } => {
                     cmd_market_add_package(&data_dir(), &name, &dir)
                 }
+                MarketCmd::Pull { url, token, force } => {
+                    cmd_market_pull(&data_dir(), &url, token.as_deref(), force)
+                }
+                MarketCmd::Push { url, token } => {
+                    cmd_market_push(&data_dir(), &url, token.as_deref())
+                }
             },
         },
         Commands::Plugin(cmd) => match cmd {
@@ -3474,6 +3594,12 @@ fn main() {
             PluginArgs::Enable { name } => cmd_plugin_enable(&data_dir(), &name, true),
             PluginArgs::Disable { name } => cmd_plugin_enable(&data_dir(), &name, false),
             PluginArgs::Run { event } => cmd_plugin_run(&data_dir(), &event),
+            PluginArgs::Pull { url, token, force } => {
+                cmd_plugin_pull(&data_dir(), &url, token.as_deref(), force)
+            }
+            PluginArgs::Push { url, token } => {
+                cmd_plugin_push(&data_dir(), &url, token.as_deref())
+            }
         },
         Commands::Notify(cmd) => match cmd {
             NotifyArgs::List => cmd_notify_list(&data_dir()),

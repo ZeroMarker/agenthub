@@ -16,6 +16,7 @@ pub mod notify;
 pub mod overview;
 pub mod plugin;
 pub mod prompt;
+pub mod remote;
 pub mod secrets;
 pub mod session;
 pub mod skill;
@@ -43,7 +44,9 @@ pub use graph::{
     EntityKind, GraphEdge, GraphNode, GraphSummary, KnowledgeGraph, KnowledgeGraphBuilder,
 };
 pub use installer::Installer;
-pub use marketplace::{MarketplaceManager, MarketplaceSkill, MarketplaceStats, SkillRating};
+pub use marketplace::{
+    MarketplaceManager, MarketplaceSkill, MarketplaceStats, RemoteSkillPackage, SkillRating,
+};
 pub use memory::{
     cosine_similarity, embed_text, MemoryEntry, MemoryManager, MemoryMatch, MemoryScope,
     MemoryStats, MemoryType, VectorIndex, VectorIndexEntry, VectorIndexSummary, EMBEDDING_DIM,
@@ -54,13 +57,14 @@ pub use notify::{
 };
 pub use overview::{CatalogOverview, OverviewReport, StatusOverview, TrendPoint};
 pub use plugin::{
-    Plugin, PluginHook, PluginManager, PluginManifest, PluginRunResult, HOOK_BACKUP, HOOK_INSTALL,
-    HOOK_MONITOR, HOOK_SESSION_END, HOOK_UNINSTALL,
+    Plugin, PluginHook, PluginManager, PluginManifest, PluginRunResult, RemotePluginPackage,
+    HOOK_BACKUP, HOOK_INSTALL, HOOK_MONITOR, HOOK_SESSION_END, HOOK_UNINSTALL,
 };
 pub use prompt::{
     ImportSummary, PromptEffects, PromptExportBundle, PromptExtraction, PromptManager,
     PromptOutcome, PromptTemplate, PromptUsage, PromptVariable, PromptVersion,
 };
+pub use remote::RemoteSyncReport;
 pub use secrets::{
     PreviousSecret, RotationResult as SecretRotationResult, SecretBackend, SecretEntry, SecretInfo,
     SecretStore,

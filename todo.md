@@ -28,15 +28,19 @@
 ### P2：产品能力增强
 
 - [x] Config：增加 OS keyring 后端，保留文件密钥存储作为兼容回退（`AGENTHUB_SECRET_BACKEND=auto|file|keyring`，auto 探测不可用自动回退；值以单一 keyring 条目存储永不落盘；CLI `config secret backend [--check] [--force]`）
-- [ ] Skill：在线技能市场与插件市场
+- [x] Skill：在线技能包注册表（HTTP JSON registry pull/push，UTF-8 包、路径/大小校验；协议见 `docs/remote-registry.md`）
+- [x] Plugin：远程插件注册表（HTTP JSON registry pull/push；安装默认禁用、`.enabled` 不随包导出，钩子仅在显式启用后执行；拒绝未知钩子事件/路径穿越/二进制与大文件）
+- [ ] Plugin：签名、撤销与信任模型（插件可执行命令，需签名校验、撤销列表、升级回滚与首次启用权限确认）
 - [x] Skill：项目级 / 用户级 / 全局级技能作用域（`SkillScope`：project > user > global 解析优先级；`AGENTHUB_PROJECT_SKILLS_DIR`/`AGENTHUB_GLOBAL_SKILLS_DIR` 可注入；CLI `skill list|install|uninstall|enable|disable --scope`）
 - [x] Notify：SMTP 直接发送（`--smtp-host/--smtp-port/--smtp-user/--smtp-password/--smtp-tls`；零依赖原生 SMTP 客户端：EHLO/AUTH PLAIN/MAIL/RCPT/DATA/QUIT；配置 SMTP 时直发，否则仍落盘 .eml）
 - [x] Session：API 调用次数、成本趋势与导出（`SessionUsage.calls` 每次调用递增；`session usage|trend|export-usage` + 聚合汇总/按日趋势/JSON 导出）
-- [ ] Prompt：社区远程推送与同步渠道
+- [x] Prompt：社区远程推送与同步渠道（HTTP JSON registry pull/push，版本跳过/强制覆盖、Bearer token）
 - [x] Overview：交互式 Web 仪表盘与指标钻取（7/30/90 天窗口切换、SVG 成本/令牌图、可排序趋势表、卡片钻取：Agent/技能/分 Agent 会话用量/最近审计；数据内嵌 JSON 无服务器）
 - [ ] Beta：邀请 3–5 名真实用户完成安装、查询、升级和卸载任务测试
 
 ### 最近验证
+
+- [ ] 远程 registry：待在真实 HTTPS 服务上验证认证、冲突和大包拒绝流程（本地 HTTP 协议单测已覆盖）
 
 - [x] 2026-08-14 本机验证：cargo test --workspace 全绿（330 测试：267 core + 49 cli + 9 集成 + 5 tauri），fmt 干净，all-targets clippy 0 警告；覆盖率门禁通过；keyring 后端本机端到端验证（值入 OS keyring、无明文文件）；`status --html` 交互式仪表盘生成 + 内嵌 JSON 解析验证
 

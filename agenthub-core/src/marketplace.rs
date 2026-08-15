@@ -15,11 +15,14 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::remote::{self, RemoteSyncReport};
 use crate::skill::SkillManager;
-use crate::storage::is_safe_id;
+use crate::storage::{atomic_write, is_safe_id, is_safe_relative_path};
 
 /// A skill available in the marketplace (as indexed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +66,28 @@ pub struct MarketplaceStats {
     pub rated_count: usize,
     pub top_rated: Vec<MarketplaceSkill>,
 }
+
+/// A portable, UTF-8 skill package used by the remote registry protocol.
+/// Binary files are intentionally not accepted by this first protocol
+/// version; executable plugins require a separate signed package format.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteSkillPackage {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Relative path -> UTF-8 contents. SKILL.md is mandatory.
+    pub files: BTreeMap<String, String>,
+}
+
+const MAX_REMOTE_PACKAGE_FILES: usize = 1024;
+const MAX_REMOTE_FILE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct MarketplaceIndex {
@@ -321,6 +346,217 @@ impl MarketplaceManager {
         Ok(())
     }
 
+    fn parse_remote(value: Value) -> Result<Vec<RemoteSkillPackage>> {
+        let packages = if value.is_array() {
+            value
+        } else {
+            value.get("packages").cloned().ok_or_else(|| {
+                AgentHubError::SkillError(
+                    "Remote skill registry must be an array or an object with a 'packages' array"
+                        .to_string(),
+                )
+            })
+        };
+        serde_json::from_value(packages).map_err(|e| {
+            AgentHubError::SkillError(format!("Invalid remote skill registry: {e}"))
+        })
+    }
+
+    fn validate_remote_package(package: &RemoteSkillPackage) -> Result<()> {
+        Self::validate_name(&package.name)?;
+        if package.files.is_empty() || package.files.len() > MAX_REMOTE_PACKAGE_FILES {
+            return Err(AgentHubError::SkillError(format!(
+                "Remote package '{}' must contain 1-{} files",
+                package.name, MAX_REMOTE_PACKAGE_FILES
+            )));
+        }
+        let manifest = package.files.get("SKILL.md").ok_or_else(|| {
+            AgentHubError::SkillError(format!(
+                "Remote package '{}' is missing SKILL.md",
+                package.name
+            ))
+        })?;
+        if manifest.len() > MAX_REMOTE_FILE_BYTES {
+            return Err(AgentHubError::SkillError("Remote SKILL.md is too large".to_string()));
+        }
+        let parsed = SkillManager::parse_manifest_pub(manifest)?;
+        if parsed.name != package.name {
+            return Err(AgentHubError::SkillError(format!(
+                "Remote manifest name '{}' does not match package name '{}'",
+                parsed.name, package.name
+            )));
+        }
+        if !package.version.is_empty() && parsed.version != package.version {
+            return Err(AgentHubError::SkillError(format!(
+                "Remote package version '{}' does not match manifest version '{}'",
+                package.version, parsed.version
+            )));
+        }
+        for (path, content) in &package.files {
+            let hidden_component = Path::new(path).components().any(|component| {
+                component
+                    .as_os_str()
+                    .to_string_lossy()
+                    .starts_with('.')
+            });
+            if path.contains('\\') || !is_safe_relative_path(Path::new(path)) || hidden_component {
+                return Err(AgentHubError::SkillError(format!(
+                    "Unsafe remote package path: {path}"
+                )));
+            }
+            if content.len() > MAX_REMOTE_FILE_BYTES {
+                return Err(AgentHubError::SkillError(format!(
+                    "Remote package file '{}' is too large",
+                    path
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn write_remote_package(&self, package: &RemoteSkillPackage) -> Result<()> {
+        Self::validate_remote_package(package)?;
+        let destination = self.packages_dir().join(&package.name);
+        if destination.exists() {
+            std::fs::remove_dir_all(&destination).map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to replace remote package: {e}"))
+            })?;
+        }
+        for (relative, content) in &package.files {
+            let path = destination.join(relative);
+            atomic_write(&path, content).map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to write remote package file: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Pull UTF-8 skill packages from a remote registry.
+    ///
+    /// The endpoint may return an array or
+    /// `{ "version": 1, "packages": [...] }`. Packages are validated before
+    /// any file is written, and path traversal, hidden paths and oversized
+    /// files are rejected.
+    pub fn pull_remote(
+        &self,
+        url: &str,
+        token: Option<&str>,
+        force: bool,
+    ) -> Result<RemoteSyncReport> {
+        let value = remote::get_json(url, token)
+            .map_err(|e| AgentHubError::SkillError(format!("Remote skill pull failed: {e}")))?;
+        let packages = Self::parse_remote(value)?;
+        // Validate the complete batch before changing local storage.
+        for package in &packages {
+            Self::validate_remote_package(package)?;
+        }
+        let old_index = self.load_index().unwrap_or_default();
+        let mut report = RemoteSyncReport::default();
+        for package in packages {
+            let previous = old_index.skills.iter().find(|s| s.name == package.name);
+            if previous.is_some_and(|entry| entry.version == package.version) && !force {
+                report.skipped += 1;
+                continue;
+            }
+            self.write_remote_package(&package)?;
+            if previous.is_some() {
+                report.updated += 1;
+            } else {
+                report.added += 1;
+            }
+        }
+        self.refresh()?;
+        Ok(report)
+    }
+
+    fn collect_files(root: &Path, current: &Path, files: &mut BTreeMap<String, String>) -> Result<()> {
+        for entry in std::fs::read_dir(current).map_err(|e| {
+            AgentHubError::SkillError(format!("Failed to read package directory: {e}"))
+        })? {
+            let path = entry
+                .map_err(|e| AgentHubError::SkillError(format!("Failed to read package entry: {e}")))?
+                .path();
+            if path.is_dir() {
+                Self::collect_files(root, &path, files)?;
+                continue;
+            }
+            if !path.is_file() {
+                continue;
+            }
+            let relative = path.strip_prefix(root).map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to calculate package path: {e}"))
+            })?;
+            let relative_string = relative.to_string_lossy().replace('\\', "/");
+            let hidden_component = Path::new(&relative_string).components().any(|component| {
+                component
+                    .as_os_str()
+                    .to_string_lossy()
+                    .starts_with('.')
+            });
+            if !is_safe_relative_path(Path::new(&relative_string)) || hidden_component {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                AgentHubError::SkillError(format!("Remote protocol only supports UTF-8 files: {e}"))
+            })?;
+            if content.len() > MAX_REMOTE_FILE_BYTES {
+                return Err(AgentHubError::SkillError(format!(
+                    "Package file '{}' is too large",
+                    relative_string
+                )));
+            }
+            files.insert(relative_string, content);
+            if files.len() > MAX_REMOTE_PACKAGE_FILES {
+                return Err(AgentHubError::SkillError("Package contains too many files".to_string()));
+            }
+        }
+        Ok(())
+    }
+
+    /// Push all local packages to a remote registry.
+    pub fn push_remote(&self, url: &str, token: Option<&str>) -> Result<RemoteSyncReport> {
+        let mut packages = Vec::new();
+        let root = self.packages_dir();
+        if root.exists() {
+            for entry in std::fs::read_dir(&root).map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to read packages dir: {e}"))
+            })? {
+                let path = entry
+                    .map_err(|e| AgentHubError::SkillError(format!("Failed to read package entry: {e}")))?
+                    .path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                Self::validate_name(&name)?;
+                let mut files = BTreeMap::new();
+                Self::collect_files(&path, &path, &mut files)?;
+                let manifest = SkillManager::parse_manifest_pub(files.get("SKILL.md").ok_or_else(|| {
+                    AgentHubError::SkillError(format!("Package '{}' is missing SKILL.md", name))
+                })?)?;
+                packages.push(RemoteSkillPackage {
+                    name,
+                    version: manifest.version,
+                    description: manifest.description,
+                    author: manifest.author,
+                    tags: manifest.tags,
+                    category: manifest.category,
+                    files,
+                });
+            }
+        }
+        let payload = serde_json::json!({ "version": 1, "packages": packages });
+        remote::post_json(url, token, &payload)
+            .map_err(|e| AgentHubError::SkillError(format!("Remote skill push failed: {e}")))?;
+        Ok(RemoteSyncReport {
+            uploaded: packages.len(),
+            ..RemoteSyncReport::default()
+        })
+    }
+
     // ---- ratings ----------------------------------------------------------
 
     fn ratings_path(&self, name: &str) -> PathBuf {
@@ -421,7 +657,27 @@ impl MarketplaceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
     use tempfile::TempDir;
+
+    fn registry_server(body: &'static str, method: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let size = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..size]).starts_with(method));
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        format!("http://{address}/skills")
+    }
 
     fn write_package(dir: &Path, name: &str, tags: &[&str]) {
         let pkg = dir.join("marketplace").join("packages").join(name);
@@ -580,5 +836,52 @@ mod tests {
         std::fs::write(mm.marketplace_dir().join("index.json"), "{ bad json !!").unwrap();
         // `info` reads the index directly, so a corrupt index must error.
         assert!(mm.info("anything").is_err());
+    }
+
+    #[test]
+    fn test_remote_package_validation_rejects_traversal_and_mismatch() {
+        let valid_manifest = "---\nname: remote-skill\nversion: 1.0.0\n---\n# Skill\n";
+        let mut files = BTreeMap::new();
+        files.insert("SKILL.md".to_string(), valid_manifest.to_string());
+        files.insert("scripts/run.sh".to_string(), "echo ok".to_string());
+        let valid = RemoteSkillPackage {
+            name: "remote-skill".to_string(),
+            version: "1.0.0".to_string(),
+            description: String::new(),
+            author: None,
+            tags: Vec::new(),
+            category: None,
+            files,
+        };
+        assert!(MarketplaceManager::validate_remote_package(&valid).is_ok());
+
+        let mut unsafe_package = valid.clone();
+        unsafe_package.files.insert("../escape".to_string(), "bad".to_string());
+        assert!(MarketplaceManager::validate_remote_package(&unsafe_package).is_err());
+        unsafe_package.files.remove("../escape");
+        unsafe_package.files.insert(r"..\\escape".to_string(), "bad".to_string());
+        assert!(MarketplaceManager::validate_remote_package(&unsafe_package).is_err());
+
+        let mut mismatch = valid;
+        mismatch.name = "another-name".to_string();
+        assert!(MarketplaceManager::validate_remote_package(&mismatch).is_err());
+    }
+
+    #[test]
+    fn test_remote_pull_and_push() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("skills");
+        let manager = MarketplaceManager::new(base.clone());
+        let body = r#"{"version":1,"packages":[{"name":"remote-skill","version":"1.0.0","description":"Remote","files":{"SKILL.md":"---\nname: remote-skill\nversion: 1.0.0\n---\n# Remote\n"}}]}"#;
+        let report = manager
+            .pull_remote(&registry_server(body, "GET"), Some("token"), false)
+            .unwrap();
+        assert_eq!(report.added, 1);
+        assert_eq!(manager.info("remote-skill").unwrap().version, "1.0.0");
+
+        let pushed = manager
+            .push_remote(&registry_server("{}", "POST"), None)
+            .unwrap();
+        assert_eq!(pushed.uploaded, 1);
     }
 }

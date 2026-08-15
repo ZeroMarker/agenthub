@@ -2,7 +2,7 @@
 
 统一管理多个 AI 编程助手的平台工具，支持命令行（CLI）与桌面图形界面（GUI）。
 
-> **当前版本**：v0.1.0 · 详细路线图见 [PROJECT_PLAN.md](PROJECT_PLAN.md)
+> **当前版本**：v1.4.0 · 详细路线图见 [todo.md](todo.md)（`PROJECT_PLAN.md` 为 v1.0 历史计划）
 
 ---
 
@@ -261,7 +261,7 @@ agenthub <command> [options]
 | `config user` | 用户管理（角色） | `agenthub config user create alice "Alice" --roles viewer` |
 | `config perm` | 细粒度权限 | `agenthub config perm grant alice write --module config` |
 | `prompt publish` | 发布提示词到社区目录 | `agenthub prompt publish review --publisher alice` |
-| `prompt community` | 社区提示词管理 | `agenthub prompt community install review` |
+| `prompt community` | 社区提示词管理（含远程 pull/push） | `agenthub prompt community install review` |
 | `prompt export/import` | 提示词导入导出（含版本） | `agenthub prompt export-all --output p.json` |
 | `memory export/import` | 记忆导入导出 | `agenthub memory import memories.json --merge` |
 | `session budget` | 成本预算/告警 | `agenthub session budget set --daily 5 --monthly 50` |
@@ -269,8 +269,8 @@ agenthub <command> [options]
 | `session usage/trend/export-usage` | API 调用次数、成本趋势与 JSON 导出 | `agenthub session export-usage usage.json` |
 | `skill list/install/uninstall/enable/disable` | 技能管理（`--scope project|user|global` 三级作用域） | `agenthub skill install rust --scope project` |
 | `skill check-compat` | 技能版本兼容检查 | `agenthub skill check-compat *` |
-| `skill market` | 技能市场（搜索/评分/安装统计） | `agenthub skill market search rust` |
-| `plugin` | 插件注册/钩子执行 | `agenthub plugin run on_monitor` |
+| `skill market` | 技能市场（本地/远程同步、搜索/评分/安装统计） | `agenthub skill market search rust` |
+| `plugin` | 插件注册/钩子执行（含远程 pull/push，安装默认禁用、显式启用） | `agenthub plugin pull <url>` |
 | `notify` | 告警推送通道（webhook/email（SMTP 直发或 .eml 落盘）/file，含分级/去重） | `agenthub notify add ops email ops@x.com --smtp-host smtp.x.com` |
 | `prompt effects` | 提示词效果追踪（评分/成功率/成本） | `agenthub prompt effects` |
 | `memory reindex` | 重建向量索引 | `agenthub memory reindex` |
@@ -537,8 +537,8 @@ cd agenthub-ui && npm test
 
 ### 计划中
 
-- 📋 **在线技能市场 / 插件市场** — 需远端服务与信任模型设计
-- 📋 **Prompt 社区远程推送** — 需远程同步通道协议
+- ✅ **插件远程注册表** — HTTP JSON registry，安装默认禁用、显式启用后才执行钩子（签名/撤销待后续）
+- ✅ **Prompt 社区远程推送** — HTTP JSON registry，详见 [docs/remote-registry.md](docs/remote-registry.md)
 - 📋 **Beta 用户测试** — 3–5 名真实用户完成安装/查询/升级/卸载
 
 ### 长期愿景（六大业务模块 + Overview 概览 + 横切能力）

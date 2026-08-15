@@ -8,10 +8,13 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
-use crate::storage::is_safe_id;
+use crate::remote::{self, RemoteSyncReport};
+use crate::storage::{atomic_write, is_safe_id, is_safe_relative_path};
 
 /// Built-in lifecycle hook event names.
 pub const HOOK_INSTALL: &str = "on_install";
@@ -69,6 +72,30 @@ pub struct PluginRunResult {
     pub output: String,
     pub duration_ms: u64,
 }
+
+/// A portable, UTF-8 plugin package used by the remote registry protocol.
+///
+/// Remote plugins are installed *disabled*: the `.enabled` marker is written
+/// only by `enable_plugin`, and `run_hook` never executes hooks of disabled
+/// plugins. Executable content therefore requires an explicit opt-in before
+/// any hook command can run. The `.enabled` marker is intentionally not
+/// exported when pushing packages.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemotePluginPackage {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub min_agenthub_version: Option<String>,
+    /// Relative path -> UTF-8 contents. `plugin.yaml` is mandatory.
+    pub files: BTreeMap<String, String>,
+}
+
+const MAX_REMOTE_PLUGIN_FILES: usize = 1024;
+const MAX_REMOTE_PLUGIN_FILE_BYTES: usize = 4 * 1024 * 1024;
 
 pub struct PluginManager {
     skills_dir: PathBuf,
@@ -241,6 +268,247 @@ impl PluginManager {
         Ok(())
     }
 
+    fn parse_remote(value: Value) -> Result<Vec<RemotePluginPackage>> {
+        let packages = if value.is_array() {
+            value
+        } else {
+            value.get("plugins").cloned().ok_or_else(|| {
+                AgentHubError::SkillError(
+                    "Remote plugin registry must be an array or an object with a 'plugins' array"
+                        .to_string(),
+                )
+            })
+        };
+        serde_json::from_value(packages).map_err(|e| {
+            AgentHubError::SkillError(format!("Invalid remote plugin registry: {e}"))
+        })
+    }
+
+    fn validate_remote_package(package: &RemotePluginPackage) -> Result<()> {
+        Self::validate_name(&package.name)?;
+        if package.files.is_empty() || package.files.len() > MAX_REMOTE_PLUGIN_FILES {
+            return Err(AgentHubError::SkillError(format!(
+                "Remote plugin '{}' must contain 1-{} files",
+                package.name, MAX_REMOTE_PLUGIN_FILES
+            )));
+        }
+        let manifest_yaml = package.files.get("plugin.yaml").ok_or_else(|| {
+            AgentHubError::SkillError(format!(
+                "Remote plugin '{}' is missing plugin.yaml",
+                package.name
+            ))
+        })?;
+        if manifest_yaml.len() > MAX_REMOTE_PLUGIN_FILE_BYTES {
+            return Err(AgentHubError::SkillError(
+                "Remote plugin.yaml is too large".to_string(),
+            ));
+        }
+        let manifest: PluginManifest = serde_yaml::from_str(manifest_yaml).map_err(|e| {
+            AgentHubError::SkillError(format!("Failed to parse remote plugin manifest: {e}"))
+        })?;
+        if manifest.name != package.name {
+            return Err(AgentHubError::SkillError(format!(
+                "Remote manifest name '{}' does not match package name '{}'",
+                manifest.name, package.name
+            )));
+        }
+        if !package.version.is_empty() && manifest.version != package.version {
+            return Err(AgentHubError::SkillError(format!(
+                "Remote package version '{}' does not match manifest version '{}'",
+                package.version, manifest.version
+            )));
+        }
+        for hook in &manifest.hooks {
+            if !matches!(
+                hook.event.as_str(),
+                HOOK_INSTALL | HOOK_UNINSTALL | HOOK_SESSION_END | HOOK_MONITOR | HOOK_BACKUP
+            ) {
+                return Err(AgentHubError::SkillError(format!(
+                    "Remote plugin '{}' declares unknown hook event '{}'",
+                    package.name, hook.event
+                )));
+            }
+        }
+        if let Some(entry) = &manifest.entry {
+            if !is_safe_relative_path(Path::new(entry)) || entry.starts_with('.') {
+                return Err(AgentHubError::SkillError(format!(
+                    "Remote plugin '{}' has an unsafe entry path: {entry}",
+                    package.name
+                )));
+            }
+        }
+        for (path, content) in &package.files {
+            let hidden_component = Path::new(path).components().any(|component| {
+                component.as_os_str().to_string_lossy().starts_with('.')
+            });
+            if path.contains('\\') || !is_safe_relative_path(Path::new(path)) || hidden_component {
+                return Err(AgentHubError::SkillError(format!(
+                    "Unsafe remote plugin path: {path}"
+                )));
+            }
+            if content.len() > MAX_REMOTE_PLUGIN_FILE_BYTES {
+                return Err(AgentHubError::SkillError(format!(
+                    "Remote plugin file '{}' is too large",
+                    path
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn write_remote_package(&self, package: &RemotePluginPackage, enabled: bool) -> Result<()> {
+        Self::validate_remote_package(package)?;
+        let destination = self.plugin_dir(&package.name);
+        if destination.exists() {
+            std::fs::remove_dir_all(&destination).map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to replace remote plugin: {e}"))
+            })?;
+        }
+        for (relative, content) in &package.files {
+            let path = destination.join(relative);
+            atomic_write(&path, content).map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to write remote plugin file: {e}"))
+            })?;
+        }
+        // Preserve the previous enablement state on update; brand-new remote
+        // plugins start disabled so no hook command runs without opt-in.
+        if enabled {
+            std::fs::write(destination.join(".enabled"), "").map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to enable plugin: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Pull UTF-8 plugin packages from a remote JSON registry.
+    ///
+    /// The endpoint may return an array or
+    /// `{ "version": 1, "plugins": [...] }`. The complete batch is
+    /// validated before any file is written; traversal, hidden paths,
+    /// unknown hook events and oversized/binary files are rejected. New
+    /// plugins are installed disabled.
+    pub fn pull_remote(
+        &self,
+        url: &str,
+        token: Option<&str>,
+        force: bool,
+    ) -> Result<RemoteSyncReport> {
+        let value = remote::get_json(url, token)
+            .map_err(|e| AgentHubError::SkillError(format!("Remote plugin pull failed: {e}")))?;
+        let packages = Self::parse_remote(value)?;
+        for package in &packages {
+            Self::validate_remote_package(package)?;
+        }
+        let mut report = RemoteSyncReport::default();
+        for package in packages {
+            let previous = self.load_plugin(&package.name).ok();
+            if previous.is_some_and(|p| p.manifest.version == package.version) && !force {
+                report.skipped += 1;
+                continue;
+            }
+            self.write_remote_package(&package, previous.as_ref().is_some_and(|p| p.enabled))?;
+            if previous.is_some() {
+                report.updated += 1;
+            } else {
+                report.added += 1;
+            }
+        }
+        Ok(report)
+    }
+
+    fn collect_files(root: &Path, current: &Path, files: &mut BTreeMap<String, String>) -> Result<()> {
+        for entry in std::fs::read_dir(current).map_err(|e| {
+            AgentHubError::SkillError(format!("Failed to read plugin directory: {e}"))
+        })? {
+            let path = entry
+                .map_err(|e| AgentHubError::SkillError(format!("Failed to read plugin entry: {e}")))?
+                .path();
+            if path.is_dir() {
+                Self::collect_files(root, &path, files)?;
+                continue;
+            }
+            if !path.is_file() {
+                continue;
+            }
+            let relative = path.strip_prefix(root).map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to calculate plugin path: {e}"))
+            })?;
+            let relative_string = relative.to_string_lossy().replace('\\', "/");
+            let hidden_component = Path::new(&relative_string).components().any(|component| {
+                component.as_os_str().to_string_lossy().starts_with('.')
+            });
+            // The `.enabled` marker is local state and never exported.
+            if !is_safe_relative_path(Path::new(&relative_string)) || hidden_component {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                AgentHubError::SkillError(format!("Remote protocol only supports UTF-8 files: {e}"))
+            })?;
+            if content.len() > MAX_REMOTE_PLUGIN_FILE_BYTES {
+                return Err(AgentHubError::SkillError(format!(
+                    "Plugin file '{}' is too large",
+                    relative_string
+                )));
+            }
+            files.insert(relative_string, content);
+            if files.len() > MAX_REMOTE_PLUGIN_FILES {
+                return Err(AgentHubError::SkillError(
+                    "Plugin contains too many files".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Push all local plugin packages to a remote JSON registry.
+    ///
+    /// The `.enabled` marker is not exported; enablement is a per-install
+    /// decision. Plugins without a `plugin.yaml` are skipped.
+    pub fn push_remote(&self, url: &str, token: Option<&str>) -> Result<RemoteSyncReport> {
+        let mut packages = Vec::new();
+        let root = self.plugins_dir();
+        if root.exists() {
+            for entry in std::fs::read_dir(&root).map_err(|e| {
+                AgentHubError::SkillError(format!("Failed to read plugins dir: {e}"))
+            })? {
+                let path = entry
+                    .map_err(|e| AgentHubError::SkillError(format!("Failed to read plugin entry: {e}")))?
+                    .path();
+                if !path.is_dir() || !path.join("plugin.yaml").exists() {
+                    continue;
+                }
+                let name = path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                Self::validate_name(&name)?;
+                let mut files = BTreeMap::new();
+                Self::collect_files(&path, &path, &mut files)?;
+                let manifest_yaml = files.get("plugin.yaml").ok_or_else(|| {
+                    AgentHubError::SkillError(format!("Plugin '{}' is missing plugin.yaml", name))
+                })?;
+                let manifest: PluginManifest = serde_yaml::from_str(manifest_yaml).map_err(|e| {
+                    AgentHubError::SkillError(format!("Failed to parse plugin manifest: {e}"))
+                })?;
+                packages.push(RemotePluginPackage {
+                    name,
+                    version: manifest.version,
+                    description: manifest.description,
+                    author: manifest.author,
+                    min_agenthub_version: manifest.min_agenthub_version,
+                    files,
+                });
+            }
+        }
+        let payload = serde_json::json!({ "version": 1, "plugins": packages });
+        remote::post_json(url, token, &payload)
+            .map_err(|e| AgentHubError::SkillError(format!("Remote plugin push failed: {e}")))?;
+        Ok(RemoteSyncReport {
+            uploaded: packages.len(),
+            ..RemoteSyncReport::default()
+        })
+    }
+
     /// Run all hooks registered for `event` across enabled plugins, in name
     /// order. Results are always collected; a failed hook does not abort the
     /// rest.
@@ -383,7 +651,27 @@ fn read_pipe(child: &mut std::process::Child, stdout: bool) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
     use tempfile::TempDir;
+
+    fn registry_server(body: &'static str, method: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let size = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..size]).starts_with(method));
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        format!("http://{address}/plugins")
+    }
 
     fn write_plugin(base: &Path, name: &str, hooks_yaml: &str) {
         let dir = base.join("plugins").join(name);
@@ -633,5 +921,63 @@ mod tests {
             .find(|r| r.plugin == "spawn-fail")
             .expect("spawn-fail result");
         assert!(!fail.ok);
+    }
+
+    #[test]
+    fn test_remote_plugin_validation_rejects_traversal_unknown_hooks_and_mismatch() {
+        let valid = RemotePluginPackage {
+            name: "remote-plugin".to_string(),
+            version: "1.0.0".to_string(),
+            description: None,
+            author: None,
+            min_agenthub_version: None,
+            files: BTreeMap::from([
+                (
+                    "plugin.yaml".to_string(),
+                    "name: remote-plugin\nversion: 1.0.0\nhooks:\n- event: on_install\n  command: \"echo hi\"\n  args: []\n"
+                        .to_string(),
+                ),
+                ("scripts/run.sh".to_string(), "echo ok".to_string()),
+            ]),
+        };
+        assert!(PluginManager::validate_remote_package(&valid).is_ok());
+
+        let mut traversal = valid.clone();
+        traversal.files.insert("../escape".to_string(), "bad".to_string());
+        assert!(PluginManager::validate_remote_package(&traversal).is_err());
+
+        let mut unknown = valid.clone();
+        unknown.files.insert(
+            "plugin.yaml".to_string(),
+            "name: remote-plugin\nversion: 1.0.0\nhooks:\n- event: on_exec\n  command: \"x\"\n  args: []\n"
+                .to_string(),
+        );
+        assert!(PluginManager::validate_remote_package(&unknown).is_err());
+
+        let mut mismatch = valid;
+        mismatch.name = "another".to_string();
+        assert!(PluginManager::validate_remote_package(&mismatch).is_err());
+    }
+
+    #[test]
+    fn test_remote_plugin_pull_installs_disabled_and_push_exports() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("skills");
+        let manager = PluginManager::new(base.clone());
+        let body = r#"{"version":1,"plugins":[{"name":"remote-plugin","version":"1.0.0","files":{"plugin.yaml":"name: remote-plugin\nversion: 1.0.0\nhooks:\n- event: on_install\n  command: \"echo hi\"\n  args: []\n"}}]}"#;
+        let report = manager
+            .pull_remote(&registry_server(body, "GET"), Some("token"), false)
+            .unwrap();
+        assert_eq!(report.added, 1);
+
+        let plugin = manager.load_plugin("remote-plugin").unwrap();
+        // Remote plugins start disabled: no hook may run without opt-in.
+        assert!(!plugin.enabled);
+        assert!(manager.run_hook(HOOK_INSTALL).unwrap().is_empty());
+
+        let pushed = manager
+            .push_remote(&registry_server("{}", "POST"), None)
+            .unwrap();
+        assert_eq!(pushed.uploaded, 1);
     }
 }

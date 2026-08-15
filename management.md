@@ -23,7 +23,7 @@
 | Overview | ✅ 完成 | 只读聚合各模块状态/成本/审计 → 仪表盘（`agenthub status`、GUI 概览视图、交互式 Web 仪表盘、趋势、钻取） |
 | 横切能力 | ✅ 完成 | 审计日志（JSONL）、备份/恢复、监控与告警（webhook/email（SMTP 直发或 .eml 落盘）/file 推送 + 分级/去重） |
 
-仍属后续规划：在线技能市场（需远端服务）、Prompt 社区远程推送、交互式仪表盘的浏览器常驻视图（当前为 `status --html` 静态导出）、Beta 用户测试。
+仍属后续规划：插件签名/撤销与信任模型（远程插件注册表已实现，安装默认禁用、显式启用后才执行钩子）、交互式仪表盘的浏览器常驻视图（当前为 `status --html` 静态导出）、Beta 用户测试。Prompt 社区、技能包与插件已支持 HTTP JSON registry 的远程 pull/push，协议见 `docs/remote-registry.md`。
 
 ---
 

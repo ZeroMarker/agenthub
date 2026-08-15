@@ -8,9 +8,12 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::remote::{self, RemoteSyncReport};
+use crate::storage::atomic_write;
 use crate::prompt::{PromptManager, PromptTemplate, PromptVariable};
 use crate::storage::is_safe_id;
 
@@ -164,6 +167,89 @@ impl CommunityManager {
         self.load(&path)
     }
 
+    fn parse_remote(value: Value) -> Result<Vec<CommunityPrompt>> {
+        let prompts = if value.is_array() {
+            value
+        } else {
+            value.get("prompts").cloned().ok_or_else(|| {
+                AgentHubError::PromptError(
+                    "Remote prompt registry must be an array or an object with a 'prompts' array"
+                        .to_string(),
+                )
+            })
+        };
+        serde_json::from_value(prompts).map_err(|e| {
+            AgentHubError::PromptError(format!("Invalid remote prompt registry: {e}"))
+        })
+    }
+
+    fn save_snapshot(&self, prompt: &CommunityPrompt) -> Result<()> {
+        Self::validate_id(&prompt.id)?;
+        std::fs::create_dir_all(self.community_dir()).map_err(|e| {
+            AgentHubError::PromptError(format!("Failed to create community dir: {e}"))
+        })?;
+        let content = serde_yaml::to_string(prompt).map_err(|e| {
+            AgentHubError::PromptError(format!("Failed to serialize community prompt: {e}"))
+        })?;
+        atomic_write(&self.community_path(&prompt.id), &content).map_err(|e| {
+            AgentHubError::PromptError(format!("Failed to write community prompt: {e}"))
+        })
+    }
+
+    /// Pull prompt snapshots from a remote JSON registry.
+    ///
+    /// The endpoint may return either a prompt array or
+    /// `{ "version": 1, "prompts": [...] }`. Existing snapshots are kept
+    /// unless the remote version is newer; `force` overwrites them.
+    pub fn pull_remote(
+        &self,
+        url: &str,
+        token: Option<&str>,
+        force: bool,
+    ) -> Result<RemoteSyncReport> {
+        let value = remote::get_json(url, token)
+            .map_err(|e| AgentHubError::PromptError(format!("Remote prompt pull failed: {e}")))?;
+        let prompts = Self::parse_remote(value)?;
+        for prompt in &prompts {
+            Self::validate_id(&prompt.id)?;
+        }
+        let mut report = RemoteSyncReport::default();
+        for prompt in prompts {
+            match self.get(&prompt.id) {
+                Ok(local) if !force && local.version >= prompt.version => report.skipped += 1,
+                Ok(_) => {
+                    self.save_snapshot(&prompt)?;
+                    report.updated += 1;
+                }
+                Err(_) => {
+                    self.save_snapshot(&prompt)?;
+                    report.added += 1;
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    /// Push all local community snapshots to a remote registry.
+    ///
+    /// The receiver accepts `{ "version": 1, "prompts": [...] }` and is
+    /// responsible for authentication and conflict policy. No local data is
+    /// deleted when a push fails.
+    pub fn push_remote(
+        &self,
+        url: &str,
+        token: Option<&str>,
+    ) -> Result<RemoteSyncReport> {
+        let prompts = self.list()?;
+        let payload = serde_json::json!({ "version": 1, "prompts": prompts });
+        remote::post_json(url, token, &payload)
+            .map_err(|e| AgentHubError::PromptError(format!("Remote prompt push failed: {e}")))?;
+        Ok(RemoteSyncReport {
+            uploaded: prompts.len(),
+            ..RemoteSyncReport::default()
+        })
+    }
+
     fn load(&self, path: &Path) -> Result<CommunityPrompt> {
         let content = std::fs::read_to_string(path).map_err(|e| {
             AgentHubError::PromptError(format!("Failed to read community prompt: {}", e))
@@ -243,7 +329,27 @@ impl CommunityManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
     use tempfile::TempDir;
+
+    fn registry_server(body: &'static str, method: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let size = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..size]).starts_with(method));
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        format!("http://{address}/prompts")
+    }
 
     #[test]
     fn test_publish_list_get_delete() {
@@ -331,5 +437,64 @@ mod tests {
 
         assert!(cm.import(&[prompt]).is_err());
         assert!(!temp.path().join("prompts/escape.yaml").exists());
+    }
+
+    #[test]
+    fn test_parse_remote_registry_accepts_array_and_envelope() {
+        let prompt = serde_json::json!({
+            "id": "remote",
+            "name": "Remote",
+            "description": "desc",
+            "template": "hello",
+            "version": 2,
+            "publisher": "alice",
+            "published_at": "2026-08-14T00:00:00Z"
+        });
+        assert_eq!(CommunityManager::parse_remote(prompt.clone()).unwrap().len(), 1);
+        assert_eq!(
+            CommunityManager::parse_remote(serde_json::json!({"version": 1, "prompts": [prompt]}))
+                .unwrap()[0]
+                .id,
+            "remote"
+        );
+        assert!(CommunityManager::parse_remote(serde_json::json!({"items": []})).is_err());
+    }
+
+    #[test]
+    fn test_remote_pull_and_push() {
+        let temp = TempDir::new().unwrap();
+        let manager = CommunityManager::new(temp.path().join("prompts"));
+        let body = r#"{"version":1,"prompts":[{"id":"remote","name":"Remote","description":"desc","template":"hello","version":2,"publisher":"alice","published_at":"2026-08-14T00:00:00Z"}]}"#;
+        let report = manager
+            .pull_remote(&registry_server(body, "GET"), Some("token"), false)
+            .unwrap();
+        assert_eq!(report.added, 1);
+        assert_eq!(manager.get("remote").unwrap().version, 2);
+
+        manager
+            .publish(
+                &PromptTemplate {
+                    id: "local".to_string(),
+                    name: "Local".to_string(),
+                    description: "desc".to_string(),
+                    template: "text".to_string(),
+                    variables: Vec::new(),
+                    tags: Vec::new(),
+                    category: None,
+                    version: 1,
+                    author: None,
+                    usage_count: 0,
+                    last_used_at: None,
+                    created_at: Some(Utc::now()),
+                    updated_at: Some(Utc::now()),
+                },
+                "tester",
+                false,
+            )
+            .unwrap();
+        let pushed = manager
+            .push_remote(&registry_server("{}", "POST"), None)
+            .unwrap();
+        assert_eq!(pushed.uploaded, 2);
     }
 }

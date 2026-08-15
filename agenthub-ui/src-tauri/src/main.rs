@@ -2591,6 +2591,29 @@ async fn delete_community_prompt(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn pull_community_prompts(
+    url: String,
+    token: Option<String>,
+    force: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::RemoteSyncReport, String> {
+    community_manager(&state)
+        .pull_remote(&url, token.as_deref(), force)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn push_community_prompts(
+    url: String,
+    token: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::RemoteSyncReport, String> {
+    community_manager(&state)
+        .push_remote(&url, token.as_deref())
+        .map_err(|e| e.to_string())
+}
+
 // ---- skill marketplace ----
 
 #[tauri::command]
@@ -2653,6 +2676,29 @@ async fn market_refresh(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn market_pull(
+    url: String,
+    token: Option<String>,
+    force: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::RemoteSyncReport, String> {
+    marketplace_manager(&state)
+        .pull_remote(&url, token.as_deref(), force)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn market_push(
+    url: String,
+    token: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::RemoteSyncReport, String> {
+    marketplace_manager(&state)
+        .push_remote(&url, token.as_deref())
+        .map_err(|e| e.to_string())
+}
+
 // ---- plugins ----
 
 #[tauri::command]
@@ -2706,6 +2752,29 @@ async fn run_plugin_hook(
 ) -> std::result::Result<Vec<agenthub_core::PluginRunResult>, String> {
     plugin_manager(&state)
         .run_hook(&event)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn plugin_pull(
+    url: String,
+    token: Option<String>,
+    force: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::RemoteSyncReport, String> {
+    plugin_manager(&state)
+        .pull_remote(&url, token.as_deref(), force)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn plugin_push(
+    url: String,
+    token: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<agenthub_core::RemoteSyncReport, String> {
+    plugin_manager(&state)
+        .push_remote(&url, token.as_deref())
         .map_err(|e| e.to_string())
 }
 
@@ -3013,17 +3082,23 @@ fn main() {
             get_community_prompt,
             install_community_prompt,
             delete_community_prompt,
+            pull_community_prompts,
+            push_community_prompts,
             market_search,
             market_info,
             market_install,
             market_rate,
             market_stats,
             market_refresh,
+            market_pull,
+            market_push,
             list_plugins,
             register_plugin,
             unregister_plugin,
             set_plugin_enabled,
             run_plugin_hook,
+            plugin_pull,
+            plugin_push,
             list_notify_channels,
             add_notify_channel,
             remove_notify_channel,

@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Remote JSON registries**: Prompt community snapshots, UTF-8 skill packages and plugin packages support authenticated HTTP JSON `pull`/`push` with bounded timeouts, version-aware sync, batch validation, path traversal rejection, and size limits. Plugin pulls install **disabled** (no hook executes until `plugin enable`) and `.enabled` state is never exported. CLI commands are `prompt community pull|push`, `skill market pull|push` and `plugin pull|push`; protocol documented in `docs/remote-registry.md`.
 - **OS keyring secret backend**: `SecretStore` supports `SecretBackend::Keyring`
   (service `agenthub`, single `keystore` entry) so values never touch the
   filesystem, while the 0600 file keystore remains the default and fallback.

@@ -152,7 +152,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev 
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/your-org/agenthub.git
+git clone https://github.com/ZeroMarker/agenthub.git
 cd agenthub
 ```
 
@@ -405,7 +405,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # 见 https://nodejs.org
 
 # 克隆并进入项目
-git clone https://github.com/your-org/agenthub.git
+git clone https://github.com/ZeroMarker/agenthub.git
 cd agenthub
 ```
 

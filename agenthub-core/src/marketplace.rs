@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
-use crate::skill::SkillManager;
+use crate::skill::{validate_path_component, SkillManager};
 
 /// A skill available in the marketplace (as indexed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +205,7 @@ impl MarketplaceManager {
 
     /// Add a skill package (a directory containing SKILL.md) to the marketplace.
     pub fn add_package(&self, name: &str, source_dir: &Path) -> Result<MarketplaceSkill> {
+        validate_path_component("marketplace package", name)?;
         let manifest_path = source_dir.join("SKILL.md");
         if !manifest_path.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -270,6 +271,7 @@ impl MarketplaceManager {
 
     /// Look up one skill in the index.
     pub fn info(&self, name: &str) -> Result<MarketplaceSkill> {
+        validate_path_component("marketplace package", name)?;
         let index = self.load_index()?;
         index
             .skills
@@ -312,6 +314,7 @@ impl MarketplaceManager {
     }
 
     fn load_ratings(&self, name: &str) -> Result<(Option<f64>, u64)> {
+        validate_path_component("marketplace package", name)?;
         let path = self.ratings_path(name);
         if !path.exists() {
             return Ok((None, 0));
@@ -543,5 +546,23 @@ mod tests {
         let info = mm.info("rust-dev").unwrap();
         assert_eq!(info.installs, 1);
         assert_eq!(info.rating_count, 1);
+    }
+
+    #[test]
+    fn test_rejects_marketplace_path_traversal() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("skills");
+        let mm = MarketplaceManager::new(base);
+        let src = temp.path().join("src-skill");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("SKILL.md"),
+            "---\nname: ../victim\ndescription: x\nversion: 1.0.0\ntags: []\n---\n",
+        )
+        .unwrap();
+
+        assert!(mm.add_package("../victim", &src).is_err());
+        assert!(mm.info("nested/name").is_err());
+        assert!(mm.rate("..\\victim", 5, None).is_err());
     }
 }

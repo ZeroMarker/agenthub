@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
+use crate::skill::validate_path_component;
 
 /// Built-in lifecycle hook event names.
 pub const HOOK_INSTALL: &str = "on_install";
@@ -92,6 +93,7 @@ impl PluginManager {
 
     /// Load a plugin manifest from its directory.
     pub fn load_plugin(&self, name: &str) -> Result<Plugin> {
+        validate_path_component("plugin", name)?;
         let dir = self.plugin_dir(name);
         let path = dir.join("plugin.yaml");
         if !path.exists() {
@@ -147,6 +149,7 @@ impl PluginManager {
 
     /// Register a plugin by copying its directory into the plugins dir.
     pub fn register_plugin(&self, name: &str, source_dir: &Path) -> Result<Plugin> {
+        validate_path_component("plugin", name)?;
         let source_manifest = source_dir.join("plugin.yaml");
         if !source_manifest.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -186,6 +189,7 @@ impl PluginManager {
     }
 
     pub fn unregister_plugin(&self, name: &str) -> Result<bool> {
+        validate_path_component("plugin", name)?;
         let dir = self.plugin_dir(name);
         if !dir.exists() {
             return Ok(false);
@@ -197,6 +201,7 @@ impl PluginManager {
     }
 
     pub fn enable_plugin(&self, name: &str) -> Result<()> {
+        validate_path_component("plugin", name)?;
         let dir = self.plugin_dir(name);
         if !dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -210,6 +215,7 @@ impl PluginManager {
     }
 
     pub fn disable_plugin(&self, name: &str) -> Result<()> {
+        validate_path_component("plugin", name)?;
         let dir = self.plugin_dir(name);
         if !dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -498,5 +504,20 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(!results[0].ok);
         assert!(results[1].ok);
+    }
+
+    #[test]
+    fn test_rejects_plugin_path_traversal() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("skills");
+        let pm = PluginManager::new(base.clone());
+        let victim = base.join("victim");
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("sentinel"), "keep").unwrap();
+
+        assert!(pm.unregister_plugin("../victim").is_err());
+        assert!(victim.join("sentinel").exists());
+        assert!(pm.load_plugin("nested/name").is_err());
+        assert!(pm.disable_plugin("..\\victim").is_err());
     }
 }

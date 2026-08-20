@@ -2,7 +2,7 @@
 
 统一管理多个 AI 编程助手的平台工具，支持命令行（CLI）与桌面图形界面（GUI）。
 
-> **当前版本**：v0.1.0 · 详细路线图见 [PROJECT_PLAN.md](PROJECT_PLAN.md)
+> **当前版本**：v1.4.0 · 详细路线图见 [PROJECT_PLAN.md](PROJECT_PLAN.md)
 
 ---
 
@@ -146,7 +146,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev 
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/your-org/agenthub.git
+git clone https://github.com/ZeroMarker/agenthub.git
 cd agenthub
 ```
 
@@ -392,7 +392,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # 见 https://nodejs.org
 
 # 克隆并进入项目
-git clone https://github.com/your-org/agenthub.git
+git clone https://github.com/ZeroMarker/agenthub.git
 cd agenthub
 ```
 

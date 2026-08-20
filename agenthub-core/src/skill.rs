@@ -5,6 +5,22 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{AgentHubError, Result};
 
+pub(crate) fn validate_path_component(kind: &str, name: &str) -> Result<()> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+    {
+        return Err(AgentHubError::SkillError(format!(
+            "Invalid {} name: {}",
+            kind, name
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillManifest {
     pub name: String,
@@ -247,6 +263,7 @@ impl SkillManager {
     }
 
     pub fn get_skill(&self, skill_name: &str) -> Result<Skill> {
+        validate_path_component("skill", skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if !skill_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -259,6 +276,7 @@ impl SkillManager {
     }
 
     pub fn install_skill(&self, skill_name: &str, source_dir: &Path) -> Result<Skill> {
+        validate_path_component("skill", skill_name)?;
         let dest_dir = self.installed_dir().join(skill_name);
         if dest_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -282,6 +300,7 @@ impl SkillManager {
     }
 
     pub fn uninstall_skill(&self, skill_name: &str) -> Result<bool> {
+        validate_path_component("skill", skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if !skill_dir.exists() {
             return Ok(false);
@@ -294,6 +313,7 @@ impl SkillManager {
     }
 
     pub fn enable_skill(&self, skill_name: &str) -> Result<()> {
+        validate_path_component("skill", skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if !skill_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -310,6 +330,7 @@ impl SkillManager {
     }
 
     pub fn disable_skill(&self, skill_name: &str) -> Result<()> {
+        validate_path_component("skill", skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if !skill_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -433,6 +454,7 @@ impl SkillManager {
     }
 
     pub fn create_skill(&self, skill_name: &str, description: &str) -> Result<Skill> {
+        validate_path_component("skill", skill_name)?;
         let skill_dir = self.installed_dir().join(skill_name);
         if skill_dir.exists() {
             return Err(AgentHubError::SkillError(format!(
@@ -663,5 +685,19 @@ triggers: []
         assert!(names.contains(&"constrained-ok"));
         assert!(names.contains(&"constrained-no"));
         assert!(!names.contains(&"unconstrained"));
+    }
+
+    #[test]
+    fn test_rejects_skill_path_traversal() {
+        let temp = TempDir::new().unwrap();
+        let manager = SkillManager::new(temp.path().join("skills"));
+        let victim = temp.path().join("skills").join("victim");
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("sentinel"), "keep").unwrap();
+
+        assert!(manager.uninstall_skill("../victim").is_err());
+        assert!(victim.join("sentinel").exists());
+        assert!(manager.create_skill("nested/name", "x").is_err());
+        assert!(manager.get_skill("..\\victim").is_err());
     }
 }
